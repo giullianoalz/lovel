@@ -1,0 +1,233 @@
+.mobile-toggle {
+  display: none;
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 100;
+  background: white;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 8px;
+  color: var(--text-main);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
+.sidebar {
+  width: 260px;
+  height: 100vh;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  position: fixed;
+  left: 0;
+  top: 0;
+  transition: transform 0.3s ease;
+  z-index: 90;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 40px;
+}
+
+.brand-logo {
+  width: 120px;
+  height: auto;
+  object-fit: contain;
+}
+
+.sidebar-brand span {
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--text-main);
+}
+
+.nav-section {
+  margin-bottom: 30px;
+}
+
+.nav-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  text-decoration: none;
+  color: var(--text-muted);
+  border-radius: 10px;
+  margin-bottom: 4px;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.nav-item:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.nav-item.active {
+  background: var(--primary);
+  color: var(--text-inverse);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border-light);
+  padding-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  background: #f3f4f6;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.user-info p {
+  margin: 0;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.user-role {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.logout-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.logout-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.mobile-header {
+  display: none;
+}
+
+.desk-only {
+  display: flex;
+}
+
+@media (max-width: 768px) {
+  .mobile-header {
+    display: flex;
+    justify-content: center; /* Centering the logo */
+    align-items: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 64px;
+    background: rgba(255, 255, 255, 0.8); /* Translucent */
+    backdrop-filter: blur(12px); /* Glass effect */
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 100;
+    border-bottom: 1px solid var(--border-light);
+    padding: 0 16px;
+  }
+  
+  .mobile-logo {
+    height: 52px; /* Enlarged logo */
+    object-fit: contain;
+  }
+  
+  .mobile-toggle {
+    display: block;
+    position: absolute; /* Absolute so it doesn't un-center the logo */
+    right: 16px;
+    left: auto; /* Override the desktop left: 16px rule */
+    border: none;
+    box-shadow: none;
+    padding: 4px;
+    background: transparent;
+  }
+  
+  .desk-only {
+    display: none;
+  }
+  
+  .sidebar { /* DROPDOWN LOGIC */
+    transform: none;
+    left: 0;
+    top: 64px; /* below header */
+    width: 100%;
+    height: auto;
+    max-height: calc(100vh - 64px);
+    border-right: none;
+    border-bottom: 1px solid var(--border-light);
+    overflow-y: auto;
+    padding: 16px;
+    z-index: 95; /* Above overlay */
+    background: rgba(255, 255, 255, 0.7); /* Translucent dropdown */
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    
+    /* Dropdown Animation */
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-20px);
+    transition: all 0.3s ease;
+  }
+  
+  .sidebar.open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  .sidebar-overlay {
+    display: block; 
+    position: fixed;
+    top: 64px; /* Start below header */
+    left: 0;
+    width: 100%; /* Fix: 100vw causes horizontal scrollbar on some devices */
+    height: calc(100vh - 64px);
+    background: rgba(255, 255, 255, 0.4); /* Light tint */
+    backdrop-filter: blur(6px); /* The blur effect */
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 80;
+  }
+}

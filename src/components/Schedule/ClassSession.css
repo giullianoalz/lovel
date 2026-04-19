@@ -1,0 +1,137 @@
+.session-container {
+  padding: 40px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.session-header {
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+}
+
+.class-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.attendance-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 12px;
+}
+
+.attendance-row {
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.attendance-row:hover {
+  transform: translateX(4px);
+}
+
+.attendance-row td {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.attendance-row td:first-child {
+  border-left: 1px solid var(--border-light);
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+.attendance-row td:last-child {
+  border-right: 1px solid var(--border-light);
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.attendance-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.snack-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid transparent;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.snack-btn:hover:not(:disabled) {
+  background: var(--primary);
+  color: white;
+}
+
+.snack-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f3f4f6;
+  color: var(--text-muted);
+}
+
+.presence-toggle {
+  display: flex;
+  gap: 4px;
+  background: #f3f4f6;
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.presence-btn {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.presence-btn.active.present {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.presence-btn.active.absent {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.allergy-warning {
+  margin-top: 24px;
+  padding: 16px;
+  background: #fff5f5;
+  border: 1px solid #feb2b2;
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  color: #c53030;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 768px) {
+  .session-container {
+    padding: 20px 16px;
+  }
+  
+  .class-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+}

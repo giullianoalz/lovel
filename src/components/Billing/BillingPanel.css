@@ -1,0 +1,307 @@
+.billing-container {
+  padding: 30px;
+  max-width: 1200px;
+  margin: 0 auto;
+  animation: fadeIn 0.5s ease;
+}
+
+.billing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.billing-header h1 {
+  font-size: 2rem;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.billing-header p {
+  color: var(--text-muted);
+}
+
+/* Metrics Row */
+.billing-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.metric-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.05);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.metric-icon {
+  background: var(--bg-sidebar);
+  color: var(--primary);
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.metric-card.warning .metric-icon {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.metric-info h3 {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.metric-info p {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+/* Analytics Chart Area placeholder */
+.analytics-section {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+/* Datatable */
+.table-container {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.table-header h2 {
+  font-size: 1.25rem;
+}
+
+.table-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.btn-filter, .btn-export {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-light);
+  background: white;
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.billing-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+}
+
+.billing-table th {
+  background: rgba(243, 244, 246, 0.5);
+  padding: 16px;
+  text-align: left;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.billing-table td {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.billing-table tr:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.student-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.student-name {
+  font-weight: 600;
+}
+
+.parent-name {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.status-badge.paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-badge.pending {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.status-badge.overdue {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-remind {
+  background: var(--bg-sidebar);
+  color: var(--primary);
+  border: 1px solid var(--border-light);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.btn-remind:hover {
+  background: var(--primary);
+  color: white;
+}
+
+/* Modal Styling */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.reminder-modal {
+  background: white;
+  padding: 30px;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-head h3 {
+  font-size: 1.25rem;
+}
+
+.modal-head button {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+/* Textarea input */
+.reminder-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-family: inherit;
+  margin-top: 10px;
+  margin-bottom: 20px;
+  resize: vertical;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.btn-cancel {
+  padding: 10px 20px;
+  border: 1px solid var(--border-light);
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.btn-send {
+  padding: 10px 20px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .billing-container {
+    padding: 20px 16px;
+  }
+  
+  .billing-metrics {
+    grid-template-columns: 1fr;
+  }
+  
+  .billing-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .btn-remind {
+    font-size: 12px;
+    padding: 8px;
+  }
+}
