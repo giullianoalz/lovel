@@ -6,9 +6,17 @@
 
 // Mock Data
 let mockStudents = [
-  { id: '1', name: "Maria Garcia", allergies: "Peanuts, Shellfish", snackAuthorized: true, parentId: 'p1', status: 'Active' },
-  { id: '2', name: "John Doe", allergies: "None", snackAuthorized: false, parentId: 'p2', status: 'Active' },
-  { id: '3', name: "Sofia Ramirez", allergies: "Lactose Intolerant", snackAuthorized: true, parentId: 'p3', status: 'On Hold' }
+  { id: '1', name: "Maria Garcia", allergies: "Peanuts, Shellfish", snackAuthorized: true, snackPunches: 8, snackHistory: [], parentId: 'p1', status: 'Active' },
+  { id: '2', name: "John Doe", allergies: "None", snackAuthorized: false, snackPunches: 0, snackHistory: [], parentId: 'p2', status: 'Active' },
+  { id: '3', name: "Sofia Ramirez", allergies: "Lactose Intolerant", snackAuthorized: true, snackPunches: 2, snackHistory: [], parentId: 'p3', status: 'On Hold' }
+];
+
+let mockSnackCabinet = [
+  { id: 'snk_1', name: 'Apple Juice', costPunches: 2, image: 'https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=200&h=200&fit=crop' },
+  { id: 'snk_2', name: 'Chocolate Chip Cookie', costPunches: 3, image: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=200&h=200&fit=crop' },
+  { id: 'snk_3', name: 'Potato Chips', costPunches: 3, image: 'https://images.unsplash.com/photo-1566478989037-eade3f7e2bd9?w=200&h=200&fit=crop' },
+  { id: 'snk_4', name: 'Granola Bar', costPunches: 2, image: 'https://images.unsplash.com/photo-1622485540306-bc71261a84f3?w=200&h=200&fit=crop' },
+  { id: 'snk_5', name: 'Organic Fruit Snacks', costPunches: 1, image: 'https://images.unsplash.com/photo-1582293041079-7814c2f12063?w=200&h=200&fit=crop' }
 ];
 
 let mockPayments = [
@@ -32,6 +40,33 @@ export const database = {
   },
 
   // --- Snacks & Billing ---
+  getSnackCabinet: async () => {
+    return Promise.resolve(mockSnackCabinet);
+  },
+
+  purchaseSnack: async (studentId, snackId) => {
+    const student = mockStudents.find(s => s.id === studentId);
+    const snack = mockSnackCabinet.find(s => s.id === snackId);
+    
+    if (!student || !snack) return false;
+
+    // Allow punches to go negative
+    student.snackPunches -= snack.costPunches;
+    
+    const record = {
+      id: `sh_${Date.now()}`,
+      date: new Date().toISOString(),
+      snackName: snack.name,
+      cost: snack.costPunches
+    };
+    
+    if(!student.snackHistory) student.snackHistory = [];
+    student.snackHistory.unshift(record); // Add to beginning (most recent)
+    
+    console.log(`[Database] Purchased ${snack.name} for ${student.name}. Remaining punches: ${student.snackPunches}`);
+    return { success: true, newBalance: student.snackPunches };
+  },
+
   logSnackConsumption: async (studentId) => {
     const student = mockStudents.find(s => s.id === studentId);
     if (!student || !student.snackAuthorized) return false;

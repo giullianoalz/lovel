@@ -1,24 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { Search, UserPlus, Filter, AlertCircle, Cookie, MoreHorizontal, Mail, MessageSquare } from 'lucide-react';
 import { database } from '../../lib/database';
+import StudentProfileModal from './StudentProfileModal';
 import './StudentsList.css';
 
 const StudentsList = () => {
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState(null);
+
+  const loadData = async () => {
+    try {
+      const data = await database.fetchStudents();
+      setStudents(data);
+      if (selectedStudent) {
+        const updatedStudent = data.find(s => s.id === selectedStudent.id);
+        if (updatedStudent) setSelectedStudent(updatedStudent);
+      }
+    } catch (error) {
+      console.error("Error loading students:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const data = await database.fetchStudents();
-        setStudents(data);
-      } catch (error) {
-        console.error("Error loading students:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
     loadData();
   }, []);
 
@@ -104,11 +111,19 @@ const StudentsList = () => {
               <div className="card-actions">
                 <button className="icon-btn" title="Send Email"><Mail size={18} /></button>
                 <button className="icon-btn" title="Internal Chat"><MessageSquare size={18} /></button>
-                <button className="action-btn">View Profile</button>
+                <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {selectedStudent && (
+        <StudentProfileModal 
+          student={selectedStudent} 
+          onClose={() => setSelectedStudent(null)} 
+          onUpdate={loadData}
+        />
       )}
     </div>
   );
