@@ -7,6 +7,7 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
   const [snackCabinet, setSnackCabinet] = useState([]);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+  const [showCabinet, setShowCabinet] = useState(false);
 
   useEffect(() => {
     const loadCabinet = async () => {
@@ -24,6 +25,7 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
     const result = await database.purchaseSnack(student.id, snack.id);
     if(result && result.success) {
       onUpdate(); // Trigger parent refresh to get updated student data
+      setShowCabinet(false); // Close cabinet after purchase
     }
     setPurchasing(false);
   };
@@ -104,34 +106,53 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
                   <AlertCircle size={16} /> Low balance! Parent will be prompted to reload on the next cycle.
                 </div>
               )}
-            </div>
 
-            <div className="snack-cabinet">
-              <h3 style={{display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px'}}>
-                <ShoppingBag size={18} /> Snack Cabinet
-              </h3>
-              
-              {loading ? (
-                <p>Loading cabinet...</p>
-              ) : (
-                <div className="cabinet-grid">
-                  {snackCabinet.map(snack => (
-                    <div key={snack.id} className="snack-item" onClick={() => handlePurchase(snack)}>
-                      <img src={snack.image} alt={snack.name} className="snack-img" />
-                      <div className="snack-info">
-                        <span className="snack-name">{snack.name}</span>
-                        <span className="snack-cost">{snack.costPunches} Punches</span>
-                      </div>
-                      <button className="action-btn primary small outline" disabled={purchasing}>
-                        Select
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <button 
+                className="action-btn primary shop-btn" 
+                onClick={() => setShowCabinet(true)}
+                style={{marginTop: '20px', width: '100%', background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.3)', backdropFilter: 'blur(10px)'}}
+              >
+                <ShoppingBag size={18} />
+                <span>Shop Snacks</span>
+              </button>
             </div>
           </div>
         </div>
+
+        {/* Snack Cabinet Pop-up Overlay */}
+        {showCabinet && (
+          <div className="cabinet-overlay" onClick={() => setShowCabinet(false)}>
+            <div className="cabinet-popup" onClick={e => e.stopPropagation()}>
+              <header className="cabinet-header">
+                <h3 style={{display: 'flex', alignItems: 'center', gap: '8px', margin: 0}}>
+                  <ShoppingBag size={20} /> Snack Cabinet
+                </h3>
+                <button className="icon-btn" onClick={() => setShowCabinet(false)}><X size={20} /></button>
+              </header>
+              
+              <div className="cabinet-content">
+                {loading ? (
+                  <p>Loading cabinet...</p>
+                ) : (
+                  <div className="cabinet-grid">
+                    {snackCabinet.map(snack => (
+                      <div key={snack.id} className="snack-item" onClick={() => handlePurchase(snack)}>
+                        <img src={snack.image} alt={snack.name} className="snack-img" />
+                        <div className="snack-info">
+                          <span className="snack-name">{snack.name}</span>
+                          <span className="snack-cost">{snack.costPunches} Punches</span>
+                        </div>
+                        <button className="action-btn primary small outline" disabled={purchasing}>
+                          Select
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
