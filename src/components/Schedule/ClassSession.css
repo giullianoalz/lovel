@@ -135,3 +135,68 @@
     gap: 16px;
   }
 }
+
+/* Prize Award Panel */
+.prize-award-panel {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  margin-bottom: 24px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.prize-panel-header {
+  padding: 16px 20px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #b45309;
+}
+
+.prize-panel-body {
+  padding: 20px;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.prize-inputs {
+  display: flex;
+  gap: 12px;
+  flex-grow: 1;
+}
+
+.prize-input {
+  padding: 10px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-size: 14px;
+  flex-grow: 1;
+}
+
+.prize-input:focus {
+  outline: none;
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.1);
+}
+
+.prize-input.points {
+  width: 100px;
+  flex-grow: 0;
+}
+
+.custom-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #fbbf24;
+}
+
+.selected-row {
+  background: #fffbeb;
+  border-color: #fde68a;
+}

@@ -202,6 +202,34 @@
   margin-top: 16px;
 }
 
+/* Prize Card specific */
+.prize-card {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  margin-top: 20px;
+}
+
+.redeem-form {
+  margin-top: 20px;
+  background: rgba(255,255,255,0.2);
+  padding: 16px;
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.prize-btn:hover {
+  background: rgba(0,0,0,0.3) !important;
+}
+
+.punch-cost.earned {
+  color: #16a34a;
+  background: #dcfce7;
+}
+
+.punch-cost.redeemed {
+  color: #ea580c;
+  background: #ffedd5;
+}
+
 /* Snack Cabinet Pop-up */
 .cabinet-overlay {
   position: absolute;
@@ -349,4 +377,113 @@
 .snack-item:hover .action-btn.outline {
   background: #3b82f6;
   color: white;
+}
+
+/* Academic Materials Section */
+.section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+
+.mini-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f1f5f9;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  width: 200px;
+}
+
+.mini-search input {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  width: 100%;
+  outline: none;
+}
+
+.materials-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.material-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s;
+}
+
+.material-item:hover {
+  background: white;
+  border-color: #3b82f6;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.material-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.material-name {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.material-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.subject-tag {
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+.divider {
+  opacity: 0.5;
+}
+
+.material-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.icon-btn.tiny {
+  padding: 6px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+}
+
+.icon-btn.tiny:hover {
+  color: #3b82f6;
+  border-color: #3b82f6;
+  background: #f8fafc;
+}
+
+@media (max-width: 600px) {
+  .section-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .mini-search {
+    width: 100%;
+  }
 }

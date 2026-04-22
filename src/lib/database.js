@@ -6,9 +6,53 @@
 
 // Mock Data
 let mockStudents = [
-  { id: '1', name: "Maria Garcia", allergies: "Peanuts, Shellfish", snackAuthorized: true, snackPunches: 8, snackHistory: [], parentId: 'p1', status: 'Active' },
-  { id: '2', name: "John Doe", allergies: "None", snackAuthorized: false, snackPunches: 0, snackHistory: [], parentId: 'p2', status: 'Active' },
-  { id: '3', name: "Sofia Ramirez", allergies: "Lactose Intolerant", snackAuthorized: true, snackPunches: 2, snackHistory: [], parentId: 'p3', status: 'On Hold' }
+  { 
+    id: '1', 
+    name: "Maria Garcia", 
+    allergies: "Peanuts, Shellfish", 
+    snackAuthorized: true, 
+    snackPunches: 8, 
+    snackHistory: [], 
+    prizePoints: 120, // Initial mock data
+    prizeHistory: [
+      { id: 'pz_1', reason: 'Participation', points: 10, date: '2026-04-20T10:00:00Z', type: 'earned' }
+    ],
+    parentId: 'p1', 
+    status: 'Active',
+    materials: [
+      { id: 'm1', name: 'Geometry Basics', subject: 'Mathematics', type: 'pdf', date: '2026-04-20', fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' },
+      { id: 'm2', name: 'Irregular Verbs List', subject: 'English', type: 'doc', date: '2026-04-18', fileUrl: '#' },
+      { id: 'm3', name: 'Class Notes - Photosynthesis', subject: 'Science', type: 'image', date: '2026-04-15', fileUrl: 'https://images.unsplash.com/photo-1530026405186-ed1f139313ca?w=800' }
+    ]
+  },
+  { 
+    id: '2', 
+    name: "John Doe", 
+    allergies: "None", 
+    snackAuthorized: false, 
+    snackPunches: 0, 
+    snackHistory: [], 
+    prizePoints: 45,
+    prizeHistory: [],
+    parentId: 'p2', 
+    status: 'Active',
+    materials: [
+      { id: 'm4', name: 'Calculus Review', subject: 'Mathematics', type: 'pdf', date: '2026-04-21', fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' }
+    ]
+  },
+  { 
+    id: '3', 
+    name: "Sofia Ramirez", 
+    allergies: "Lactose Intolerant", 
+    snackAuthorized: true, 
+    snackPunches: 2, 
+    snackHistory: [], 
+    prizePoints: 0,
+    prizeHistory: [],
+    parentId: 'p3', 
+    status: 'On Hold',
+    materials: []
+  }
 ];
 
 let mockSnackCabinet = [
@@ -87,6 +131,52 @@ export const database = {
 
   fetchPayments: async (studentId) => {
     return mockPayments.filter(p => p.studentId === studentId);
+  },
+
+  // --- Prizes System ---
+  awardPrizePoints: async (studentIds, reason, points) => {
+    // studentIds is an array of IDs for bulk operations
+    const ids = Array.isArray(studentIds) ? studentIds : [studentIds];
+    
+    ids.forEach(id => {
+      const student = mockStudents.find(s => s.id === id);
+      if (student) {
+        student.prizePoints = (student.prizePoints || 0) + parseInt(points);
+        if (!student.prizeHistory) student.prizeHistory = [];
+        student.prizeHistory.unshift({
+          id: `pz_${Date.now()}_${id}`,
+          reason: reason,
+          points: parseInt(points),
+          date: new Date().toISOString(),
+          type: 'earned'
+        });
+      }
+    });
+    console.log(`[Database] Awarded ${points} points to ${ids.length} students for: ${reason}`);
+    return true;
+  },
+
+  redeemPrizePoints: async (studentId, prizeName, cost) => {
+    const student = mockStudents.find(s => s.id === studentId);
+    if (!student) return { success: false, error: 'Student not found' };
+    
+    // Check if enough points
+    if ((student.prizePoints || 0) < parseInt(cost)) {
+      return { success: false, error: 'Insufficient points' };
+    }
+
+    student.prizePoints -= parseInt(cost);
+    if (!student.prizeHistory) student.prizeHistory = [];
+    student.prizeHistory.unshift({
+      id: `rz_${Date.now()}`,
+      reason: `Redeemed: ${prizeName}`,
+      points: -parseInt(cost),
+      date: new Date().toISOString(),
+      type: 'redeemed'
+    });
+    
+    console.log(`[Database] Student ${student.name} redeemed ${prizeName} for ${cost} points. Remaining: ${student.prizePoints}`);
+    return { success: true, newBalance: student.prizePoints };
   },
 
   // --- Conversations ---

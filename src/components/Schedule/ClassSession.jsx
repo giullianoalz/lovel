@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { database } from '../../lib/database';
-import { Check, X, Cookie, AlertTriangle, Clock, Users } from 'lucide-react';
+import { Check, X, Cookie, AlertTriangle, Clock, Users, Star, Gift } from 'lucide-react';
 import './ClassSession.css';
 
 const ClassSession = () => {
   const [students, setStudents] = useState([]);
   const [attendance, setAttendance] = useState({});
   const [snackLogged, setSnackLogged] = useState({});
+  const [selectedForPrize, setSelectedForPrize] = useState({});
+  const [prizePoints, setPrizePoints] = useState('');
+  const [prizeReason, setPrizeReason] = useState('');
+  const [awarding, setAwarding] = useState(false);
 
   useEffect(() => {
     const loadStudents = async () => {
@@ -31,6 +35,41 @@ const ClassSession = () => {
     }
   };
 
+  const togglePrizeSelection = (id) => {
+    setSelectedForPrize(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
+  const selectAllPresent = () => {
+    const newSelection = {};
+    students.forEach(s => {
+      if (attendance[s.id] === 'present') {
+        newSelection[s.id] = true;
+      }
+    });
+    setSelectedForPrize(newSelection);
+  };
+
+  const handleAwardPoints = async () => {
+    const idsToAward = Object.keys(selectedForPrize).filter(id => selectedForPrize[id]);
+    if (idsToAward.length === 0 || !prizePoints || !prizeReason) return;
+    
+    setAwarding(true);
+    const success = await database.awardPrizePoints(idsToAward, prizeReason, prizePoints);
+    if (success) {
+      // Reset after success
+      setPrizePoints('');
+      setPrizeReason('');
+      setSelectedForPrize({});
+      // Optionally show a success toast here
+    }
+    setAwarding(false);
+  };
+
+  const selectedCount = Object.values(selectedForPrize).filter(Boolean).length;
+
   return (
     <div className="session-container">
       <header className="session-header">
@@ -45,10 +84,51 @@ const ClassSession = () => {
         </div>
       </header>
 
+      {/* Prize Points Award Panel */}
+      <div className="prize-award-panel">
+        <div className="prize-panel-header">
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Star fill="currentColor" size={20} color="#fbbf24" />
+            Award Prize Points
+          </h3>
+          <button className="action-btn outline small" onClick={selectAllPresent}>
+            Select All Present
+          </button>
+        </div>
+        <div className="prize-panel-body">
+          <div className="prize-inputs">
+            <input 
+              type="text" 
+              placeholder="Reason (e.g. Good Participation)" 
+              value={prizeReason}
+              onChange={(e) => setPrizeReason(e.target.value)}
+              className="prize-input"
+            />
+            <input 
+              type="number" 
+              placeholder="Points" 
+              value={prizePoints}
+              onChange={(e) => setPrizePoints(e.target.value)}
+              className="prize-input points"
+              min="1"
+            />
+          </div>
+          <button 
+            className="action-btn primary" 
+            onClick={handleAwardPoints}
+            disabled={awarding || selectedCount === 0 || !prizePoints || !prizeReason}
+          >
+            <Gift size={16} style={{marginRight: '8px'}} />
+            Award to {selectedCount} Students
+          </button>
+        </div>
+      </div>
+
       <div className="table-responsive">
         <table className="attendance-table">
           <thead>
             <tr>
+              <th width="40px" align="center"></th>
               <th align="left">Student</th>
               <th align="center">Attendance</th>
               <th align="right">Actions</th>
@@ -56,7 +136,15 @@ const ClassSession = () => {
           </thead>
           <tbody>
             {students.map(student => (
-              <tr key={student.id} className="attendance-row">
+              <tr key={student.id} className={`attendance-row ${selectedForPrize[student.id] ? 'selected-row' : ''}`}>
+                <td align="center">
+                  <input 
+                    type="checkbox" 
+                    checked={!!selectedForPrize[student.id]}
+                    onChange={() => togglePrizeSelection(student.id)}
+                    className="custom-checkbox"
+                  />
+                </td>
                 <td>
                   <div>
                     <div className="student-name">{student.name}</div>
