@@ -9,7 +9,10 @@ import {
   Clock, 
   User, 
   ChevronRight,
-  TrendingUp
+  TrendingUp,
+  FileText,
+  Image as ImageIcon,
+  Paperclip
 } from 'lucide-react';
 import { database } from '../../lib/database';
 import { useNavigate } from 'react-router-dom';
@@ -105,8 +108,36 @@ const Dashboard = () => {
               <span className="stat-label">{role === 'parent' ? 'Next Payment' : 'Attendance Rate'}</span>
             </div>
             <div className="glass-card stat-item">
-              <span className="stat-value">4</span>
+              <span className="stat-value">{data.recentSessions.length}</span>
               <span className="stat-label">Resources Available</span>
+            </div>
+          </div>
+
+          {/* Lessons Review Section */}
+          <div className="glass-card list-section lesson-review-section">
+            <div className="section-header">
+              <h2>Recent Lesson Materials</h2>
+              <p className="text-muted" style={{fontSize: '13px'}}>Review notes and files shared by your teachers</p>
+            </div>
+            <div className="lessons-grid">
+              {data.recentSessions.map(session => (
+                <div key={session.id} className="lesson-card">
+                  <div className="lesson-badge">{session.subject}</div>
+                  <div className="lesson-header">
+                    <h4>{session.teacher}</h4>
+                    <span className="date-tag">{session.date}</span>
+                  </div>
+                  <p className="lesson-notes">{session.notes}</p>
+                  <div className="lesson-materials">
+                    {session.materials.map((file, idx) => (
+                      <div key={idx} className="material-chip">
+                        {file.type.includes('image') ? <ImageIcon size={14} /> : <Paperclip size={14} />}
+                        <span>{file.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 

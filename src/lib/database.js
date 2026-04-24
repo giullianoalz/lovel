@@ -68,6 +68,33 @@ let mockPayments = [
   { id: 'pay_2', studentId: '1', amount: 5.00, type: 'Snack Charge', status: 'Pending', date: '2026-04-15' }
 ];
 
+let mockSessionHistory = [
+  {
+    sessionId: 'session_old_1',
+    groupId: '1', // Matches 'Math Foundations - Group A'
+    date: '2026-04-17', // Last week
+    notes: 'Reviewed fractions and decimals. Most students struggled with converting fractions to percentages. Homework: Exercises 1-15 on page 42.',
+    materials: [{ name: 'Fractions_Worksheet.pdf', type: 'application/pdf', url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' }],
+    visibility: 'all'
+  },
+  {
+    sessionId: 'session_old_2',
+    groupId: '1',
+    date: '2026-04-10', // Two weeks ago
+    notes: 'Introduced basic geometry concepts (areas of triangles and rectangles). Behavior was excellent today.',
+    materials: [],
+    visibility: 'teacher'
+  },
+  {
+    sessionId: 'session_old_3',
+    groupId: '2', // Matches 'Advanced English'
+    date: '2026-04-16',
+    notes: 'Practiced past perfect continuous tense. Discussed the reading assignment chapter 3.',
+    materials: [{ name: 'Tense_Chart.png', type: 'image/png', url: 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=800' }],
+    visibility: 'students'
+  }
+];
+
 // Service Methods
 export const database = {
   // --- Students ---
@@ -181,7 +208,6 @@ export const database = {
 
   // --- Conversations ---
   fetchConversations: async (userId) => {
-    // Return mock threads
     return [
       { id: '0', name: "Academy Assistant", lastMsg: "How can I help you?", time: "9:00 AM", unread: 0, roles: ["AI Agent", "Support"], isBot: true },
       { id: '1', name: "Maria Garcia (Student)", parent: "Elena Garcia", lastMsg: "Tomorrow's lesson is at 4pm?", time: "10:30 AM", unread: 2, roles: ["Student", "Parent"] }
@@ -205,7 +231,31 @@ export const database = {
       },
       notifications: [
         { id: 1, text: "The Academy will be closed on May 1st.", date: "2 hours ago", type: "info" },
-        { id: 2, text: "Your Math class has a new resource available.", date: "5 hours ago", type: "update" }
+        { id: 2, text: "New resources published for Math Foundations.", date: "5 hours ago", type: "update" },
+        { id: 3, text: "Your English teacher added links to common irregular verbs.", date: "1 day ago", type: "update" }
+      ],
+      recentSessions: [
+        { 
+          id: 'rs1', 
+          subject: 'Math Foundations', 
+          date: 'Yesterday', 
+          teacher: 'Prof. David Brown',
+          notes: 'Focused on quadratic equations. Remember to complete exercise 5 for next week.',
+          materials: [
+            { name: 'Quadratic_Formula_Sheet.pdf', type: 'application/pdf' },
+            { name: 'Formula_Reference.png', type: 'image/png' }
+          ]
+        },
+        { 
+          id: 'rs2', 
+          subject: 'English Intro', 
+          date: 'Apr 20', 
+          teacher: 'Prof. Sarah Jenkins',
+          notes: 'Discussion about future tense. See attached list of verbs.',
+          materials: [
+            { name: 'Irregular_Verbs.pdf', type: 'application/pdf' }
+          ]
+        }
       ]
     };
   },
@@ -224,5 +274,41 @@ export const database = {
         { id: 'INV-100', student: 'Sofia Lee', parent: 'Jennifer Lee', dueDate: 'Apr 18, 2026', tuition: '$80.00', snacks: '$0.00', total: '$80.00', status: 'Paid' }
       ]
     };
+  },
+
+  // --- Class Sessions ---
+  fetchSessionHistory: async (groupId) => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const history = mockSessionHistory.filter(h => h.groupId === groupId);
+        // Sort by date descending
+        resolve(history.sort((a, b) => new Date(b.date) - new Date(a.date)));
+      }, 400); // simulate delay
+    });
+  },
+
+  saveClassNotes: async (sessionId, notes, files, visibility = 'all', recordingUrl = '') => {
+    const newEntry = {
+      sessionId: `session_${Date.now()}`,
+      groupId: sessionId, // In this mock, sessionId is used as groupId
+      date: new Date().toISOString(),
+      notes: notes,
+      materials: files || [],
+      visibility: visibility,
+      recordingUrl: recordingUrl
+    };
+    mockSessionHistory.unshift(newEntry);
+    
+    console.log(`[Database] Saved notes for session ${sessionId} [Visibility: ${visibility}]:`, notes);
+    if (files && files.length > 0) {
+      console.log(`[Database] Attached ${files.length} files.`);
+    }
+    return true;
+  },
+
+  saveAttendance: async (sessionId, attendanceData) => {
+    console.log(`[Database] Saved attendance for session ${sessionId}:`, attendanceData);
+    // In a real app, this would update a 'sessions' collection or similar
+    return true;
   }
 };

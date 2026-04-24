@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock } from 'lucide-react';
+import { database } from '../../lib/database';
 import './CalendarView.css';
 
 const MOCK_EVENTS = [
-  { id: 1, title: 'Advanced Math', subject: 'math', time: '10:00 AM - 11:30 AM', dayOffset: 0, type: 'Virtual' },
-  { id: 2, title: 'English Conversation', subject: 'languages', time: '4:00 PM - 5:00 PM', dayOffset: 0, type: 'In-person' },
-  { id: 3, title: 'Physics Labs', subject: 'science', time: '1:00 PM - 3:00 PM', dayOffset: 1, type: 'In-person' },
-  { id: 4, title: 'History of Arts', subject: 'arts', time: '2:30 PM - 4:00 PM', dayOffset: 2, type: 'Virtual' },
-  { id: 5, title: 'Geometry', subject: 'math', time: '9:00 AM - 10:30 AM', dayOffset: 3, type: 'Virtual' },
+  { id: 1, title: 'Advanced Math', subject: 'math', time: '10:00 AM - 11:30 AM', dayOffset: 0, type: 'Virtual', teacher: 'Prof. David Brown', notes: 'Reviewing trigonometry basics.', materials: [{name: 'Trig_Sheet.pdf', type: 'application/pdf'}] },
+  { id: 2, title: 'English Conversation', subject: 'languages', time: '4:00 PM - 5:00 PM', dayOffset: 0, type: 'In-person', teacher: 'Prof. Sarah Jenkins', notes: 'Daily vocabulary practice.', materials: [] },
+  { id: 3, title: 'Physics Labs', subject: 'science', time: '1:00 PM - 3:00 PM', dayOffset: 1, type: 'In-person', teacher: 'Prof. Mark Wilson', notes: 'Newtonian mechanics experiment.', materials: [{name: 'Lab_Instructions.pdf', type: 'application/pdf'}] },
+  { id: 4, title: 'History of Arts', subject: 'arts', time: '2:30 PM - 4:00 PM', dayOffset: 2, type: 'Virtual', teacher: 'Prof. Elena Rodriguez', notes: 'Focus on Renaissance masters.', materials: [{name: 'Renaissance_Slides.pdf', type: 'application/pdf'}] },
+  { id: 5, title: 'Geometry', subject: 'math', time: '9:00 AM - 10:30 AM', dayOffset: 3, type: 'Virtual', teacher: 'Prof. David Brown', notes: 'Final review for midterm.', materials: [] },
 ];
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -16,6 +17,10 @@ const CalendarView = () => {
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
   const [filter, setFilter] = useState('all');
   const [currentDate, setCurrentDate] = useState(new Date(2026, 3, 20)); // Fake current date
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editNotes, setEditNotes] = useState('');
+  const [saving, setSaving] = useState(false);
 
   // Responsive default view detection
   useEffect(() => {
@@ -36,6 +41,20 @@ const CalendarView = () => {
   };
 
   const events = getFilteredEvents();
+
+  const handleEventClick = (event) => {
+    setSelectedEvent(event);
+    setEditNotes(event.notes || '');
+    setIsEditing(false);
+  };
+
+  const handleSaveNotes = async () => {
+    setSaving(true);
+    await database.saveClassNotes(selectedEvent.id, editNotes, selectedEvent.materials);
+    setSelectedEvent(prev => ({ ...prev, notes: editNotes }));
+    setSaving(false);
+    setIsEditing(false);
+  };
 
   // Helper to get day numbers for the week
   const getWeekDates = () => {
@@ -119,7 +138,12 @@ const CalendarView = () => {
                     <div className="time-slot">
                       {dayEvents.length > 0 ? (
                         dayEvents.map(e => (
-                          <div key={e.id} className={`event-pill ${e.subject}`}>
+                          <div 
+                            key={e.id} 
+                            className={`event-pill ${e.subject}`}
+                            onClick={() => handleEventClick(e)}
+                            style={{ cursor: 'pointer' }}
+                          >
                             <span className="event-title">{e.title}</span>
                             <span className="event-time">{e.time}</span>
                             <span className="event-time" style={{display:'block', marginTop:'4px'}}>
@@ -204,8 +228,88 @@ const CalendarView = () => {
             </div>
           </div>
         )}
-
       </div>
+
+      {/* Session Details Modal */}
+      {selectedEvent && (
+        <div className="modal-overlay" onClick={() => setSelectedEvent(null)}>
+          <div className="modal-content glass-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title-area">
+                <div className={`subject-tag ${selectedEvent.subject}`}>{selectedEvent.subject}</div>
+                <h2>{selectedEvent.title}</h2>
+              </div>
+              <button className="close-modal" onClick={() => setSelectedEvent(null)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="session-meta-grid">
+                <div className="meta-item">
+                  <User size={16} />
+                  <span>{selectedEvent.teacher}</span>
+                </div>
+                <div className="meta-item">
+                  <Clock size={16} />
+                  <span>{selectedEvent.time}</span>
+                </div>
+                <div className="meta-item">
+                  {selectedEvent.type === 'Virtual' ? <Video size={16} /> : <MapPin size={16} />}
+                  <span>{selectedEvent.type}</span>
+                </div>
+              </div>
+
+              <div className="notes-section">
+                <div className="notes-header">
+                  <h3><FileText size={18} /> Session Notes</h3>
+                  {!isEditing ? (
+                    <button className="edit-btn-text" onClick={() => setIsEditing(true)}>
+                      <Edit2 size={14} /> Edit Notes
+                    </button>
+                  ) : (
+                    <div className="edit-actions">
+                      <button className="cancel-btn" onClick={() => setIsEditing(false)}>Cancel</button>
+                      <button className="save-btn" onClick={handleSaveNotes} disabled={saving}>
+                        <Save size={14} /> {saving ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {isEditing ? (
+                  <textarea 
+                    className="modal-notes-area"
+                    value={editNotes}
+                    onChange={e => setEditNotes(e.target.value)}
+                    placeholder="Write session notes here..."
+                  />
+                ) : (
+                  <div className="notes-display">
+                    {selectedEvent.notes || 'No notes published for this session.'}
+                  </div>
+                )}
+              </div>
+
+              <div className="materials-section">
+                <h3><Paperclip size={18} /> Materials & Resources</h3>
+                <div className="modal-materials-grid">
+                  {selectedEvent.materials && selectedEvent.materials.length > 0 ? (
+                    selectedEvent.materials.map((m, i) => (
+                      <div key={i} className="material-item">
+                        <ImageIcon size={18} color="#64748b" />
+                        <span>{m.name}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-muted">No materials uploaded.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
