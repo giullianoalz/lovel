@@ -9,7 +9,8 @@ import {
   LogOut,
   LayoutDashboard,
   Menu,
-  X
+  X,
+  ClipboardList
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -71,6 +72,10 @@ const Sidebar = () => {
             <NavLink to="/billing" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <CreditCard size={20} />
               <span>Unified Billing</span>
+            </NavLink>
+            <NavLink to="/registration" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+              <ClipboardList size={20} />
+              <span>Registration & Terms</span>
             </NavLink>
             <NavLink to="/session" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <ShieldCheck size={20} />

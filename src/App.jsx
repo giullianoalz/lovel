@@ -8,6 +8,7 @@ import CalendarView from './components/Schedule/CalendarView'
 import ClassSession from './components/Schedule/ClassSession'
 import BillingPanel from './components/Billing/BillingPanel'
 import SupervisionPanel from './components/Supervision/SupervisionPanel'
+import RegistrationAdmin from './components/Registration/RegistrationAdmin'
 import './index.css'
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
             <Route path="/calendar" element={<CalendarView />} />
             <Route path="/session" element={<ClassSession />} />
             <Route path="/billing" element={<BillingPanel />} />
+            <Route path="/registration" element={<RegistrationAdmin />} />
             <Route path="/supervision" element={<SupervisionPanel />} />
           </Routes>
         </main>
