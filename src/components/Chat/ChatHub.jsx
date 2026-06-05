@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft } from 'lucide-react';
-import { database } from '../../lib/database';
+import io from 'socket.io-client';
+import api from '../../lib/api';
 import './ChatHub.css';
+
+const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 const ChatHub = () => {
   const [activeChat, setActiveChat] = useState(null);
@@ -9,27 +12,61 @@ const ChatHub = () => {
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [chatThreads, setChatThreads] = useState([]);
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   
-  // Dynamic message state
-  const [messages, setMessages] = useState({
-    '1': [
-      { id: 1, sender: "Maria Garcia", text: "Hello! I'm ready for the group session today.", time: "10:15 AM", type: "received" },
-      { id: 2, sender: "Me", text: "Great! See you at 4:00 PM.", time: "10:20 AM", type: "sent" }
-    ],
-    '0': [
-      { id: 1, sender: "Assistant", text: "Hello! I am your Academy Assistant. I can help you schedule classes, check availability with teachers, or manage your enrollment. How can I help you today?", time: "9:00 AM", type: "received" }
-    ]
-  });
+  const [messages, setMessages] = useState({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const socketRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  const loadThreads = async () => {
+    try {
+      const response = await api.get('/chat');
+      setChatThreads(response.data.threads);
+    } catch (error) {
+      console.error("Error loading chat threads:", error);
+    }
+  };
 
   useEffect(() => {
-    const loadThreads = async () => {
-      const threads = await database.fetchConversations();
-      setChatThreads(threads);
-    };
     loadThreads();
-  }, []);
+    
+    // Initialize socket connection
+    socketRef.current = io(SOCKET_URL);
+    
+    socketRef.current.on('receive_message', (data) => {
+      const { threadId, message } = data;
+      setMessages(prev => {
+        const threadMessages = prev[threadId] || [];
+        // Prevent duplicate if we already have it (optimistic check by text and time roughly, or id)
+        // Since optimistic uses timestamp as ID, we can just check if a message with same text exists very recently
+        const isDuplicate = threadMessages.some(m => m.id === message.id || (m.text === message.text && m.type === 'sent'));
+        if (isDuplicate) return prev;
+        
+        return {
+          ...prev,
+          [threadId]: [...threadMessages, message]
+        };
+      });
+      
+      setChatThreads(prevThreads => 
+        prevThreads.map(t => 
+          t.id === threadId 
+            ? { ...t, lastMsg: message.text, time: message.time, unread: (activeChat === threadId ? 0 : (t.unread || 0) + 1) } 
+            : t
+        )
+      );
+      if (activeChat === threadId) {
+        scrollToBottom();
+      }
+    });
 
-  const messagesEndRef = useRef(null);
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+    };
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -39,70 +76,103 @@ const ChatHub = () => {
     scrollToBottom();
   }, [messages, activeChat]);
 
+  useEffect(() => {
+    const loadMessages = async () => {
+      if (!activeChat) return;
+      try {
+        const response = await api.get(`/chat/${activeChat}/messages`);
+        setMessages(prev => ({
+          ...prev,
+          [activeChat]: response.data.messages
+        }));
+        
+        if (socketRef.current) {
+          socketRef.current.emit('join_room', activeChat);
+        }
+      } catch (error) {
+        console.error("Error loading messages:", error);
+      }
+    };
+
+    if (activeChat) {
+      loadMessages();
+    }
+
+    return () => {
+      if (socketRef.current && activeChat) {
+        socketRef.current.emit('leave_room', activeChat);
+      }
+    };
+  }, [activeChat]);
+
   const handleSelectChat = (id) => {
     setActiveChat(id);
     setIsMobileChatOpen(true);
+    setIsTyping(false);
+    setIsHeaderMenuOpen(false);
   };
 
   const handleBackToList = () => {
     setIsMobileChatOpen(false);
   };
 
-  const handleSendMessage = () => {
-    if (!inputText.trim()) return;
+  const handleBlockToggle = async () => {
+    const currentChat = chatThreads.find(t => t.id === activeChat);
+    if (!currentChat) return;
 
-    const newMessage = {
+    try {
+      await api.post(`/chat/${activeChat}/block`);
+      setIsHeaderMenuOpen(false);
+      await loadThreads();
+    } catch (error) {
+      console.error("Error toggling block status:", error);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!inputText.trim() || !activeChat) return;
+
+    const sentText = inputText;
+    setInputText('');
+    
+    const optimisticMessage = {
       id: Date.now(),
       sender: "Me",
-      text: inputText,
+      text: sentText,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: "sent"
     };
 
     setMessages(prev => ({
       ...prev,
-      [activeChat]: [...(prev[activeChat] || []), newMessage]
+      [activeChat]: [...(prev[activeChat] || []), optimisticMessage]
     }));
+    
+    setChatThreads(prevThreads => 
+      prevThreads.map(t => 
+        t.id === activeChat 
+          ? { ...t, lastMsg: sentText, time: optimisticMessage.time } 
+          : t
+      )
+    );
 
-    const sentText = inputText;
-    setInputText('');
-
-    // Handle AI Logic if talking to the bot
-    if (activeChat === '0') {
-      simulateAIResponse(sentText);
+    try {
+      const response = await api.post(`/chat/${activeChat}/messages`, { text: sentText });
+      // Update optimistic message with real ID
+      setMessages(prev => {
+        const updated = prev[activeChat].map(m => m.id === optimisticMessage.id ? { ...m, id: response.data.message.id } : m);
+        return { ...prev, [activeChat]: updated };
+      });
+    } catch (error) {
+      console.error("Error sending message:", error);
     }
   };
 
-  const simulateAIResponse = (userText) => {
-    setIsTyping(true);
-    
-    setTimeout(() => {
-      let responseText = "I'm processing your request. Give me a moment to check the teacher's schedule...";
-      
-      const lowerText = userText.toLowerCase();
-      if (lowerText.includes("math") || lowerText.includes("class") || lowerText.includes("mate")) {
-        responseText = "I see you're looking for a math class. I found Prof. David Brown is available tomorrow at 4:30 PM. Would you like me to book it for you?";
-      } else if (lowerText.includes("yes") || lowerText.includes("si")) {
-        responseText = "Perfect! The class has been scheduled. I've updated your Google Calendar and sent a notification to Prof. David. Anything else?";
-      }
-
-      const aiMessage = {
-        id: Date.now() + 1,
-        sender: "Assistant",
-        text: responseText,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        type: "received"
-      };
-
-      setMessages(prev => ({
-        ...prev,
-        '0': [...(prev['0'] || []), aiMessage]
-      }));
-      setIsTyping(false);
-    }, 2000);
-  };
-
   const currentChatData = chatThreads.find(t => t.id === activeChat);
+  const filteredThreads = chatThreads.filter(t => 
+    t.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (t.roles && t.roles.some(r => r.toLowerCase().includes(searchQuery.toLowerCase())))
+  );
 
   return (
     <div className={`chat-hub-container ${isMobileChatOpen ? 'mobile-chat-active' : ''}`}>
@@ -115,19 +185,24 @@ const ChatHub = () => {
           </div>
           <div className="search-box">
             <Search size={18} />
-            <input type="text" placeholder="Search students, parents, teachers..." />
+            <input 
+              type="text" 
+              placeholder="Search students, parents, teachers..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
         </div>
         
         <div className="threads-list">
-          {chatThreads.map(thread => (
+          {filteredThreads.map(thread => (
             <div 
               key={thread.id} 
               className={`thread-item ${activeChat === thread.id ? 'active' : ''} ${thread.isBot ? 'bot-thread' : ''}`}
               onClick={() => handleSelectChat(thread.id)}
             >
               <div className={`thread-avatar ${thread.isBot ? 'bot-avatar' : ''}`}>
-                {thread.isBot ? <Bot size={22} /> : thread.name[0]}
+                {thread.isBot ? <Bot size={22} /> : (thread.name ? thread.name[0] : 'U')}
               </div>
               <div className="thread-info">
                 <div className="thread-top">
@@ -146,6 +221,11 @@ const ChatHub = () => {
               </div>
             </div>
           ))}
+          {filteredThreads.length === 0 && (
+            <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No conversations found.
+            </div>
+          )}
         </div>
       </div>
 
@@ -159,7 +239,7 @@ const ChatHub = () => {
                   <ArrowLeft size={24} />
                 </button>
                 <div className={`header-avatar ${currentChatData.isBot ? 'bot-avatar' : ''}`}>
-                  {currentChatData.isBot ? <Bot size={20} /> : currentChatData.name[0]}
+                  {currentChatData.isBot ? <Bot size={20} /> : (currentChatData.name ? currentChatData.name[0] : 'U')}
                 </div>
                 <div>
                   <h3>{currentChatData.name}</h3>
@@ -169,7 +249,24 @@ const ChatHub = () => {
                   </div>
                 </div>
               </div>
-              <button className="icon-btn"><MoreVertical size={20} /></button>
+              
+              <div style={{ position: 'relative' }}>
+                <button className="icon-btn" onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}>
+                  <MoreVertical size={20} />
+                </button>
+                {isHeaderMenuOpen && (
+                  <div style={{ position: 'absolute', right: 0, top: '100%', background: 'white', border: '1px solid var(--border-light)', borderRadius: '8px', boxShadow: 'var(--shadow-md)', zIndex: 100, minWidth: '150px', padding: '8px 0' }}>
+                    <button 
+                      onClick={handleBlockToggle}
+                      style={{ width: '100%', textAlign: 'left', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: currentChatData.isBlocked ? 'var(--text-main)' : '#dc2626', fontSize: '14px', fontWeight: '500' }}
+                      onMouseEnter={(e) => e.target.style.background = '#f1f5f9'}
+                      onMouseLeave={(e) => e.target.style.background = 'none'}
+                    >
+                      {currentChatData.isBlocked ? "Unblock Contact" : "Block Contact"}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
             
             <div className="messages-area">
@@ -197,19 +294,27 @@ const ChatHub = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            <div className="chat-input-area">
-              <button className="icon-btn"><Paperclip size={20} /></button>
-              <input 
-                type="text" 
-                placeholder="Type your message..." 
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-              />
-              <button className="send-btn" onClick={handleSendMessage}>
-                <Send size={20} />
-              </button>
-            </div>
+            {currentChatData.isBlocked ? (
+              <div style={{ padding: '20px', textAlign: 'center', background: '#f8fafc', borderTop: '1px solid var(--border-light)', color: '#64748b', fontSize: '14px' }}>
+                You have blocked this contact. You cannot send or receive messages.
+                <br />
+                <button onClick={handleBlockToggle} className="btn-text" style={{ marginTop: '8px', fontWeight: '600' }}>Unblock Contact</button>
+              </div>
+            ) : (
+              <div className="chat-input-area">
+                <button className="icon-btn"><Paperclip size={20} /></button>
+                <input 
+                  type="text" 
+                  placeholder="Type your message..." 
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                />
+                <button className="send-btn" onClick={handleSendMessage}>
+                  <Send size={20} />
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <div className="no-chat-selected">

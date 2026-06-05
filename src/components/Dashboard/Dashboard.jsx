@@ -1,18 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Bell, 
-  Video, 
+  Video,
   Calendar, 
   MessageSquare, 
   BookOpen, 
   CreditCard, 
-  Clock, 
-  User, 
   ChevronRight,
-  TrendingUp,
-  FileText,
   Image as ImageIcon,
-  Paperclip
+  Paperclip,
+  Radio
 } from 'lucide-react';
 import { database } from '../../lib/database';
 import { useNavigate } from 'react-router-dom';
@@ -23,6 +20,14 @@ const Dashboard = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  // Helper: check if a session time string is currently live
+  const isSessionLive = (timeStr) => {
+    if (!timeStr) return false;
+    // For demo purposes, mark "Today" sessions at specific simulated times as live
+    // In production this would compare real clock vs session time range
+    return timeStr.toLowerCase().startsWith('today');
+  };
 
   useEffect(() => {
     const loadDashboard = async () => {
@@ -44,15 +49,15 @@ const Dashboard = () => {
     );
   }
 
-  const nextClass = data.upcomingSessions[0];
+
 
   return (
     <div className="dashboard-container">
       {/* Header with Notifications */}
       <header className="dashboard-header">
         <div className="welcome-section">
-          <h1>Good Morning, Maria! 👋</h1>
-          <p>You have {data.upcomingSessions.length} classes scheduled for this week.</p>
+          <h1>Welcome Back! 👋</h1>
+          <p>You have {data.upcomingSessions.length} class{data.upcomingSessions.length !== 1 ? 'es' : ''} scheduled this week.</p>
         </div>
         
         <div className="header-actions">
@@ -70,46 +75,50 @@ const Dashboard = () => {
               Parent
             </button>
           </div>
-          
-          <button className="notif-bell">
-            <Bell size={20} />
-            <span className="notif-badge">2</span>
-          </button>
         </div>
       </header>
 
       <div className="dashboard-grid">
         {/* Main Content Area */}
         <div className="main-col">
-          {/* Featured Next Class Card */}
-          <div className="glass-card next-class-card">
-            <h2>Next Up</h2>
-            <div className="next-class-info">
-              <div className="class-details">
-                <h3>{nextClass.subject}</h3>
-                <p><User size={14} style={{display:'inline', marginRight: '6px'}} /> {nextClass.teacher}</p>
-                <p><Clock size={14} style={{display:'inline', marginRight: '6px'}} /> {nextClass.time} ({nextClass.type})</p>
-              </div>
-              <button className="join-btn" onClick={() => window.open('#', '_blank')}>
-                <Video size={20} />
-                <span>Join Virtual Class</span>
-              </button>
+          {/* Upcoming Schedule List */}
+          <div className="glass-card list-section">
+            <div className="section-header">
+              <h2>Upcoming Classes</h2>
+              <button className="text-link" onClick={() => navigate('/calendar')}>View Full Calendar</button>
             </div>
-          </div>
-
-          {/* Quick Metrics Row */}
-          <div className="stats-row">
-            <div className="glass-card stat-item">
-              <span className="stat-value">12</span>
-              <span className="stat-label">Hours Completed</span>
-            </div>
-            <div className={`glass-card stat-item ${role === 'parent' ? 'highlight' : ''}`}>
-              <span className="stat-value">{role === 'parent' ? data.billing.nextPayment : '94%'}</span>
-              <span className="stat-label">{role === 'parent' ? 'Next Payment' : 'Attendance Rate'}</span>
-            </div>
-            <div className="glass-card stat-item">
-              <span className="stat-value">{data.recentSessions.length}</span>
-              <span className="stat-label">Resources Available</span>
+            <div className="compact-list">
+              {data.upcomingSessions.map(session => {
+                const live = isSessionLive(session.time);
+                return (
+                  <div key={session.id} className={`list-item ${live ? 'session-live' : ''}`}>
+                    <div className="item-main">
+                      <div className={`item-icon ${live ? 'live-icon' : ''}`}>
+                        {live ? <Radio size={18} /> : <Calendar size={18} />}
+                      </div>
+                      <div className="item-text">
+                        <h4>{session.subject}</h4>
+                        <p>{session.teacher}</p>
+                      </div>
+                    </div>
+                    <div className="item-side">
+                      <div style={{ textAlign: 'right' }}>
+                        {live && <span className="live-badge">● LIVE NOW</span>}
+                        <div style={{ fontWeight: '600', color: live ? 'var(--primary)' : 'var(--text-main)', marginBottom: '4px' }}>{session.time}</div>
+                        {session.meetingUrl && (
+                          <button 
+                            className="join-zoom-btn"
+                            onClick={() => window.open(session.meetingUrl, '_blank')}
+                          >
+                            <Video size={14} />
+                            <span>{live ? 'Join Now' : 'Join Zoom'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -117,7 +126,7 @@ const Dashboard = () => {
           <div className="glass-card list-section lesson-review-section">
             <div className="section-header">
               <h2>Recent Lesson Materials</h2>
-              <p className="text-muted" style={{fontSize: '13px'}}>Review notes and files shared by your teachers</p>
+              <p className="section-subtitle">Review notes and files shared by your teachers</p>
             </div>
             <div className="lessons-grid">
               {data.recentSessions.map(session => (
@@ -140,28 +149,6 @@ const Dashboard = () => {
               ))}
             </div>
           </div>
-
-          {/* Upcoming Schedule List */}
-          <div className="glass-card list-section">
-            <div className="section-header" style={{ display:'flex', justifyContent:'space-between', marginBottom:'16px'}}>
-              <h2>Upcoming Classes</h2>
-              <button className="text-link" onClick={() => navigate('/calendar')} style={{ background:'none', border:'none', color:'var(--primary)', fontWeight:'600', cursor:'pointer'}}>View Full Calendar</button>
-            </div>
-            <div className="compact-list">
-              {data.upcomingSessions.slice(1).map(session => (
-                <div key={session.id} className="list-item">
-                  <div className="item-main">
-                    <div className="item-icon"><Calendar size={18} /></div>
-                    <div className="item-text">
-                      <h4>{session.subject}</h4>
-                      <p>{session.teacher}</p>
-                    </div>
-                  </div>
-                  <div className="item-side">{session.time}</div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* Sidebar Area */}
@@ -170,10 +157,10 @@ const Dashboard = () => {
           <div className="glass-card list-section">
             <h2>Quick Actions</h2>
             <div className="compact-list">
-              <button className="list-item action-row" onClick={() => navigate('/chat')} style={{ width:'100%', border:'none', background:'rgba(255,255,255,0.5)', cursor:'pointer' }}>
+              <button className="list-item action-row chat-action" onClick={() => navigate('/chat')}>
                 <div className="item-main">
-                  <div className="item-icon" style={{ background:'#e0f2fe', color:'#0ea5e9'}}><MessageSquare size={18} /></div>
-                  <div className="item-text" style={{ textAlign:'left'}}>
+                  <div className="item-icon chat-icon"><MessageSquare size={18} /></div>
+                  <div className="item-text">
                     <h4>Academy Chat</h4>
                     <p>Contact your teacher</p>
                   </div>
@@ -181,10 +168,10 @@ const Dashboard = () => {
                 <ChevronRight size={16} />
               </button>
               
-              <button className="list-item action-row" style={{ width:'100%', border:'none', background:'rgba(255,255,255,0.5)', cursor:'pointer' }}>
+              <button className="list-item action-row study-action">
                 <div className="item-main">
-                  <div className="item-icon" style={{ background:'#fef3c7', color:'#d97706'}}><BookOpen size={18} /></div>
-                  <div className="item-text" style={{ textAlign:'left'}}>
+                  <div className="item-icon study-icon"><BookOpen size={18} /></div>
+                  <div className="item-text">
                     <h4>Study Materials</h4>
                     <p>Review last lesson</p>
                   </div>

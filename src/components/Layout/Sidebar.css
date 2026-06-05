@@ -151,7 +151,57 @@
   display: flex;
 }
 
-@media (max-width: 768px) {
+/* Notification Dropdown */
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  width: 320px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-light);
+  z-index: 1000;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.notif-header {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.notif-body {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.notif-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-light);
+  transition: background 0.2s;
+}
+
+.notif-item:hover {
+  background: #f8fafc;
+}
+
+.notif-item.unread {
+  background: #f0fdf4;
+}
+
+.notif-item.unread:hover {
+  background: #dcfce7;
+}
+
+@media (max-width: 1100px) {
   .mobile-header {
     display: flex;
     justify-content: center; /* Centering the logo */
@@ -176,13 +226,53 @@
   
   .mobile-toggle {
     display: block;
-    position: absolute; /* Absolute so it doesn't un-center the logo */
-    right: 16px;
-    left: auto; /* Override the desktop left: 16px rule */
+    position: absolute;
+    left: 16px;
+    right: auto;
     border: none;
     box-shadow: none;
     padding: 4px;
     background: transparent;
+    color: var(--text-main);
+  }
+  
+  .notif-wrapper {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .global-notif-bell {
+    position: relative;
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    padding: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .global-notif-bell .notif-badge {
+    position: absolute;
+    top: 0px;
+    right: 0px;
+    background: #ef4444;
+    color: white;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid white;
+    font-weight: bold;
   }
   
   .desk-only {

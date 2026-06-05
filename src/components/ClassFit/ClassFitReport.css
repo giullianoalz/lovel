@@ -1,0 +1,97 @@
+.classfit-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+.classfit-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 24px; flex-wrap: wrap; gap: 16px;
+}
+.classfit-header h1 { font-size: 26px; font-weight: 700; color: var(--text-main); margin: 0 0 4px; }
+
+.classfit-add-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 20px; background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white; border: none; border-radius: 10px; font-weight: 600; font-size: 14px;
+  cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 8px rgba(245,158,11,0.3);
+}
+.classfit-add-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(245,158,11,0.4); }
+
+/* Status Tabs */
+.status-tabs { display: flex; gap: 4px; margin-bottom: 24px; background: #f1f5f9; border-radius: 12px; padding: 4px; }
+.status-tabs .tab {
+  flex: 1; padding: 10px 16px; border: none; background: transparent; border-radius: 10px;
+  font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; transition: all 0.2s;
+}
+.status-tabs .tab.active { background: white; color: var(--text-main); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.status-tabs .tab:hover:not(.active) { color: var(--text-main); }
+
+/* Reports Grid */
+.reports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
+
+.report-card {
+  background: white; border-radius: 14px; border: 1px solid var(--border-light);
+  overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: all 0.2s;
+}
+.report-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); transform: translateY(-2px); }
+
+.report-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 20px; border-bottom: 1px solid #f1f5f9;
+}
+
+.report-student { display: flex; align-items: center; gap: 12px; }
+
+.report-avatar {
+  width: 40px; height: 40px; border-radius: 12px;
+  background: linear-gradient(135deg, #f59e0b, #d97706); color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700;
+}
+
+.report-student h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.report-class { font-size: 12px; color: var(--text-muted); }
+
+.status-pill {
+  padding: 4px 12px; border-radius: 20px; font-size: 11px;
+  font-weight: 600; white-space: nowrap;
+}
+
+.report-body { padding: 16px 20px; }
+
+.report-field { margin-bottom: 12px; }
+.report-field:last-child { margin-bottom: 0; }
+.report-field label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+.report-field p { margin: 0; font-size: 13px; color: var(--text-main); line-height: 1.5; }
+
+.report-field.review-notes { background: #f0fdf4; padding: 10px 12px; border-radius: 8px; border-left: 3px solid #10b981; }
+
+.report-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 20px; background: #fafbfc; border-top: 1px solid #f1f5f9;
+}
+
+.report-meta { display: flex; gap: 16px; }
+.report-meta span { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); }
+
+.review-btn {
+  padding: 6px 16px; background: #3b82f6; color: white; border: none;
+  border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.review-btn:hover { background: #2563eb; }
+
+.classfit-loading, .classfit-empty { grid-column: 1 / -1; padding: 60px; text-align: center; color: var(--text-muted); }
+.classfit-empty svg { margin-bottom: 12px; color: #10b981; opacity: 0.4; }
+.classfit-empty h3 { margin: 8px 0 4px; color: var(--text-main); }
+
+/* Modal */
+.classfit-modal {
+  background: white; border-radius: 16px; width: 95%; max-width: 520px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.2); animation: slideUp 0.25s ease;
+}
+
+.review-summary { background: #f8fafc; padding: 16px; border-radius: 10px; margin-bottom: 16px; }
+.review-summary p { margin: 6px 0; font-size: 13px; color: var(--text-main); }
+
+@media (max-width: 768px) {
+  .classfit-container { padding: 16px; }
+  .reports-grid { grid-template-columns: 1fr; }
+  .status-tabs { overflow-x: auto; }
+}

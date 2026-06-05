@@ -1,0 +1,43 @@
+import { Router } from 'express';
+import { authenticate } from '../middleware/auth.js';
+import { requireRole } from '../middleware/roles.js';
+import {
+  createTerm,
+  seedPriorityHolds,
+  getRegistrationStatus,
+  submitRegistrationRequest,
+  promoteFromWaitlist,
+  getTerms,
+  updateTerm,
+  getRegistrationClasses,
+  getClassRoster,
+  revokeHold,
+  sweepHolds,
+  remindHolds
+} from '../controllers/registration.controller.js';
+
+const router = Router();
+
+// --- ADMIN ROUTES ---
+router.get('/terms', authenticate, requireRole('ADMIN'), getTerms);
+router.post('/terms', authenticate, requireRole('ADMIN'), createTerm);
+router.put('/terms/:id', authenticate, requireRole('ADMIN'), updateTerm);
+router.post('/terms/:id/seed-priority', authenticate, requireRole('ADMIN'), seedPriorityHolds);
+
+router.get('/classes', authenticate, requireRole('ADMIN'), getRegistrationClasses);
+router.get('/classes/:id/roster', authenticate, requireRole('ADMIN'), getClassRoster);
+
+router.post('/promote/:classId', authenticate, requireRole('ADMIN'), promoteFromWaitlist);
+
+router.delete('/holds/:id', authenticate, requireRole('ADMIN'), revokeHold);
+router.post('/classes/:id/holds/sweep', authenticate, requireRole('ADMIN'), sweepHolds);
+router.post('/classes/:id/holds/remind', authenticate, requireRole('ADMIN'), remindHolds);
+
+// --- PARENT/USER ROUTES ---
+// Check window and status for a student
+router.get('/status/:studentId', authenticate, getRegistrationStatus);
+
+// Submit 1st/2nd choice
+router.post('/request', authenticate, submitRegistrationRequest);
+
+export default router;

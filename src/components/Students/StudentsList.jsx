@@ -1,14 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, Filter, AlertCircle, Cookie, MoreHorizontal, Mail, MessageSquare } from 'lucide-react';
+import { Search, UserPlus, Filter, AlertCircle, Cookie, MoreHorizontal, Mail, MessageSquare, ShoppingBag, X, GraduationCap, DollarSign } from 'lucide-react';
 import { database } from '../../lib/database';
 import StudentProfileModal from './StudentProfileModal';
+import TeacherProfileModal from './TeacherProfileModal';
+import SnackCabinetModal from './SnackCabinetModal';
+import AddStudentModal from './AddStudentModal';
 import './StudentsList.css';
 
 const StudentsList = () => {
+  const [activeTab, setActiveTab] = useState('students');
   const [students, setStudents] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [isSnackManagerOpen, setIsSnackManagerOpen] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [families, setFamilies] = useState([]);
 
   const loadData = async () => {
     try {
@@ -25,55 +35,197 @@ const StudentsList = () => {
     }
   };
 
+  const loadTeachers = async () => {
+    try {
+      const data = await database.fetchTeachers();
+      setTeachers(data);
+    } catch (error) {
+      console.error("Error loading teachers:", error);
+    }
+  };
+
   useEffect(() => {
     loadData();
+    loadTeachers();
+    const loadFamilies = async () => {
+      try {
+        const fams = await database.fetchFamilies();
+        setFamilies(fams);
+      } catch (err) {
+        console.error('Error loading families:', err);
+      }
+    };
+    loadFamilies();
   }, []);
 
-  const filteredStudents = students.filter(student => 
-    student.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredStudents = students.filter(student => {
+    const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter === 'All' || student.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const filteredTeachers = teachers.filter(t =>
+    t.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
+    (statusFilter === 'All' || t.status === statusFilter)
   );
+
+  const handleAddStudent = (newStudent) => {
+    setStudents(prev => [...prev, newStudent]);
+    setShowAddModal(false);
+  };
 
   return (
     <div className="students-container">
       <header className="students-header">
         <div>
-          <h1>Student Directory</h1>
-          <p className="text-muted">Total Enrolled: {students.length}</p>
+          <h1>Directory</h1>
+          <p className="text-muted">
+            {activeTab === 'students' 
+              ? `Total Enrolled: ${students.length}` 
+              : `Total Teachers: ${teachers.length}`}
+          </p>
         </div>
-        <button className="action-btn primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <UserPlus size={18} />
-          <span>Add New Student</span>
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          {activeTab === 'students' && (
+            <>
+              <button 
+                className="action-btn outline" 
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
+                onClick={() => setIsSnackManagerOpen(true)}
+              >
+                <ShoppingBag size={18} />
+                <span className="desk-only">Snack Cabinet</span>
+              </button>
+              <button 
+                className="action-btn primary" 
+                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                onClick={() => setShowAddModal(true)}
+              >
+                <UserPlus size={18} />
+                <span className="desk-only">Add New Student</span>
+              </button>
+            </>
+          )}
+        </div>
       </header>
+
+      {/* Tabs */}
+      <div className="directory-tabs">
+        <button 
+          className={`dir-tab ${activeTab === 'students' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('students'); setSearchQuery(''); setStatusFilter('All'); }}
+        >
+          <GraduationCap size={18} />
+          <span>Students</span>
+          <span className="tab-count">{students.length}</span>
+        </button>
+        <button 
+          className={`dir-tab ${activeTab === 'teachers' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('teachers'); setSearchQuery(''); setStatusFilter('All'); }}
+        >
+          <DollarSign size={18} />
+          <span>Teachers & Payroll</span>
+          <span className="tab-count">{teachers.length}</span>
+        </button>
+      </div>
 
       <div className="search-filter-row">
         <div className="search-input-wrapper">
           <Search size={18} className="search-icon" />
           <input 
             type="text" 
-            placeholder="Search by name..." 
+            placeholder={activeTab === 'students' ? "Search by name..." : "Search teachers..."} 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <button className="action-btn">
-          <Filter size={18} />
-        </button>
+        <div className="filter-chips">
+          {['All', 'Active', 'Inactive'].map(status => (
+            <button
+              key={status}
+              className={`filter-chip ${statusFilter === status ? 'active' : ''}`}
+              onClick={() => setStatusFilter(status)}
+            >
+              {status === 'All' ? `All ${activeTab === 'students' ? 'Students' : 'Teachers'}` : status}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {loading ? (
-        <div className="loading-state">Loading academy records...</div>
-      ) : (
+      {/* Students Tab */}
+      {activeTab === 'students' && (
+        <>
+          {loading ? (
+            <div className="loading-state">Loading academy records...</div>
+          ) : (
+            <div className="students-grid">
+              {filteredStudents.map(student => (
+                <div key={student.id} className="premium-card student-card">
+                  <div className="card-top">
+                    <div className="student-main-info">
+                      <div className="student-avatar">{student.name[0]}</div>
+                      <div>
+                        <h3 className="student-name">{student.name}</h3>
+                        <span className={`status-tag ${student.status.replace(' ', '').toLowerCase()}`}>
+                          {student.status}
+                        </span>
+                      </div>
+                    </div>
+                    <button className="icon-btn"><MoreHorizontal size={20} /></button>
+                  </div>
+
+                  <div className="card-details">
+                    <div className="detail-item">
+                      <span className="detail-label">Allergies:</span>
+                      <span className={student.allergies !== 'None' ? 'allergy-alert' : ''}>
+                        {student.allergies === 'None' ? (
+                          'No reported allergies'
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <AlertCircle size={14} />
+                            {student.allergies}
+                          </div>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="detail-item">
+                      <span className="detail-label">Billing:</span>
+                      {student.snackAuthorized ? (
+                        <div className="snack-badge">
+                          <Cookie size={14} />
+                          <span>Snacks Authorized</span>
+                        </div>
+                      ) : (
+                        <span className="text-muted" style={{ fontSize: '12px' }}>Standard Plan (No snacks)</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="card-actions">
+                    <button className="icon-btn" title="Send Email"><Mail size={18} /></button>
+                    <button className="icon-btn" title="Internal Chat"><MessageSquare size={18} /></button>
+                    <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Teachers Tab */}
+      {activeTab === 'teachers' && (
         <div className="students-grid">
-          {filteredStudents.map(student => (
-            <div key={student.id} className="premium-card student-card">
+          {filteredTeachers.map(teacher => (
+            <div key={teacher.id} className="premium-card student-card teacher-card">
               <div className="card-top">
                 <div className="student-main-info">
-                  <div className="student-avatar">{student.name[0]}</div>
+                  <div className="student-avatar teacher-avatar">{teacher.name[0]}</div>
                   <div>
-                    <h3 className="student-name">{student.name}</h3>
-                    <span className={`status-tag ${student.status.replace(' ', '').toLowerCase()}`}>
-                      {student.status}
+                    <h3 className="student-name">{teacher.name}</h3>
+                    <span className={`status-tag ${teacher.status?.replace(' ', '').toLowerCase()}`}>
+                      {teacher.status}
                     </span>
                   </div>
                 </div>
@@ -82,36 +234,29 @@ const StudentsList = () => {
 
               <div className="card-details">
                 <div className="detail-item">
-                  <span className="detail-label">Allergies:</span>
-                  <span className={student.allergies !== 'None' ? 'allergy-alert' : ''}>
-                    {student.allergies === 'None' ? (
-                      'No reported allergies'
-                    ) : (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <AlertCircle size={14} />
-                        {student.allergies}
-                      </div>
-                    )}
+                  <span className="detail-label">Email:</span>
+                  <span style={{ fontSize: '13px' }}>{teacher.email}</span>
+                </div>
+                <div className="detail-item">
+                  <span className="detail-label">Salary:</span>
+                  <span className="salary-badge">
+                    <DollarSign size={14} />
+                    ${teacher.baseSalary?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'} /mo
                   </span>
                 </div>
-
                 <div className="detail-item">
-                  <span className="detail-label">Billing:</span>
-                  {student.snackAuthorized ? (
-                    <div className="snack-badge">
-                      <Cookie size={14} />
-                      <span>Snacks Authorized</span>
-                    </div>
-                  ) : (
-                    <span className="text-muted" style={{ fontSize: '12px' }}>Standard Plan (No snacks)</span>
-                  )}
+                  <span className="detail-label">Per Session:</span>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
+                    ${teacher.perSessionRate?.toFixed(2) || '0.00'}
+                  </span>
                 </div>
               </div>
 
               <div className="card-actions">
                 <button className="icon-btn" title="Send Email"><Mail size={18} /></button>
-                <button className="icon-btn" title="Internal Chat"><MessageSquare size={18} /></button>
-                <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>
+                <button className="action-btn" onClick={() => setSelectedTeacher(teacher)}>
+                  <DollarSign size={14} /> View Payroll
+                </button>
               </div>
             </div>
           ))}
@@ -123,6 +268,28 @@ const StudentsList = () => {
           student={selectedStudent} 
           onClose={() => setSelectedStudent(null)} 
           onUpdate={loadData}
+        />
+      )}
+
+      {selectedTeacher && (
+        <TeacherProfileModal
+          teacher={selectedTeacher}
+          onClose={() => setSelectedTeacher(null)}
+        />
+      )}
+
+      {isSnackManagerOpen && (
+        <SnackCabinetModal 
+          mode="manage"
+          onClose={() => setIsSnackManagerOpen(false)}
+        />
+      )}
+
+      {showAddModal && (
+        <AddStudentModal
+          onClose={() => setShowAddModal(false)}
+          onSave={handleAddStudent}
+          families={families}
         />
       )}
     </div>

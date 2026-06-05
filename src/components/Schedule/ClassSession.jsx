@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { database } from '../../lib/database';
-import { Check, X, AlertTriangle, Clock, Users, Star, Gift, TrendingUp, FileText, Image, Paperclip, Video, History, Eye, EyeOff, ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List, Link2, Type } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Check, X, AlertTriangle, FileWarning, Clock, Users, Star, Gift, TrendingUp, FileText, Image, Paperclip, Video, History, Eye, EyeOff, ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List, Link2, Type, Activity, Wind, LogOut, LifeBuoy, AlertCircle } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
 import mammoth from 'mammoth';
 import * as xlsx from 'xlsx';
+import api from '../../lib/api';
 import './ClassSession.css';
 
 const ClassSession = () => {
-  const [dailySessions, setDailySessions] = useState([
-    { id: '1', title: 'Math Foundations - Group A', time: '4:00 PM - 5:30 PM', studentsCount: 3, status: 'pending', link: 'https://zoom.us/j/123' },
-    { id: '2', title: 'Advanced English', time: '6:00 PM - 7:30 PM', studentsCount: 4, status: 'pending', link: 'https://zoom.us/j/456' },
-  ]);
+  const [dailySessions, setDailySessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
 
   const [students, setStudents] = useState([]);
@@ -40,6 +38,7 @@ const ClassSession = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [completeLoading, setCompleteLoading] = useState(false);
   const [visibleAllergy, setVisibleAllergy] = useState(null);
+  const [selectedAlertStudent, setSelectedAlertStudent] = useState(null);
   
   // Rich Text Active States
   const [activeFormats, setActiveFormats] = useState({
@@ -154,15 +153,27 @@ const ClassSession = () => {
   }, [activeSessionId]);
 
   useEffect(() => {
-    const loadStudents = async () => {
+    const loadStudentsAndSessions = async () => {
+      // Load Students
       const data = await database.fetchStudents();
       setStudents(data);
       // Initialize states
       const initialAttendance = {};
       data.forEach(s => initialAttendance[s.id] = 'present');
       setAttendance(initialAttendance);
+
+      // Load Sessions
+      const sessions = await database.fetchDailySessions();
+      if (sessions && sessions.length > 0) {
+        setDailySessions(sessions);
+      } else {
+        // Fallback mock if no sessions today
+        setDailySessions([
+          { id: '1', title: 'Math Foundations - Group A (Mock)', time: '4:00 PM - 5:30 PM', studentsCount: 3, status: 'pending', link: 'https://zoom.us/j/123' }
+        ]);
+      }
     };
-    loadStudents();
+    loadStudentsAndSessions();
   }, []);
 
   const togglePresence = (id, status) => {
@@ -251,6 +262,16 @@ const ClassSession = () => {
     setAttachedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleAlertTrigger = async (student, type) => {
+    try {
+      await api.post('/alerts', { studentId: student.id, alertType: type, reason: `${type} requested from Class Session` });
+      alert(`${type} alert sent to Front Desk for ${student.name}.`);
+    } catch (error) {
+      console.error('Error triggering alert:', error);
+      alert('Failed to trigger alert. Make sure the backend is running.');
+    }
+  };
+
   const handleCompleteSession = async (sessionId) => {
     const markedCount = Object.keys(attendance).length;
     if (markedCount < students.length) {
@@ -275,7 +296,10 @@ const ClassSession = () => {
       setAttachedFiles([]);
       setNoteVisibility(['students_parents', 'me']);
       
-      alert('Session completed and saved successfully!');
+      const askFit = window.confirm('Session completed and saved successfully!\n\nDo you need to submit a Class-Fit Report to flag any student who might need to change groups?');
+      if (askFit) {
+        navigate('/class-fit');
+      }
     } catch (error) {
       console.error('Error completing session:', error);
       alert('There was an error saving the session. Please try again.');
@@ -412,6 +436,24 @@ const ClassSession = () => {
                 <td>
                   <div className="student-info-cell">
                     <div className="student-name">{student.name}</div>
+                    <div className="student-quick-actions" style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                      <button 
+                        className="quick-action-btn behavior" 
+                        title="Log Behavior"
+                        onClick={() => navigate('/behavior')}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '2px', display: 'flex', alignItems: 'center' }}
+                      >
+                        <FileWarning size={14} />
+                      </button>
+                      <button 
+                        className="quick-action-btn alert-trigger" 
+                        title="Send Alert"
+                        onClick={() => setSelectedAlertStudent(student)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#eab308', padding: '2px', display: 'flex', alignItems: 'center' }}
+                      >
+                        <AlertTriangle size={14} />
+                      </button>
+                    </div>
                     {student.allergies !== 'None' && (
                       <div className="allergy-indicator-wrapper">
                         <button 
@@ -772,6 +814,49 @@ const ClassSession = () => {
           </div>
         ))}
       </div>
+
+      {/* Alert Modal */}
+      {selectedAlertStudent && (
+        <div className="alert-modal-overlay" onClick={() => setSelectedAlertStudent(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div className="alert-modal-content" onClick={e => e.stopPropagation()} style={{ background: '#fff', padding: '30px', borderRadius: '16px', width: '90%', maxWidth: '400px', textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <AlertTriangle size={48} color="#eab308" />
+            </div>
+            <h2 style={{ marginTop: 0, marginBottom: '8px', color: '#0f172a' }}>Send Alert</h2>
+            <p style={{ color: '#64748b', marginBottom: '32px', fontSize: '15px' }}>Trigger an immediate alert to Front Desk for <strong>{selectedAlertStudent.name}</strong></p>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <button 
+                onClick={() => { handleAlertTrigger(selectedAlertStudent, 'Student out'); setSelectedAlertStudent(null); }}
+                style={{ background: '#fef08a', color: '#ca8a04', border: '2px solid #fde047', padding: '16px', borderRadius: '12px', fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s', width: '100%' }}
+              >
+                <LogOut size={24} /> Student Out
+              </button>
+              
+              <button 
+                onClick={() => { handleAlertTrigger(selectedAlertStudent, 'Class support'); setSelectedAlertStudent(null); }}
+                style={{ background: '#ffedd5', color: '#c2410c', border: '2px solid #fdba74', padding: '16px', borderRadius: '12px', fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s', width: '100%' }}
+              >
+                <LifeBuoy size={24} /> Class Support
+              </button>
+              
+              <button 
+                onClick={() => { handleAlertTrigger(selectedAlertStudent, 'Medic'); setSelectedAlertStudent(null); }}
+                style={{ background: '#fee2e2', color: '#b91c1c', border: '2px solid #fca5a5', padding: '16px', borderRadius: '12px', fontSize: '18px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer', transition: 'all 0.2s', width: '100%' }}
+              >
+                <AlertCircle size={24} /> Medical
+              </button>
+            </div>
+            
+            <button 
+              onClick={() => setSelectedAlertStudent(null)}
+              style={{ marginTop: '32px', background: 'none', border: 'none', color: '#64748b', fontSize: '16px', cursor: 'pointer', fontWeight: '600' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* File Preview Modal */}
       {previewFile && (

@@ -363,7 +363,7 @@
   display: none;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1100px) {
   .chat-hub-container {
     display: block;
     height: calc(100vh - 64px); 

@@ -1,14 +1,41 @@
+import api from './api';
+
 /**
  * Database Service Layer
- * This module handles all communication with Firestore.
- * Currently using a MOCK implementation to allow development without active API keys.
+ * This module handles all communication with the backend.
+ * Currently migrating to use the real API instead of Mock Data.
  */
 
 // Mock Data
+let mockFamilies = [
+  { 
+    id: 'f1', 
+    name: 'Garcia Family', 
+    contacts: [{ name: 'Elena Garcia', role: 'Mother', isInvoiceRecipient: true }], 
+    tags: ['EMA', 'Fall 2025'] 
+  },
+  { 
+    id: 'f2', 
+    name: 'Doe Family', 
+    contacts: [{ name: 'Michael Doe', role: 'Father', isInvoiceRecipient: true }], 
+    tags: ['Love Learning FL LLC'] 
+  },
+  { 
+    id: 'f3', 
+    name: 'Ramirez Family', 
+    contacts: [{ name: 'Carlos Ramirez', role: 'Father', isInvoiceRecipient: true }], 
+    tags: [] 
+  }
+];
+
 let mockStudents = [
   { 
     id: '1', 
     name: "Maria Garcia", 
+    age: 12,
+    parentName: "Elena Garcia",
+    parentPhone: "(555) 123-4567",
+    parentEmail: "elena.garcia@example.com",
     allergies: "Peanuts, Shellfish", 
     snackAuthorized: true, 
     snackPunches: 8, 
@@ -17,7 +44,7 @@ let mockStudents = [
     prizeHistory: [
       { id: 'pz_1', reason: 'Participation', points: 10, date: '2026-04-20T10:00:00Z', type: 'earned' }
     ],
-    parentId: 'p1', 
+    familyId: 'f1', 
     status: 'Active',
     materials: [
       { id: 'm1', name: 'Geometry Basics', subject: 'Mathematics', type: 'pdf', date: '2026-04-20', fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' },
@@ -28,13 +55,17 @@ let mockStudents = [
   { 
     id: '2', 
     name: "John Doe", 
+    age: 15,
+    parentName: "Michael Doe",
+    parentPhone: "(555) 987-6543",
+    parentEmail: "michael.doe@example.com",
     allergies: "None", 
     snackAuthorized: false, 
     snackPunches: 0, 
     snackHistory: [], 
     prizePoints: 45,
     prizeHistory: [],
-    parentId: 'p2', 
+    familyId: 'f2', 
     status: 'Active',
     materials: [
       { id: 'm4', name: 'Calculus Review', subject: 'Mathematics', type: 'pdf', date: '2026-04-21', fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' }
@@ -49,24 +80,36 @@ let mockStudents = [
     snackHistory: [], 
     prizePoints: 0,
     prizeHistory: [],
-    parentId: 'p3', 
-    status: 'On Hold',
+    familyId: 'f3', 
+    status: 'Inactive',
     materials: []
   }
 ];
 
 let mockSnackCabinet = [
-  { id: 'snk_1', name: 'Apple Juice', costPunches: 2, image: 'https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=200&h=200&fit=crop' },
-  { id: 'snk_2', name: 'Chocolate Chip Cookie', costPunches: 3, image: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=200&h=200&fit=crop' },
-  { id: 'snk_3', name: 'Potato Chips', costPunches: 3, image: 'https://images.unsplash.com/photo-1566478989037-eade3f7e2bd9?w=200&h=200&fit=crop' },
-  { id: 'snk_4', name: 'Granola Bar', costPunches: 2, image: 'https://images.unsplash.com/photo-1622485540306-bc71261a84f3?w=200&h=200&fit=crop' },
-  { id: 'snk_5', name: 'Organic Fruit Snacks', costPunches: 1, image: 'https://images.unsplash.com/photo-1582293041079-7814c2f12063?w=200&h=200&fit=crop' }
+  { id: 'snk_1', name: 'Apple Juice', costPunches: 2, image: 'https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=400&h=400&fit=crop' },
+  { id: 'snk_2', name: 'Chocolate Chip Cookie', costPunches: 3, image: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=400&h=400&fit=crop' },
+  { id: 'snk_3', name: 'Potato Chips', costPunches: 3, image: 'https://images.unsplash.com/photo-1566478989037-eade3f7e2bd9?w=400&h=400&fit=crop' },
+  { id: 'snk_4', name: 'Granola Bar', costPunches: 2, image: 'https://images.unsplash.com/photo-1590080873974-9a3dcac5ee63?w=400&h=400&fit=crop' },
+  { id: 'snk_5', name: 'Organic Fruit Snacks', costPunches: 1, image: 'https://images.unsplash.com/photo-1582293041079-7814c2f12063?w=400&h=400&fit=crop' }
 ];
 
-let mockPayments = [
-  { id: 'pay_1', studentId: '1', amount: 45.00, type: 'Class Fee', status: 'Paid', date: '2026-04-10' },
-  { id: 'pay_2', studentId: '1', amount: 5.00, type: 'Snack Charge', status: 'Pending', date: '2026-04-15' }
+let mockTransactions = [
+  { id: 'tx_1', studentId: '1', familyId: 'f1', amount: 50.00, type: 'Charge', description: 'In Person Tutoring with Prof. David Brown', date: '2026-04-20', invoiceId: null },
+  { id: 'tx_2', studentId: '1', familyId: 'f1', amount: 30.00, type: 'Charge', description: 'Portfolio Evaluation', date: '2026-04-22', invoiceId: null },
+  { id: 'tx_3', studentId: '1', familyId: 'f1', amount: -50.00, type: 'Payment', description: 'EMA Disbursement', date: '2026-04-25', invoiceId: null },
+  { id: 'tx_4', studentId: '2', familyId: 'f2', amount: 385.00, type: 'Charge', description: 'Morning POD: Math & Science', date: '2026-04-01', invoiceId: 'INV-100' },
+  { id: 'tx_5', studentId: '2', familyId: 'f2', amount: 5.00, type: 'Charge', description: 'Snack - Apple Juice', date: '2026-04-15', invoiceId: null }
 ];
+
+let mockInvoices = [
+  { id: 'LC-4390', familyId: 'f2', date: '2026-04-01', dateRange: '03/01/2026 - 03/31/2026', amount: 385.00, status: 'Sent' }
+];
+
+let globalConfig = {
+  nextInvoiceNumber: 4391,
+  invoicePrefix: 'LC-'
+};
 
 let mockSessionHistory = [
   {
@@ -95,14 +138,144 @@ let mockSessionHistory = [
   }
 ];
 
+// --- Chat Data ---
+let mockMessages = {
+  '1': [
+    { id: 1, sender: "Maria Garcia", text: "Hello! I'm ready for the group session today.", time: "10:15 AM", type: "received" },
+    { id: 2, sender: "Me", text: "Great! See you at 4:00 PM.", time: "10:20 AM", type: "sent" }
+  ],
+  '0': [
+    { id: 1, sender: "Assistant", text: "Hello! I am your Academy Assistant. I can help you schedule classes, check availability with teachers, or manage your enrollment. How can I help you today?", time: "9:00 AM", type: "received" }
+  ]
+};
+
+let mockBlockedUsers = [];
+
 // Service Methods
 export const database = {
+  // --- Families ---
+  fetchFamilies: async () => {
+    try {
+      const response = await api.get('/families?limit=100');
+      // Mapear al formato que espera el frontend
+      const realFamilies = response.data.families.map(dbFam => {
+        return {
+          id: dbFam.id,
+          name: dbFam.name,
+          contacts: dbFam.members.map(m => ({
+            name: m.user?.fullName || 'Unknown',
+            role: m.role || 'Member',
+            isInvoiceRecipient: m.isInvoiceRecipient
+          })),
+          tags: dbFam.tags || []
+        };
+      });
+      return realFamilies.length > 0 ? realFamilies : mockFamilies;
+    } catch (error) {
+      console.error("Error fetching real families, falling back to mock:", error);
+      return mockFamilies;
+    }
+  },
+
   // --- Students ---
   fetchStudents: async () => {
-    // Simulate API delay
-    return new Promise((resolve) => {
-      setTimeout(() => resolve(mockStudents), 500);
-    });
+    try {
+      const response = await api.get('/students?limit=100');
+      
+      // Mapear el formato del backend (Prisma) al formato que espera el frontend actual
+      const realStudents = response.data.students.map(dbStudent => {
+        // Encontrar el padre principal
+        const mainParent = dbStudent.familyMembers?.[0]?.family?.members?.find(m => m.role === 'PARENT' || m.role === 'Father' || m.role === 'Mother')?.user;
+
+        return {
+          id: dbStudent.id,
+          name: dbStudent.fullName,
+          age: dbStudent.age || 0,
+          parentName: mainParent ? mainParent.fullName : 'No Parent Assigned',
+          parentPhone: mainParent ? mainParent.phone : 'N/A',
+          parentEmail: mainParent ? mainParent.email : 'N/A',
+          allergies: dbStudent.allergies || 'None',
+          snackAuthorized: dbStudent.snackAuthorized,
+          snackPunches: dbStudent.snackPunches,
+          snackHistory: [],
+          prizePoints: dbStudent.prizePoints,
+          prizeHistory: [],
+          familyId: dbStudent.familyMembers?.[0]?.familyId || null,
+          // Formatear estado (ej. "ACTIVE" -> "Active")
+          status: dbStudent.status.charAt(0).toUpperCase() + dbStudent.status.slice(1).toLowerCase(),
+          materials: []
+        };
+      });
+
+      return realStudents.length > 0 ? realStudents : mockStudents; // Fallback al mock si la BD está vacía (para no romper la UI)
+    } catch (error) {
+      console.error("Error fetching real students, falling back to mock data:", error);
+      return mockStudents;
+    }
+  },
+
+  // --- Teachers ---
+  fetchTeachers: async () => {
+    try {
+      const response = await api.get('/users?role=TEACHER');
+      const teachers = response.data.users.map(t => ({
+        id: t.id,
+        name: t.fullName,
+        email: t.email,
+        phone: t.phone || 'N/A',
+        status: t.status.charAt(0).toUpperCase() + t.status.slice(1).toLowerCase(),
+        baseSalary: parseFloat(t.baseSalary || 0),
+        perSessionRate: parseFloat(t.perSessionRate || 0),
+        classCount: t.familyMembers?.length || 0, // placeholder
+      }));
+      if (teachers.length > 0) return teachers;
+      // Fallback mock
+      return [
+        { id: 'teacher_1', name: 'Prof. David Brown', email: 'david@academy.com', phone: '(555) 111-2222', status: 'Active', baseSalary: 2000, perSessionRate: 35, classCount: 3 },
+        { id: 'teacher_2', name: 'Prof. Sarah Jenkins', email: 'sarah@academy.com', phone: '(555) 333-4444', status: 'Active', baseSalary: 2200, perSessionRate: 40, classCount: 2 },
+        { id: 'teacher_3', name: 'Prof. Michael Torres', email: 'michael@academy.com', phone: '(555) 555-6666', status: 'Active', baseSalary: 1800, perSessionRate: 30, classCount: 4 },
+      ];
+    } catch (error) {
+      console.error("Error fetching teachers:", error);
+      return [
+        { id: 'teacher_1', name: 'Prof. David Brown', email: 'david@academy.com', phone: '(555) 111-2222', status: 'Active', baseSalary: 2000, perSessionRate: 35, classCount: 3 },
+        { id: 'teacher_2', name: 'Prof. Sarah Jenkins', email: 'sarah@academy.com', phone: '(555) 333-4444', status: 'Active', baseSalary: 2200, perSessionRate: 40, classCount: 2 },
+        { id: 'teacher_3', name: 'Prof. Michael Torres', email: 'michael@academy.com', phone: '(555) 555-6666', status: 'Active', baseSalary: 1800, perSessionRate: 30, classCount: 4 },
+      ];
+    }
+  },
+
+  fetchTeacherPayroll: async (teacherId, month, year) => {
+    try {
+      const params = [];
+      if (month) params.push(`month=${month}`);
+      if (year) params.push(`year=${year}`);
+      const qs = params.length > 0 ? `?${params.join('&')}` : '';
+      const response = await api.get(`/users/${teacherId}/payroll${qs}`);
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching teacher payroll:", error);
+      // Fallback mock payroll
+      const now = new Date();
+      return {
+        teacher: { id: teacherId, fullName: 'Teacher', email: '', phone: '' },
+        payroll: {
+          month: month || (now.getMonth() + 1),
+          year: year || now.getFullYear(),
+          baseSalary: 2000,
+          perSessionRate: 35,
+          inPersonSessionCount: 12,
+          onlineSessionCount: 8,
+          totalSessionCount: 20,
+          tutoringEarnings: 280,
+          totalEarnings: 2280,
+        },
+        classes: [
+          { id: 'c1', name: 'Math Foundations', subject: 'math', type: 'IN_PERSON', completedSessions: 8, sessions: [] },
+          { id: 'c2', name: 'Online Algebra', subject: 'math', type: 'VIRTUAL', completedSessions: 5, sessions: [] },
+        ],
+      };
+    }
   },
 
   updateStudentHealth: async (studentId, updates) => {
@@ -113,6 +286,22 @@ export const database = {
   // --- Snacks & Billing ---
   getSnackCabinet: async () => {
     return Promise.resolve(mockSnackCabinet);
+  },
+
+  addSnack: async (snackData) => {
+    const newSnack = {
+      id: `snk_${Date.now()}`,
+      name: snackData.name,
+      costPunches: parseInt(snackData.cost),
+      image: snackData.image || 'https://images.unsplash.com/photo-1599598425947-330026296904?w=400&h=400&fit=crop' // default snack placeholder
+    };
+    mockSnackCabinet.push(newSnack);
+    return { success: true, snack: newSnack };
+  },
+
+  deleteSnack: async (snackId) => {
+    mockSnackCabinet = mockSnackCabinet.filter(s => s.id !== snackId);
+    return { success: true };
   },
 
   purchaseSnack: async (studentId, snackId) => {
@@ -143,21 +332,93 @@ export const database = {
     if (!student || !student.snackAuthorized) return false;
 
     const newCharge = {
-      id: `pay_${Date.now()}`,
+      id: `tx_${Date.now()}`,
       studentId: studentId,
+      familyId: student.familyId,
       amount: 5.00, // Fixed snack price
-      type: 'Snack Charge',
-      status: 'Pending',
-      date: new Date().toISOString().split('T')[0]
+      type: 'Charge',
+      description: 'Snack Purchase',
+      date: new Date().toISOString().split('T')[0],
+      invoiceId: null
     };
 
-    mockPayments.push(newCharge);
+    mockTransactions.push(newCharge);
     console.log(`[Database] Recorded snack charge for ${student.name}`);
     return true;
   },
 
   fetchPayments: async (studentId) => {
-    return mockPayments.filter(p => p.studentId === studentId);
+    return mockTransactions.filter(p => p.studentId === studentId);
+  },
+
+  fetchAllTransactions: async () => {
+    try {
+      const response = await api.get('/billing/transactions');
+      return response.data.transactions;
+    } catch (error) {
+      console.error("Error fetching transactions, using mock:", error);
+      return mockTransactions;
+    }
+  },
+
+  fetchAllInvoices: async () => {
+    try {
+      const response = await api.get('/billing/invoices');
+      return response.data.invoices;
+    } catch (error) {
+      console.error("Error fetching invoices, using mock:", error);
+      return mockInvoices;
+    }
+  },
+
+  addTransaction: async (tx) => {
+    try {
+      const response = await api.post('/billing/transactions', tx);
+      return response.data.transaction;
+    } catch (error) {
+      console.error("Error adding transaction, using mock:", error);
+      const newTx = { ...tx, id: `tx_${Date.now()}` };
+      mockTransactions.push(newTx);
+      return newTx;
+    }
+  },
+
+  generateInvoice: async (familyId, transactionIds) => {
+    try {
+      const response = await api.post('/billing/invoices', { familyId, transactionIds });
+      return response.data.invoice;
+    } catch (error) {
+      console.error("Error generating invoice, using mock:", error);
+      // Fallback mock
+      const sum = mockTransactions
+        .filter(t => transactionIds.includes(t.id))
+        .reduce((acc, t) => acc + (t.type === 'Charge' ? t.amount : -t.amount), 0);
+        
+      const newInvoiceId = `${globalConfig.invoicePrefix}${globalConfig.nextInvoiceNumber}`;
+      globalConfig.nextInvoiceNumber++;
+        
+      const newInv = {
+        id: newInvoiceId,
+        familyId,
+        date: new Date().toISOString().split('T')[0],
+        dateRange: 'Current Unbilled',
+        amount: sum,
+        status: 'Sent'
+      };
+      mockInvoices.unshift(newInv);
+      
+      mockTransactions = mockTransactions.map(t => 
+        transactionIds.includes(t.id) ? { ...t, invoiceId: newInv.id } : t
+      );
+      
+      return newInv;
+    }
+  },
+
+  generateInvoiceId: async () => {
+    const newInvoiceId = `${globalConfig.invoicePrefix}${globalConfig.nextInvoiceNumber}`;
+    globalConfig.nextInvoiceNumber++;
+    return newInvoiceId;
   },
 
   // --- Prizes System ---
@@ -209,55 +470,104 @@ export const database = {
   // --- Conversations ---
   fetchConversations: async (userId) => {
     return [
-      { id: '0', name: "Academy Assistant", lastMsg: "How can I help you?", time: "9:00 AM", unread: 0, roles: ["AI Agent", "Support"], isBot: true },
-      { id: '1', name: "Maria Garcia (Student)", parent: "Elena Garcia", lastMsg: "Tomorrow's lesson is at 4pm?", time: "10:30 AM", unread: 2, roles: ["Student", "Parent"] }
+      { id: '0', name: "Academy Assistant", lastMsg: "How can I help you?", time: "9:00 AM", unread: 0, roles: ["AI Agent", "Support"], isBot: true, isBlocked: mockBlockedUsers.includes('0') },
+      { id: '1', name: "Maria Garcia (Student)", parent: "Elena Garcia", lastMsg: "Tomorrow's lesson is at 4pm?", time: "10:30 AM", unread: 2, roles: ["Student", "Parent"], isBlocked: mockBlockedUsers.includes('1') }
     ];
+  },
+
+  blockContact: async (threadId) => {
+    if (!mockBlockedUsers.includes(threadId)) {
+      mockBlockedUsers.push(threadId);
+    }
+    return true;
+  },
+
+  unblockContact: async (threadId) => {
+    mockBlockedUsers = mockBlockedUsers.filter(id => id !== threadId);
+    return true;
+  },
+
+  fetchMessages: async (threadId) => {
+    return mockMessages[threadId] || [];
+  },
+
+  sendMessage: async (threadId, text, sender = "Me") => {
+    if (!mockMessages[threadId]) {
+      mockMessages[threadId] = [];
+    }
+
+    const newMessage = {
+      id: Date.now(),
+      sender: sender,
+      text: text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: sender === "Me" ? "sent" : "received"
+    };
+
+    mockMessages[threadId].push(newMessage);
+
+    // AI Simulation for Assistant thread
+    if (threadId === '0' && sender === "Me") {
+      setTimeout(() => {
+        let responseText = "I'm processing your request. Give me a moment...";
+        const lowerText = text.toLowerCase();
+        
+        if (lowerText.includes("math") || lowerText.includes("class") || lowerText.includes("mate")) {
+          responseText = "I see you're looking for a math class. I found Prof. David Brown is available tomorrow at 4:30 PM. Would you like me to book it for you?";
+        } else if (lowerText.includes("yes") || lowerText.includes("si")) {
+          responseText = "Perfect! The class has been scheduled. I've updated your calendar. Anything else?";
+        } else if (lowerText.includes("bill") || lowerText.includes("invoice") || lowerText.includes("pay")) {
+          responseText = "Your current balance is $125.00 due on April 25. You can view the details in the Billing section. Need help paying it?";
+        }
+
+        const aiMessage = {
+          id: Date.now() + 1,
+          sender: "Assistant",
+          text: responseText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: "received"
+        };
+        mockMessages['0'].push(aiMessage);
+      }, 1500); // Simulate network/AI delay
+    }
+
+    return newMessage;
   },
 
   // --- Student Specific Dashboard Data ---
   fetchStudentData: async (studentId) => {
-    return {
-      upcomingSessions: [
-        { id: 's1', subject: 'English Conversation', teacher: 'Prof. Sarah Jenkins', time: 'Today, 4:00 PM', status: 'upcoming', type: 'Virtual' },
-        { id: 's2', subject: 'Mathematics Advanced', teacher: 'Prof. David Brown', time: 'Tomorrow, 10:00 AM', status: 'upcoming', type: 'In-person' },
-        { id: 's3', subject: 'History of Arts', teacher: 'Prof. Elena Rodriguez', time: 'Friday, 2:30 PM', status: 'upcoming', type: 'Virtual' }
-      ],
-      billing: {
-        nextPayment: '$120.00',
-        dueDate: 'April 25, 2026',
-        pendingCharges: [
-          { item: 'Snack Log - April 18', amount: '$5.00' }
-        ]
-      },
-      notifications: [
-        { id: 1, text: "The Academy will be closed on May 1st.", date: "2 hours ago", type: "info" },
-        { id: 2, text: "New resources published for Math Foundations.", date: "5 hours ago", type: "update" },
-        { id: 3, text: "Your English teacher added links to common irregular verbs.", date: "1 day ago", type: "update" }
-      ],
-      recentSessions: [
-        { 
-          id: 'rs1', 
-          subject: 'Math Foundations', 
-          date: 'Yesterday', 
-          teacher: 'Prof. David Brown',
-          notes: 'Focused on quadratic equations. Remember to complete exercise 5 for next week.',
-          materials: [
-            { name: 'Quadratic_Formula_Sheet.pdf', type: 'application/pdf' },
-            { name: 'Formula_Reference.png', type: 'image/png' }
-          ]
+    try {
+      const response = await api.get('/dashboard');
+      const d = response.data;
+      
+      // The backend already returns data in the exact shape we need
+      return {
+        upcomingSessions: d.upcomingSessions || [],
+        billing: d.billing || { nextPayment: '$0.00', dueDate: 'N/A', pendingCharges: [] },
+        notifications: d.notifications || [],
+        recentSessions: d.recentSessions || [],
+        stats: d.stats || {}
+      };
+    } catch (error) {
+      console.error("Error fetching dashboard from API, using fallback:", error);
+      // Fallback mock data
+      return {
+        upcomingSessions: [
+          { id: 's1', subject: 'English Conversation', teacher: 'Prof. Sarah Jenkins', time: 'Today, 4:00 PM', status: 'upcoming', type: 'Virtual', meetingUrl: 'https://zoom.us/j/123456789' },
+          { id: 's2', subject: 'Mathematics Advanced', teacher: 'Prof. David Brown', time: 'Tomorrow, 10:00 AM', status: 'upcoming', type: 'In-person' },
+        ],
+        billing: {
+          nextPayment: '$120.00',
+          dueDate: 'April 25, 2026',
+          pendingCharges: [{ item: 'Snack Log - April 18', amount: '$5.00' }]
         },
-        { 
-          id: 'rs2', 
-          subject: 'English Intro', 
-          date: 'Apr 20', 
-          teacher: 'Prof. Sarah Jenkins',
-          notes: 'Discussion about future tense. See attached list of verbs.',
-          materials: [
-            { name: 'Irregular_Verbs.pdf', type: 'application/pdf' }
-          ]
-        }
-      ]
-    };
+        notifications: [
+          { id: 1, text: "The Academy will be closed on May 1st.", date: "2 hours ago", type: "info" },
+          { id: 2, text: "New resources published for Math Foundations.", date: "5 hours ago", type: "update" },
+        ],
+        recentSessions: []
+      };
+    }
   },
 
   // --- Administrative Billing Data ---
@@ -276,39 +586,163 @@ export const database = {
     };
   },
 
+  // --- Chat ---
+  fetchConversations: async () => {
+    return Promise.resolve([
+      { id: '0', name: 'Academy Assistant (AI)', isBot: true, isBlocked: false },
+      { id: '1', name: 'Maria Garcia', roles: ['Parent', 'Garcia Family'], isBot: false, isBlocked: mockBlockedUsers.includes('1') },
+      { id: '2', name: 'Michael Doe', roles: ['Parent', 'Doe Family'], isBot: false, isBlocked: mockBlockedUsers.includes('2') }
+    ]);
+  },
+  
+  fetchMessages: async (chatId) => {
+    return Promise.resolve(mockMessages[chatId] || []);
+  },
+  
+  sendMessage: async (chatId, text) => {
+    if (!mockMessages[chatId]) {
+      mockMessages[chatId] = [];
+    }
+    const newMsg = {
+      id: Date.now(),
+      sender: "Me",
+      text: text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: "sent"
+    };
+    mockMessages[chatId].push(newMsg);
+    
+    // Simulate AI bot response
+    if (chatId === '0') {
+      setTimeout(() => {
+        mockMessages[chatId].push({
+          id: Date.now() + 1,
+          sender: "Assistant",
+          text: "I understand you need help with that. Let me look up the information for you.",
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: "received"
+        });
+      }, 1500);
+    }
+    
+    return Promise.resolve(newMsg);
+  },
+  
+  blockContact: async (chatId) => {
+    if (!mockBlockedUsers.includes(chatId)) {
+      mockBlockedUsers.push(chatId);
+    }
+    return Promise.resolve(true);
+  },
+  
+  unblockContact: async (chatId) => {
+    mockBlockedUsers = mockBlockedUsers.filter(id => id !== chatId);
+    return Promise.resolve(true);
+  },
+
   // --- Class Sessions ---
   fetchSessionHistory: async (groupId) => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const history = mockSessionHistory.filter(h => h.groupId === groupId);
-        // Sort by date descending
-        resolve(history.sort((a, b) => new Date(b.date) - new Date(a.date)));
-      }, 400); // simulate delay
-    });
+    try {
+      // In the frontend it's called groupId, in the backend it's classId
+      const response = await api.get(`/sessions?classId=${groupId}`);
+      // The backend returns an array of sessions, but we need notes and materials inside them
+      // We also need to sort them by date descending as the mock does
+      
+      const realSessions = response.data.sessions.map(s => {
+        // Since listSessions doesn't include notes in the backend by default,
+        // we'd ideally fetch /sessions/:id for details, but for now we map what we have
+        return {
+          sessionId: s.id,
+          groupId: s.classId,
+          date: s.date,
+          // If notes are not returned in listSessions, they might be empty string
+          notes: s.notes ? s.notes[0]?.notes : '',
+          materials: s.materials || [],
+          visibility: s.notes ? s.notes[0]?.visibility : 'all'
+        };
+      });
+      
+      if (realSessions.length > 0) {
+        return realSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
+      }
+      
+      // Fallback to mock if empty
+      const history = mockSessionHistory.filter(h => h.groupId === String(groupId));
+      return history.sort((a, b) => new Date(b.date) - new Date(a.date));
+    } catch (error) {
+      console.error("Error fetching real sessions, falling back to mock:", error);
+      const history = mockSessionHistory.filter(h => h.groupId === String(groupId));
+      return history.sort((a, b) => new Date(b.date) - new Date(a.date));
+    }
   },
 
   saveClassNotes: async (sessionId, notes, files, visibility = 'all', recordingUrl = '') => {
-    const newEntry = {
-      sessionId: `session_${Date.now()}`,
-      groupId: sessionId, // In this mock, sessionId is used as groupId
-      date: new Date().toISOString(),
-      notes: notes,
-      materials: files || [],
-      visibility: visibility,
-      recordingUrl: recordingUrl
-    };
-    mockSessionHistory.unshift(newEntry);
-    
-    console.log(`[Database] Saved notes for session ${sessionId} [Visibility: ${visibility}]:`, notes);
-    if (files && files.length > 0) {
-      console.log(`[Database] Attached ${files.length} files.`);
+    try {
+      await api.post(`/sessions/${sessionId}/notes`, {
+        notes,
+        visibility,
+        recordingUrl
+      });
+      console.log(`[Database] Saved notes for session ${sessionId} [Visibility: ${visibility}] via API`);
+      return true;
+    } catch (error) {
+      console.error("Error saving real session notes, falling back to mock:", error);
+      const newEntry = {
+        sessionId: `session_${Date.now()}`,
+        groupId: sessionId,
+        date: new Date().toISOString(),
+        notes: notes,
+        materials: files || [],
+        visibility: visibility,
+        recordingUrl: recordingUrl
+      };
+      mockSessionHistory.unshift(newEntry);
+      return true;
     }
-    return true;
   },
 
   saveAttendance: async (sessionId, attendanceData) => {
-    console.log(`[Database] Saved attendance for session ${sessionId}:`, attendanceData);
-    // In a real app, this would update a 'sessions' collection or similar
-    return true;
+    try {
+      // Convert frontend attendance map to backend array
+      // Frontend might pass: { "studentId1": "PRESENT", "studentId2": "LATE" }
+      const records = Object.keys(attendanceData).map(studentId => ({
+        studentId,
+        status: attendanceData[studentId]
+      }));
+      
+      await api.put(`/sessions/${sessionId}/attendance`, {
+        attendanceRecords: records
+      });
+      
+      console.log(`[Database] Saved real attendance for session ${sessionId}`);
+      return true;
+    } catch (error) {
+      console.error("Error saving real attendance:", error);
+      return false;
+    }
+  },
+
+  fetchDailySessions: async () => {
+    try {
+      // Get today's date in YYYY-MM-DD
+      const today = new Date().toISOString().split('T')[0];
+      const response = await api.get(`/sessions?startDate=${today}&endDate=${today}`);
+      const sessions = response.data.sessions;
+      
+      if (sessions.length > 0) {
+        return sessions.map(s => ({
+          id: s.id,
+          title: s.class?.name || 'Class Session',
+          time: new Date(s.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' - ' + new Date(s.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+          studentsCount: 0, // Should come from enrollments ideally
+          status: s.status === 'COMPLETED' ? 'completed' : 'pending',
+          link: s.class?.meetingUrl || '#'
+        }));
+      }
+      return null;
+    } catch (error) {
+      console.error("Error fetching daily sessions:", error);
+      return null;
+    }
   }
 };

@@ -1,0 +1,165 @@
+.student-portal { padding: 24px; max-width: 1200px; margin: 0 auto; }
+
+.portal-loading { padding: 60px; text-align: center; color: var(--text-muted); font-size: 16px; }
+
+/* Welcome Banner */
+.welcome-banner {
+  display: flex; align-items: center; gap: 20px;
+  padding: 28px 32px; border-radius: 20px;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+  color: white; margin-bottom: 24px; box-shadow: 0 8px 24px rgba(99,102,241,0.3);
+}
+
+.welcome-avatar {
+  width: 64px; height: 64px; border-radius: 18px;
+  background: rgba(255,255,255,0.2); backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 700; flex-shrink: 0; border: 2px solid rgba(255,255,255,0.3);
+}
+
+.welcome-text h1 { margin: 0 0 4px; font-size: 22px; font-weight: 700; }
+.welcome-text p { margin: 0; font-size: 14px; opacity: 0.85; }
+
+/* Points Grid */
+.points-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px; margin-bottom: 28px;
+}
+
+.points-card {
+  background: white; border-radius: 16px; padding: 24px;
+  border: 1px solid var(--border-light); box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  text-align: center;
+}
+
+.points-card.prize-card { border-top: 4px solid #fbbf24; }
+.points-card.snack-card { border-top: 4px solid #6366f1; }
+
+.points-icon { font-size: 28px; margin-bottom: 8px; }
+
+.points-value {
+  font-size: 36px; font-weight: 800; color: var(--text-main);
+  line-height: 1; margin-bottom: 4px;
+}
+
+.points-label {
+  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 12px;
+}
+
+.points-bar {
+  height: 8px; background: #f1f5f9; border-radius: 10px; overflow: hidden;
+}
+
+.points-bar-fill {
+  height: 100%; border-radius: 10px;
+  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+  transition: width 1s ease;
+}
+
+.points-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; display: block; }
+
+/* Behavior Summary */
+.behavior-summary-card { padding: 20px !important; }
+
+.behavior-split {
+  display: flex; align-items: center; justify-content: center; gap: 24px;
+  height: 100%;
+}
+
+.b-divider { width: 1px; height: 50px; background: var(--border-light); }
+
+.b-stat {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.b-stat.positive svg { color: #10b981; }
+.b-stat.warning svg { color: #f59e0b; }
+
+.b-count { font-size: 28px; font-weight: 800; color: var(--text-main); line-height: 1; }
+.b-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+
+/* Main Grid */
+.portal-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.portal-section {
+  background: white; border-radius: 16px; padding: 24px;
+  border: 1px solid var(--border-light); box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+.portal-section h2 {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 16px; font-weight: 700; margin: 0 0 16px; color: var(--text-main);
+}
+.portal-section h2 svg { color: #6366f1; }
+
+.empty-text { color: var(--text-muted); font-size: 13px; text-align: center; padding: 20px 0; }
+
+/* Classes */
+.classes-list { display: flex; flex-direction: column; gap: 10px; }
+
+.class-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px; background: #f8fafc; border-radius: 10px;
+}
+
+.class-info h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.teacher-name { font-size: 12px; color: var(--text-muted); }
+
+.next-session {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: #6366f1; font-weight: 600;
+  background: #eef2ff; padding: 4px 10px; border-radius: 8px;
+}
+
+/* Prize History */
+.prize-list { display: flex; flex-direction: column; gap: 8px; }
+
+.prize-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; border-radius: 8px; background: #fafbfc;
+}
+
+.prize-info { display: flex; flex-direction: column; gap: 2px; }
+.prize-reason { font-size: 13px; font-weight: 500; }
+.prize-date { font-size: 11px; color: var(--text-muted); }
+
+.prize-points {
+  font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 12px;
+}
+.prize-points.earned { background: #d1fae5; color: #065f46; }
+.prize-points.redeemed { background: #fee2e2; color: #991b1b; }
+
+/* Materials */
+.materials-list { display: flex; flex-direction: column; gap: 8px; }
+
+.material-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 8px; background: #f8fafc;
+  text-decoration: none; color: var(--text-main); transition: background 0.2s;
+}
+.material-link:hover { background: #eef2ff; }
+
+.material-icon { font-size: 20px; }
+.material-name { display: block; font-size: 13px; font-weight: 500; }
+.material-subject { display: block; font-size: 11px; color: var(--text-muted); }
+
+/* Announcements */
+.announcements-list { display: flex; flex-direction: column; gap: 12px; }
+
+.announcement-item {
+  padding: 14px; border-radius: 10px; background: #fffbeb;
+  border-left: 3px solid #fbbf24;
+}
+.announcement-item h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.announcement-item p { margin: 0 0 6px; font-size: 13px; color: var(--text-main); line-height: 1.4; }
+.announcement-date { font-size: 11px; color: var(--text-muted); }
+
+@media (max-width: 768px) {
+  .student-portal { padding: 16px; }
+  .welcome-banner { flex-direction: column; text-align: center; padding: 24px 20px; }
+  .points-grid { grid-template-columns: 1fr; }
+  .portal-grid { grid-template-columns: 1fr; }
+}

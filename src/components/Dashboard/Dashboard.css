@@ -18,13 +18,15 @@
 }
 
 .welcome-section h1 {
-  font-size: 2rem;
+  font-size: 1.6rem;
   color: var(--text-main);
   margin-bottom: 4px;
+  font-weight: 700;
 }
 
 .welcome-section p {
   color: var(--text-muted);
+  font-size: 14px;
 }
 
 .header-actions {
@@ -185,8 +187,34 @@
 /* List Items */
 .list-section h2 {
   font-size: 1.1rem;
-  margin-bottom: 16px;
+  margin: 0;
   color: var(--text-main);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.section-subtitle {
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: -10px 0 10px 0;
+}
+
+.text-link {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
 }
 
 .compact-list {
@@ -223,8 +251,8 @@
 
 .lesson-badge {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 16px;
+  right: 16px;
   background: #eff6ff;
   color: #3b82f6;
   padding: 4px 8px;
@@ -233,6 +261,15 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  z-index: 1;
+}
+
+@media (max-width: 480px) {
+  .lesson-badge {
+    position: static;
+    display: inline-block;
+    margin-bottom: 12px;
+  }
 }
 
 .lesson-header {
@@ -321,12 +358,38 @@
   font-size: 12px;
   color: var(--text-muted);
   margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
 }
 
 .item-side {
   font-size: 12px;
   font-weight: 600;
   color: var(--primary);
+}
+
+.join-zoom-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.join-zoom-btn:hover {
+  background: #bae6fd;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
 /* Billing Widget (Parent View) */
@@ -353,6 +416,22 @@
   cursor: pointer;
 }
 
+.action-row {
+  width: 100%;
+  border: none;
+  background: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-row:hover {
+  background: white;
+  transform: translateX(4px);
+}
+
+.chat-icon { background: #e0f2fe; color: #0ea5e9; }
+.study-icon { background: #fef3c7; color: #d97706; }
+
 /* Responsive */
 @media (max-width: 1024px) {
   .dashboard-grid {
@@ -362,21 +441,31 @@
 
 @media (max-width: 768px) {
   .dashboard-container {
-    padding: 20px 16px;
+    padding: 12px;
+    overflow-x: hidden;
   }
   
   .dashboard-header {
     flex-direction: column;
+    align-items: stretch;
     text-align: center;
-    gap: 20px;
+    gap: 16px;
+  }
+
+  .header-actions {
+    justify-content: center;
   }
 
   .welcome-section h1 {
-    font-size: 1.5rem;
+    font-size: 22px;
+  }
+  
+  .welcome-section p {
+    font-size: 12px;
   }
   
   .stats-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
   
   .next-class-info {
@@ -389,4 +478,75 @@
     width: 100%;
     justify-content: center;
   }
+
+  .lessons-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Stack only standard list items, keep action rows horizontal */
+  .list-item:not(.action-row) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .list-item:not(.action-row) .item-side {
+    text-align: left !important;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--border-light);
+    padding-top: 12px;
+  }
+
+  .list-item:not(.action-row) .item-side > div {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left !important;
+  }
+
+  .action-row .item-text h4 {
+    font-size: 14px;
+  }
+
+  .action-row .item-text p {
+    font-size: 11px;
+    max-width: 140px;
+  }
+
+  .stats-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Live Session Indicator --- */
+.list-item.session-live {
+  border-color: var(--primary);
+  background: linear-gradient(135deg, #f0fdf4 0%, rgba(255,255,255,0.6) 100%);
+  box-shadow: 0 0 0 2px rgba(21, 128, 61, 0.12);
+}
+
+.live-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  color: #16a34a;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  animation: pulse-live 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.live-icon {
+  background: #dcfce7;
+  color: #16a34a;
 }

@@ -6,12 +6,13 @@ import { getMessaging } from "firebase/messaging";
 
 // Replace these with your actual Firebase config keys
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyB77z4hjPKhs040QiQomfjVragZMIXI3rg",
+  authDomain: "love-learning-f2aa2.firebaseapp.com",
+  projectId: "love-learning-f2aa2",
+  storageBucket: "love-learning-f2aa2.firebasestorage.app",
+  messagingSenderId: "881085942229",
+  appId: "1:881085942229:web:a40063af9807ff0797d55c",
+  measurementId: "G-22E1T8RW2R"
 };
 
 const app = initializeApp(firebaseConfig);

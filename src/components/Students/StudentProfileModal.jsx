@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Star, Gift, Check, TrendingDown } from 'lucide-react';
 import { database } from '../../lib/database';
+import SnackCabinetModal from './SnackCabinetModal';
 import './StudentProfileModal.css';
 
 const StudentProfileModal = ({ student, onClose, onUpdate }) => {
@@ -15,27 +16,6 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
   const [redeemItem, setRedeemItem] = useState('');
   const [redeemCost, setRedeemCost] = useState('');
   const [redeeming, setRedeeming] = useState(false);
-
-  useEffect(() => {
-    const loadCabinet = async () => {
-      const snacks = await database.getSnackCabinet();
-      setSnackCabinet(snacks);
-      setLoading(false);
-    };
-    loadCabinet();
-  }, []);
-
-  const handlePurchase = async (snack) => {
-    if(purchasing) return;
-    setPurchasing(true);
-    
-    const result = await database.purchaseSnack(student.id, snack.id);
-    if(result && result.success) {
-      onUpdate(); // Trigger parent refresh to get updated student data
-      setShowCabinet(false); // Close cabinet after purchase
-    }
-    setPurchasing(false);
-  };
 
   const isLowBalance = student.snackPunches < 7;
   const isNegative = student.snackPunches < 0;
@@ -82,7 +62,17 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
           <div className="profile-col">
             <div className="info-card">
               <h3>Health & Details</h3>
-              <p><strong>Allergies:</strong> {student.allergies}</p>
+              <p style={{ marginBottom: '8px' }}><strong>Age:</strong> {student.age || 'N/A'}</p>
+              <p style={{ marginBottom: '8px' }}><strong>Allergies:</strong> {student.allergies || 'None'}</p>
+              {student.medicalNotes && <p style={{ marginBottom: '8px' }}><strong>Medical Notes:</strong> {student.medicalNotes}</p>}
+              {student.accommodationNotes && <p style={{ marginBottom: '8px' }}><strong>Accommodations:</strong> {student.accommodationNotes}</p>}
+              
+              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
+                <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'N/A'}</p>
+                <p style={{ marginBottom: '4px' }}><strong>Phone:</strong> {student.parentPhone || 'N/A'}</p>
+                <p style={{ marginBottom: '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
+              </div>
             </div>
 
             <div className="info-card history-card">
@@ -200,7 +190,7 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
                     onChange={e => setRedeemItem(e.target.value)}
                     className="prize-input"
                   />
-                  <div style={{display: 'flex', gap: '10px', marginTop: '10px'}}>
+                  <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
                     <input 
                       type="number" 
                       placeholder="Points" 
@@ -280,37 +270,12 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
 
         {/* Snack Cabinet Pop-up Overlay */}
         {showCabinet && (
-          <div className="cabinet-overlay" onClick={() => setShowCabinet(false)}>
-            <div className="cabinet-popup" onClick={e => e.stopPropagation()}>
-              <header className="cabinet-header">
-                <h3 style={{display: 'flex', alignItems: 'center', gap: '8px', margin: 0}}>
-                  <ShoppingBag size={20} /> Snack Cabinet
-                </h3>
-                <button className="icon-btn" onClick={() => setShowCabinet(false)}><X size={20} /></button>
-              </header>
-              
-              <div className="cabinet-content">
-                {loading ? (
-                  <p>Loading cabinet...</p>
-                ) : (
-                  <div className="cabinet-grid">
-                    {snackCabinet.map(snack => (
-                      <div key={snack.id} className="snack-item" onClick={() => handlePurchase(snack)}>
-                        <img src={snack.image} alt={snack.name} className="snack-img" />
-                        <div className="snack-info">
-                          <span className="snack-name">{snack.name}</span>
-                          <span className="snack-cost">{snack.costPunches} Punches</span>
-                        </div>
-                        <button className="action-btn primary small outline" disabled={purchasing}>
-                          Select
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <SnackCabinetModal 
+            mode="purchase"
+            student={student}
+            onClose={() => setShowCabinet(false)}
+            onUpdate={onUpdate}
+          />
         )}
       </div>
     </div>
