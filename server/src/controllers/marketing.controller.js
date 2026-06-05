@@ -1,6 +1,7 @@
 import prisma from '../config/database.js';
 import path from 'path';
 import fs from 'fs';
+import { uploadFileToDrive, drive } from '../config/drive.js';
 
 // Ensure upload directory exists
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'marketing');
@@ -120,15 +121,33 @@ export const uploadPhotos = async (req, res, next) => {
     }
 
     const photos = await Promise.all(
-      req.files.map((file) =>
-        prisma.marketingPhoto.create({
+      req.files.map(async (file) => {
+        let driveFileId = null;
+        
+        // Attempt to upload to Google Drive if configured
+        if (drive) {
+          try {
+            // Optional: specify a folder ID if you have one configured
+            const folderId = process.env.DRIVE_MARKETING_FOLDER_ID || null;
+            const driveFile = await uploadFileToDrive(file.path, file.originalname, file.mimetype, folderId);
+            if (driveFile) {
+              driveFileId = driveFile.id;
+            }
+          } catch (driveErr) {
+            console.error(`Failed to upload ${file.originalname} to drive:`, driveErr);
+            // We continue even if drive upload fails, so the local file record is created
+          }
+        }
+
+        return prisma.marketingPhoto.create({
           data: {
             submissionId: id,
             fileUrl: `/uploads/marketing/${file.filename}`,
             fileName: file.originalname,
+            driveFileId: driveFileId,
           },
-        })
-      )
+        });
+      })
     );
 
     res.status(201).json({ photos });
