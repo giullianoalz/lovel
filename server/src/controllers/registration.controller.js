@@ -275,11 +275,14 @@ export const getTerms = async (req, res, next) => {
     const terms = await prisma.registrationTerm.findMany({
       orderBy: { startDate: 'desc' }
     });
-    // Check if seeded (if it has holds)
-    const termsWithSeedStatus = await Promise.all(terms.map(async (term) => {
-      const holdCount = await prisma.priorityHold.count({ where: { termId: term.id } });
-      return { ...term, seeded: holdCount > 0 };
-    }));
+    // Single groupBy instead of one COUNT per term
+    const holdCounts = await prisma.priorityHold.groupBy({
+      by: ['termId'],
+      where: { termId: { in: terms.map(t => t.id) } },
+      _count: { id: true },
+    });
+    const seededTermIds = new Set(holdCounts.map(h => h.termId));
+    const termsWithSeedStatus = terms.map(term => ({ ...term, seeded: seededTermIds.has(term.id) }));
     res.json({ terms: termsWithSeedStatus });
   } catch (error) {
     next(error);

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './ParentPortal.css';
 
 const RELATIONSHIPS = ['Parent', 'Guardian', 'Grandparent', 'Aunt/Uncle', 'Sibling', 'Family Friend', 'Other'];
@@ -137,27 +138,30 @@ const PickupModal = ({ children, onClose, onCreated }) => {
 const ParentPortal = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [activeChild, setActiveChild] = useState(0);
   const [pickupAuths, setPickupAuths] = useState([]);
   const [showPickupModal, setShowPickupModal] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [portalRes, pickupRes] = await Promise.all([
-          api.get('/portal/parent'),
-          api.get('/portal/parent/pickup'),
-        ]);
-        setData(portalRes.data);
-        setPickupAuths(pickupRes.data);
-      } catch (error) {
-        console.error('Error loading parent portal:', error);
-      }
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [portalRes, pickupRes] = await Promise.all([
+        api.get('/portal/parent'),
+        api.get('/portal/parent/pickup'),
+      ]);
+      setData(portalRes.data);
+      setPickupAuths(pickupRes.data);
+    } catch (err) {
+      setError(err.userMessage || 'No se pudo cargar el portal familiar. Inténtalo de nuevo.');
+    } finally {
       setLoading(false);
-    };
-    load();
-  }, []);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const handlePickupCreated = (auth) => {
     setPickupAuths(prev => [auth, ...prev]);
@@ -173,7 +177,8 @@ const ParentPortal = () => {
   };
 
   if (loading) return <div className="portal-loading">Loading your family portal...</div>;
-  if (!data) return <div className="portal-loading">Unable to load portal data.</div>;
+  if (error) return <div className="portal-loading"><ErrorBanner message={error} onRetry={load} /></div>;
+  if (!data) return null;
 
   const { children, announcements } = data;
   const child = children[activeChild] || null;

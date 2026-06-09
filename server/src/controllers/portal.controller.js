@@ -258,7 +258,7 @@ export const getParentPortal = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
-    // Find all families this parent belongs to
+    // Single query: families + all student members
     const familyMembers = await prisma.familyMember.findMany({
       where: { userId },
       include: {
@@ -287,87 +287,121 @@ export const getParentPortal = async (req, res, next) => {
       },
     });
 
-    // Get all student children
-    const children = [];
+    // Collect all student IDs up-front — no queries inside loops
+    const studentMeta = []; // { user, familyName }
     for (const fm of familyMembers) {
       for (const member of fm.family.members) {
         if (member.user.role === 'STUDENT') {
-          const studentId = member.user.id;
-
-          // Get their enrollments
-          const enrollments = await prisma.classEnrollment.findMany({
-            where: { studentId, status: 'active' },
-            include: {
-              class: {
-                include: {
-                  teacher: { select: { fullName: true } },
-                  sessions: {
-                    where: { date: { gte: new Date() } },
-                    orderBy: { date: 'asc' },
-                    take: 3,
-                  },
-                },
-              },
-            },
-          });
-
-          // Get recent behavior summary
-          const [warningCount, positiveCount] = await Promise.all([
-            prisma.behaviorLog.count({ where: { studentId, type: { in: ['WARNING', 'SLIP'] } } }),
-            prisma.behaviorLog.count({ where: { studentId, type: 'POSITIVE' } }),
-          ]);
-
-          // Get recent prize history
-          const prizeHistory = await prisma.prizeHistory.findMany({
-            where: { studentId },
-            orderBy: { createdAt: 'desc' },
-            take: 10,
-          });
-
-          // Get materials
-          const materials = await prisma.material.findMany({
-            where: { studentId },
-            orderBy: { uploadedAt: 'desc' },
-            take: 10,
-          });
-
-          children.push({
-            ...member.user,
-            familyName: fm.family.name,
-            enrollments: enrollments.map(e => ({
-              classId: e.class.id,
-              className: e.class.name,
-              teacherName: e.class.teacher?.fullName || 'TBD',
-              upcomingSessions: e.class.sessions,
-            })),
-            behaviorSummary: { warnings: warningCount, positives: positiveCount },
-            prizeHistory,
-            materials,
-          });
+          studentMeta.push({ user: member.user, familyName: fm.family.name });
         }
       }
     }
 
-    // Get parent-targeted announcements
-    const announcements = await prisma.announcement.findMany({
-      where: {
-        targetAudience: { in: ['all', 'parents'] },
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gte: new Date() } },
-        ],
-      },
-      orderBy: { publishedAt: 'desc' },
-      take: 10,
-      include: {
-        author: { select: { fullName: true } },
-      },
+    const studentIds = studentMeta.map(s => s.user.id);
+
+    if (studentIds.length === 0) {
+      // Skip all batch queries when there are no children
+      const announcements = await prisma.announcement.findMany({
+        where: {
+          targetAudience: { in: ['all', 'parents'] },
+          OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+        },
+        orderBy: { publishedAt: 'desc' },
+        take: 10,
+        include: { author: { select: { fullName: true } } },
+      });
+      return res.json({ children: [], announcements });
+    }
+
+    // Batch all child-data queries in a single Promise.all — O(1) DB round-trips
+    const [enrollments, behaviorCounts, prizeHistories, materials, announcements] = await Promise.all([
+      prisma.classEnrollment.findMany({
+        where: { studentId: { in: studentIds }, status: 'active' },
+        include: {
+          class: {
+            include: {
+              teacher: { select: { fullName: true } },
+              sessions: {
+                where: { date: { gte: new Date() } },
+                orderBy: { date: 'asc' },
+                take: 3,
+              },
+            },
+          },
+        },
+      }),
+      prisma.behaviorLog.groupBy({
+        by: ['studentId', 'type'],
+        where: {
+          studentId: { in: studentIds },
+          type: { in: ['WARNING', 'SLIP', 'POSITIVE'] },
+        },
+        _count: { id: true },
+      }),
+      prisma.prizeHistory.findMany({
+        where: { studentId: { in: studentIds } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.material.findMany({
+        where: { studentId: { in: studentIds } },
+        orderBy: { uploadedAt: 'desc' },
+      }),
+      prisma.announcement.findMany({
+        where: {
+          targetAudience: { in: ['all', 'parents'] },
+          OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+        },
+        orderBy: { publishedAt: 'desc' },
+        take: 10,
+        include: { author: { select: { fullName: true } } },
+      }),
+    ]);
+
+    // Index results by studentId for O(1) lookups during assembly
+    const enrollmentsByStudent = {};
+    for (const e of enrollments) {
+      if (!enrollmentsByStudent[e.studentId]) enrollmentsByStudent[e.studentId] = [];
+      enrollmentsByStudent[e.studentId].push(e);
+    }
+
+    const behaviorByStudent = {};
+    for (const row of behaviorCounts) {
+      if (!behaviorByStudent[row.studentId]) behaviorByStudent[row.studentId] = { warnings: 0, positives: 0 };
+      if (['WARNING', 'SLIP'].includes(row.type)) behaviorByStudent[row.studentId].warnings += row._count.id;
+      if (row.type === 'POSITIVE') behaviorByStudent[row.studentId].positives += row._count.id;
+    }
+
+    const prizeByStudent = {};
+    for (const p of prizeHistories) {
+      if (!prizeByStudent[p.studentId]) prizeByStudent[p.studentId] = [];
+      if (prizeByStudent[p.studentId].length < 10) prizeByStudent[p.studentId].push(p);
+    }
+
+    const materialsByStudent = {};
+    for (const m of materials) {
+      if (!materialsByStudent[m.studentId]) materialsByStudent[m.studentId] = [];
+      if (materialsByStudent[m.studentId].length < 10) materialsByStudent[m.studentId].push(m);
+    }
+
+    // Assemble final response — pure JS, zero additional DB calls
+    const children = studentMeta.map(({ user, familyName }) => {
+      const studentEnrollments = enrollmentsByStudent[user.id] || [];
+      return {
+        ...user,
+        familyName,
+        enrollments: studentEnrollments.map(e => ({
+          classId: e.class.id,
+          className: e.class.name,
+          teacherName: e.class.teacher?.fullName || 'TBD',
+          upcomingSessions: e.class.sessions,
+        })),
+        behaviorSummary: behaviorByStudent[user.id] || { warnings: 0, positives: 0 },
+        prizeHistory: prizeByStudent[user.id] || [],
+        materials: materialsByStudent[user.id] || [],
+      };
     });
 
-    res.json({
-      children,
-      announcements,
-    });
+    res.json({ children, announcements });
   } catch (error) {
     next(error);
   }

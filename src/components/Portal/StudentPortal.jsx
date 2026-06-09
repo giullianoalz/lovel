@@ -1,27 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { Star, Gift, BookOpen, Calendar, Award, AlertTriangle, ThumbsUp, Clock, TrendingUp } from 'lucide-react';
 import api from '../../lib/api';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './StudentPortal.css';
 
 const StudentPortal = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const response = await api.get('/portal/student');
-        setData(response.data);
-      } catch (error) {
-        console.error('Error loading student portal:', error);
-      }
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await api.get('/portal/student');
+      setData(response.data);
+    } catch (err) {
+      setError(err.userMessage || 'No se pudo cargar el portal. Inténtalo de nuevo.');
+    } finally {
       setLoading(false);
-    };
-    load();
-  }, []);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
 
   if (loading) return <div className="portal-loading">Loading your portal...</div>;
-  if (!data) return <div className="portal-loading">Unable to load portal data.</div>;
+  if (error) return <div className="portal-loading"><ErrorBanner message={error} onRetry={load} /></div>;
+  if (!data) return null;
 
   const { student, enrollments, prizeHistory, behaviorSummary, materials, announcements } = data;
 

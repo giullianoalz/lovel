@@ -4,15 +4,14 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getMessaging } from "firebase/messaging";
 
-// Replace these with your actual Firebase config keys
 const firebaseConfig = {
-  apiKey: "AIzaSyB77z4hjPKhs040QiQomfjVragZMIXI3rg",
-  authDomain: "love-learning-f2aa2.firebaseapp.com",
-  projectId: "love-learning-f2aa2",
-  storageBucket: "love-learning-f2aa2.firebasestorage.app",
-  messagingSenderId: "881085942229",
-  appId: "1:881085942229:web:a40063af9807ff0797d55c",
-  measurementId: "G-22E1T8RW2R"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 };
 
 const app = initializeApp(firebaseConfig);

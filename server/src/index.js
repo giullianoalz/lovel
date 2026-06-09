@@ -4,6 +4,7 @@ import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import compression from 'compression';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 
@@ -51,6 +52,9 @@ app.set('io', io);
 // ===========================================
 // Global Middleware
 // ===========================================
+
+// Gzip compression — reduces response sizes significantly for JSON payloads
+app.use(compression());
 
 // Security headers
 app.use(helmet());

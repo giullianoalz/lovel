@@ -5,6 +5,7 @@ import StudentProfileModal from './StudentProfileModal';
 import TeacherProfileModal from './TeacherProfileModal';
 import SnackCabinetModal from './SnackCabinetModal';
 import AddStudentModal from './AddStudentModal';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './StudentsList.css';
 
 const StudentsList = () => {
@@ -12,6 +13,7 @@ const StudentsList = () => {
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
@@ -21,6 +23,7 @@ const StudentsList = () => {
   const [families, setFamilies] = useState([]);
 
   const loadData = async () => {
+    setLoadError(null);
     try {
       const data = await database.fetchStudents();
       setStudents(data);
@@ -29,7 +32,7 @@ const StudentsList = () => {
         if (updatedStudent) setSelectedStudent(updatedStudent);
       }
     } catch (error) {
-      console.error("Error loading students:", error);
+      setLoadError(error.userMessage || 'No se pudo cargar la lista de estudiantes.');
     } finally {
       setLoading(false);
     }
@@ -155,6 +158,7 @@ const StudentsList = () => {
       {/* Students Tab */}
       {activeTab === 'students' && (
         <>
+          {loadError && <ErrorBanner message={loadError} onRetry={loadData} />}
           {loading ? (
             <div className="loading-state">Loading academy records...</div>
           ) : (

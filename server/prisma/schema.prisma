@@ -484,6 +484,9 @@ model PriorityHold {
   term      RegistrationTerm @relation(fields: [termId], references: [id], onDelete: Cascade)
 
   @@unique([termId, studentId, classId])
+  @@index([termId])
+  @@index([classId])
+  @@index([studentId])
   @@map("priority_holds")
 }
 
@@ -516,6 +519,7 @@ model WaitlistEntry {
   student   User                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([classId, studentId])
+  @@index([studentId])
   @@map("waitlist_entries")
 }
 
