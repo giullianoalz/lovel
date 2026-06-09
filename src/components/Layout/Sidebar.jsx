@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   Camera,
   Activity,
-  UserCircle
+  UserCircle,
+  Compass
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -124,6 +125,12 @@ const Sidebar = () => {
               <NavLink to="/alerts" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Bell size={20} />
                 <span>Front Desk Alerts</span>
+              </NavLink>
+            )}
+            {(role === 'TEACHER' || role === 'ADMIN') && (
+              <NavLink to="/portal/teacher" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                <Compass size={20} />
+                <span>Teacher Portal</span>
               </NavLink>
             )}
             {(role === 'ADMIN' || role === 'TEACHER') && (

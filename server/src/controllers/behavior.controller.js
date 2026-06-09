@@ -3,7 +3,7 @@ import prisma from '../config/database.js';
 // POST /api/behavior — Log a behavior entry
 export const createBehaviorLog = async (req, res, next) => {
   try {
-    const { studentId, sessionId, type, category, description, severity } = req.body;
+    const { studentId, additionalStudentIds = [], sessionId, place, ruleBroken, type, category, description, severity } = req.body;
     const teacherId = req.user.id;
 
     if (!studentId || !type || !category || !description) {
@@ -13,38 +13,57 @@ export const createBehaviorLog = async (req, res, next) => {
       });
     }
 
-    const log = await prisma.behaviorLog.create({
-      data: {
-        studentId,
-        teacherId,
-        sessionId: sessionId || null,
-        type,
-        category,
-        description,
-        severity: severity || 'MINOR',
-      },
-      include: {
-        student: { select: { id: true, fullName: true } },
-        teacher: { select: { id: true, fullName: true } },
-      },
+    const allStudentIds = [studentId, ...additionalStudentIds];
+    
+    // Create logs for all involved students
+    const logs = await prisma.$transaction(
+      allStudentIds.map(sId => 
+        prisma.behaviorLog.create({
+          data: {
+            studentId: sId,
+            teacherId,
+            sessionId: sessionId || null,
+            place,
+            ruleBroken,
+            type,
+            category,
+            description,
+            severity: severity || 'MINOR',
+            status: 'RECORDED'
+          },
+          include: {
+            student: { select: { id: true, fullName: true } },
+            teacher: { select: { id: true, fullName: true } },
+          },
+        })
+      )
+    );
+
+    // Send push notification to management
+    import('../utils/pushNotifications.js').then(({ broadcastToManagement }) => {
+      broadcastToManagement(
+        'New Behavior Report',
+        `${logs[0].teacher.fullName} reported a behavior incident involving ${logs.length} student(s).`,
+        { type: 'BEHAVIOR' }
+      );
     });
 
     // Emit real-time notification to admins
     const io = req.app.get('io');
     if (io) {
       io.to('admin_room').emit('behavior_logged', {
-        id: log.id,
-        studentName: log.student.fullName,
-        teacherName: log.teacher.fullName,
-        type: log.type,
-        category: log.category,
-        severity: log.severity,
-        description: log.description,
-        createdAt: log.createdAt,
+        id: logs[0].id,
+        studentName: logs.map(l => l.student.fullName).join(', '),
+        teacherName: logs[0].teacher.fullName,
+        type: logs[0].type,
+        category: logs[0].category,
+        severity: logs[0].severity,
+        description: logs[0].description,
+        createdAt: logs[0].createdAt,
       });
     }
 
-    res.status(201).json({ log });
+    res.status(201).json({ logs });
   } catch (error) {
     next(error);
   }
@@ -117,6 +136,53 @@ export const getStudentBehavior = async (req, res, next) => {
     };
 
     res.json({ logs, summary });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/behavior/:id/status — Manager updates status (e.g. DOWNGRADED, SENT_TO_PARENT)
+export const updateBehaviorStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status, managerNotes } = req.body;
+
+    const data = {
+      status,
+      managerNotes
+    };
+
+    if (status === 'SENT_TO_PARENT') {
+      data.parentNotifiedAt = new Date();
+    }
+
+    const log = await prisma.behaviorLog.update({
+      where: { id },
+      data,
+      include: {
+        student: true
+      }
+    });
+
+    if (status === 'SENT_TO_PARENT') {
+      // Find parent and send push notification
+      const familyMembers = await prisma.familyMember.findMany({
+        where: { userId: log.studentId },
+        select: { family: { select: { members: { where: { role: 'PARENT' }, select: { userId: true } } } } }
+      });
+      const parentIds = familyMembers.flatMap(f => f.family.members.map(m => m.userId));
+      
+      import('../utils/pushNotifications.js').then(({ sendPushNotification }) => {
+        sendPushNotification(
+          parentIds,
+          'Behavior Incident Report',
+          `An incident involving ${log.student.fullName} has been recorded.`,
+          { logId: log.id }
+        );
+      });
+    }
+
+    res.json({ log });
   } catch (error) {
     next(error);
   }

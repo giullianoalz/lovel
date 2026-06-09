@@ -27,6 +27,11 @@ import classfitRoutes from './routes/classfit.routes.js';
 import alertRoutes from './routes/alert.routes.js';
 import marketingRoutes from './routes/marketing.routes.js';
 import portalRoutes from './routes/portal.routes.js';
+import assignmentsRoutes from './routes/assignments.routes.js';
+import announcementsRoutes from './routes/announcements.routes.js';
+import medicalRoutes from './routes/medical.routes.js';
+import lessonPlanRoutes from './routes/lessonPlan.routes.js';
+import calendarRoutes from './routes/calendar.routes.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -115,10 +120,15 @@ app.use('/api/billing', billingRoutes);
 // app.use('/api/prizes', prizesRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/behavior', behaviorRoutes);
+app.use('/api/medical', medicalRoutes);
 app.use('/api/class-fit', classfitRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/marketing', marketingRoutes);
+app.use('/api/lesson-plans', lessonPlanRoutes);
+app.use('/api/calendar', calendarRoutes);
 app.use('/api/portal', portalRoutes);
+app.use('/api/assignments', assignmentsRoutes);
+app.use('/api/announcements', announcementsRoutes);
 
 // app.use('/api/notifications', notificationsRoutes);
 // app.use('/api/announcements', announcementsRoutes);

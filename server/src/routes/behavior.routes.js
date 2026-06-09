@@ -5,6 +5,7 @@ import {
   createBehaviorLog,
   listBehaviorLogs,
   getStudentBehavior,
+  updateBehaviorStatus
 } from '../controllers/behavior.controller.js';
 
 const router = Router();
@@ -17,5 +18,8 @@ router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listBehaviorLogs)
 
 // GET /api/behavior/student/:studentId — Behavior history for a student
 router.get('/student/:studentId', authenticate, requireRole('ADMIN', 'TEACHER'), getStudentBehavior);
+
+// PUT /api/behavior/:id/status — Manager updates behavior log
+router.put('/:id/status', authenticate, requireRole('ADMIN'), updateBehaviorStatus);
 
 export default router;

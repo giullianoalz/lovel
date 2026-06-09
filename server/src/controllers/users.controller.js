@@ -71,7 +71,7 @@ export const getUser = async (req, res, next) => {
  */
 export const updateUser = async (req, res, next) => {
   try {
-    const { fullName, phone, avatarUrl, age, allergies } = req.body;
+    const { fullName, phone, avatarUrl, age, allergies, quietHoursStart, quietHoursEnd, autoResponderMessage } = req.body;
 
     const user = await prisma.user.update({
       where: { id: req.params.id },
@@ -81,7 +81,11 @@ export const updateUser = async (req, res, next) => {
         ...(avatarUrl !== undefined && { avatarUrl }),
         ...(age !== undefined && { age: parseInt(age) }),
         ...(allergies !== undefined && { allergies }),
+        ...(quietHoursStart !== undefined && { quietHoursStart }),
+        ...(quietHoursEnd !== undefined && { quietHoursEnd }),
+        ...(autoResponderMessage !== undefined && { autoResponderMessage }),
       },
+
       include: {
         familyMembers: { include: { family: true } },
       },
@@ -168,6 +172,15 @@ export const getTeacherPayroll = async (req, res, next) => {
             },
           },
         },
+        timeOffRequests: {
+          where: {
+            date: {
+              gte: new Date(targetYear, 0, 1),
+              lte: new Date(targetYear, 11, 31)
+            },
+            status: 'APPROVED'
+          }
+        }
       },
     });
 
@@ -185,6 +198,10 @@ export const getTeacherPayroll = async (req, res, next) => {
     const perSessionRate = parseFloat(teacher.perSessionRate || 0);
     const tutoringEarnings = onlineSessions.length * perSessionRate;
     const totalEarnings = baseSalary + tutoringEarnings;
+
+    // Calculate time off
+    const usedSickDays = teacher.timeOffRequests ? teacher.timeOffRequests.filter(r => r.type === 'SICK').length : 0;
+    const usedPTODays = teacher.timeOffRequests ? teacher.timeOffRequests.filter(r => r.type === 'PTO').length : 0;
 
     res.json({
       teacher: {
@@ -205,6 +222,10 @@ export const getTeacherPayroll = async (req, res, next) => {
         totalSessionCount: allSessions.length,
         tutoringEarnings,
         totalEarnings,
+        usedSickDays,
+        totalSickDays: 8,
+        usedPTODays,
+        totalPTODays: 12,
       },
       classes: teacher.taughtClasses.map(c => ({
         id: c.id,

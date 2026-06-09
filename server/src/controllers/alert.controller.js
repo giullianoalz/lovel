@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { broadcastToStaff, broadcastToManagement } from '../utils/pushNotifications.js';
 
 // POST /api/alerts — Teacher triggers a class alert (Student out, Class support, Medic)
 export const createAlert = async (req, res, next) => {
@@ -39,6 +40,21 @@ export const createAlert = async (req, res, next) => {
         createdAt: alert.createdAt,
         status: alert.status,
       });
+    }
+
+    // Trigger Push Notifications based on Alert Type
+    if (alertType.toUpperCase() === 'LOCK DOWN') {
+      await broadcastToStaff(
+        '🐰 Lock Down', // Non-threatening bunny rabbit as requested
+        'Please secure your rooms immediately.',
+        { alertId: alert.id }
+      );
+    } else if (['MEDIC', 'STUDENT OUT', 'CLASS SUPPORT'].includes(alertType.toUpperCase())) {
+      await broadcastToManagement(
+        `Alert: ${alertType}`,
+        `${alert.reportedBy.fullName} needs assistance. Reason: ${alert.reason || 'N/A'}`,
+        { alertId: alert.id }
+      );
     }
 
     res.status(201).json({ alert });

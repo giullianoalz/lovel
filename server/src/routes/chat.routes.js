@@ -5,7 +5,9 @@ import {
   createThread,
   getMessages,
   sendMessage,
-  blockContact
+  blockContact,
+  createGroupThread,
+  resolveThread
 } from '../controllers/chat.controller.js';
 
 const router = Router();
@@ -24,5 +26,11 @@ router.post('/:threadId/messages', authenticate, sendMessage);
 
 // POST /api/chat/:threadId/block — Toggle block status for a contact
 router.post('/:threadId/block', authenticate, blockContact);
+
+// POST /api/chat/group — Create a group thread
+router.post('/group', authenticate, createGroupThread);
+
+// PUT /api/chat/:threadId/resolve — Resolve a thread
+router.put('/:threadId/resolve', authenticate, resolveThread);
 
 export default router;

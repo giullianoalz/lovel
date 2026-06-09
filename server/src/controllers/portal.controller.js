@@ -1,4 +1,102 @@
 import prisma from '../config/database.js';
+import crypto from 'crypto';
+
+// GET /api/portal/teacher — Teacher dashboard (Today's classes, roster, etc)
+export const getTeacherPortal = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get today's start and end of day
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    // Get today's sessions for this teacher
+    const todaySessions = await prisma.session.findMany({
+      where: {
+        date: {
+          gte: startOfDay,
+          lte: endOfDay
+        },
+        class: {
+          teacherId: userId
+        }
+      },
+      include: {
+        class: {
+          include: {
+            enrollments: {
+              where: { status: 'active' },
+              include: {
+                student: {
+                  select: {
+                    id: true,
+                    fullName: true,
+                    age: true,
+                    allergies: true,
+                    medicalNotes: true,
+                    accommodationNotes: true,
+                    prizePoints: true, // Used for seashells
+                  }
+                }
+              }
+            }
+          }
+        },
+        attendance: true,
+        materials: true
+      },
+      orderBy: { startTime: 'asc' }
+    });
+
+    // Get teacher's unread announcements
+    const announcements = await prisma.announcement.findMany({
+      where: {
+        OR: [{ targetAudience: 'all' }, { targetAudience: 'teacher' }],
+        AND: [
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }
+        ]
+      },
+      include: {
+        reads: { where: { userId } }
+      },
+      orderBy: { publishedAt: 'desc' }
+    });
+    
+    const unreadAnnouncements = announcements.filter(a => a.reads.length === 0);
+
+    // Format schedule
+    const schedule = todaySessions.map(session => ({
+      sessionId: session.id,
+      classId: session.class.id,
+      className: session.class.name,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      roster: session.class.enrollments.map(e => {
+        const student = e.student;
+        return {
+          id: student.id,
+          name: student.fullName,
+          age: student.age,
+          allergies: student.allergies ? true : false,
+          accommodation: student.accommodationNotes ? true : false,
+          noPhoto: false, // Schema doesn't currently store this, defaulting to false
+          upcomingBirthday: false, // Requires DOB to be tracked in schema, using placeholder
+          seashells: student.prizePoints,
+          attendance: session.attendance.find(a => a.studentId === student.id)?.status || 'PENDING'
+        };
+      })
+    }));
+
+    res.json({
+      schedule,
+      announcements: unreadAnnouncements
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 // GET /api/portal/student — Student sees their own dashboard data
 export const getStudentPortal = async (req, res, next) => {
@@ -93,6 +191,63 @@ export const getStudentPortal = async (req, res, next) => {
       materials,
       announcements,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/portal/parent/pickup — Create a temporary pickup authorization
+export const createPickupAuth = async (req, res, next) => {
+  try {
+    const parentId = req.user.id;
+    const { pickupPerson, relationship, validDate, studentName } = req.body;
+
+    if (!pickupPerson || !validDate) {
+      return res.status(400).json({ error: 'Bad Request', message: 'pickupPerson and validDate are required.' });
+    }
+
+    // Generate a unique hash token
+    const rawData = `${parentId}-${pickupPerson}-${validDate}-${Date.now()}`;
+    const qrCodeHash = crypto.createHash('sha256').update(rawData).digest('hex');
+
+    const auth = await prisma.tempPickupAuth.create({
+      data: {
+        parentId,
+        pickupPerson,
+        validDate: new Date(validDate),
+        qrCodeHash,
+      },
+    });
+
+    res.status(201).json({ ...auth, relationship, studentName });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/portal/parent/pickup — List parent's pickup authorizations
+export const getPickupAuths = async (req, res, next) => {
+  try {
+    const parentId = req.user.id;
+    const auths = await prisma.tempPickupAuth.findMany({
+      where: { parentId },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(auths);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// DELETE /api/portal/parent/pickup/:id — Revoke a pickup auth
+export const deletePickupAuth = async (req, res, next) => {
+  try {
+    const parentId = req.user.id;
+    const { id } = req.params;
+    const auth = await prisma.tempPickupAuth.findFirst({ where: { id, parentId } });
+    if (!auth) return res.status(404).json({ error: 'Not Found' });
+    await prisma.tempPickupAuth.delete({ where: { id } });
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

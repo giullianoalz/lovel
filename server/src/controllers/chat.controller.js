@@ -5,9 +5,14 @@ export const getThreads = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
+    const { status = 'ACTIVE' } = req.query;
+
     // Find all threads the user is part of
     const participants = await prisma.chatParticipant.findMany({
-      where: { userId },
+      where: { 
+        userId,
+        thread: { status: status.toUpperCase() }
+      },
       include: {
         thread: {
           include: {
@@ -43,6 +48,7 @@ export const getThreads = async (req, res, next) => {
         id: thread.id,
         name: thread.name || otherNames || 'System Assistant',
         isBot: thread.isBot,
+        status: thread.status,
         isBlocked: isBlocked,
         roles: roles,
         lastMsg: lastMsg ? lastMsg.text : (thread.isBot ? 'Hello! I am your Academy Assistant.' : 'No messages yet'),
@@ -90,6 +96,57 @@ export const createThread = async (req, res, next) => {
           include: { user: true }
         }
       }
+    });
+
+    res.status(201).json({ thread });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/chat/group
+export const createGroupThread = async (req, res, next) => {
+  try {
+    const { groupType, classId } = req.body; // CLASS, MANAGEMENT, OCEAN_NAVIGATORS
+    const userId = req.user.id;
+    let participantIds = [];
+    let name = '';
+
+    if (groupType === 'CLASS' && classId) {
+      const enrollments = await prisma.classEnrollment.findMany({
+        where: { classId },
+        select: { studentId: true, class: true }
+      });
+      const students = enrollments.map(e => e.studentId);
+      
+      const parents = await prisma.familyMember.findMany({
+        where: { userId: { in: students } },
+        select: { family: { select: { members: { select: { userId: true, user: { select: { role: true } } } } } } }
+      });
+      
+      participantIds = parents.flatMap(f => f.family.members.filter(m => m.user.role === 'PARENT').map(m => m.userId));
+      name = `Class ${enrollments[0]?.class?.name || 'Announcements'}`;
+    } else if (groupType === 'MANAGEMENT') {
+      const managers = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true } });
+      participantIds = managers.map(m => m.id);
+      name = 'Management Team';
+    } else if (groupType === 'OCEAN_NAVIGATORS') {
+      const staff = await prisma.user.findMany({ where: { role: { in: ['TEACHER', 'ADMIN'] } }, select: { id: true } });
+      participantIds = staff.map(s => s.id);
+      name = 'Ocean Navigators';
+    }
+
+    participantIds.push(userId);
+    const uniqueParticipants = Array.from(new Set(participantIds));
+
+    const thread = await prisma.chatThread.create({
+      data: {
+        name,
+        participants: {
+          create: uniqueParticipants.map(id => ({ userId: id }))
+        }
+      },
+      include: { participants: { include: { user: true } } }
     });
 
     res.status(201).json({ thread });
@@ -217,6 +274,31 @@ export const blockContact = async (req, res, next) => {
     });
 
     res.json({ isBlocked: updatedParticipant.isBlocked });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/chat/:threadId/resolve
+export const resolveThread = async (req, res, next) => {
+  try {
+    const { threadId } = req.params;
+    const userId = req.user.id;
+
+    const participant = await prisma.chatParticipant.findUnique({
+      where: { threadId_userId: { threadId, userId } }
+    });
+
+    if (!participant) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Not a participant' });
+    }
+
+    const updatedThread = await prisma.chatThread.update({
+      where: { id: threadId },
+      data: { status: 'RESOLVED' }
+    });
+
+    res.json({ message: 'Thread resolved', thread: updatedThread });
   } catch (error) {
     next(error);
   }

@@ -1,0 +1,762 @@
+/* ================================================================
+   TEACHER PORTAL — Premium Design
+   ================================================================ */
+
+.teacher-portal {
+  padding: 30px;
+  max-width: 1280px;
+  margin: 0 auto;
+  animation: tp-fadeIn 0.5s ease;
+}
+
+@keyframes tp-fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Emergency Strip ---- */
+.emergency-strip {
+  display: flex;
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fef2f2 0%, #fff1f2 50%, #fdf2f8 100%);
+  border: 1px solid #fecdd3;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+  align-items: center;
+  box-shadow: 0 2px 12px rgba(244, 63, 94, 0.08);
+}
+
+.emergency-strip-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9f1239;
+  margin-right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.emergency-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.22s ease;
+  white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+}
+
+.emergency-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.emergency-btn:hover::before {
+  opacity: 1;
+}
+
+.emergency-btn:active {
+  transform: scale(0.96);
+}
+
+.emergency-btn.lockdown {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: white;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.25);
+}
+.emergency-btn.lockdown:hover {
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.35);
+  transform: translateY(-1px);
+}
+
+.emergency-btn.medic {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: white;
+  box-shadow: 0 2px 8px rgba(249, 115, 22, 0.25);
+}
+.emergency-btn.medic:hover {
+  box-shadow: 0 4px 16px rgba(249, 115, 22, 0.35);
+  transform: translateY(-1px);
+}
+
+.emergency-btn.student-out {
+  background: linear-gradient(135deg, #eab308, #ca8a04);
+  color: #422006;
+  box-shadow: 0 2px 8px rgba(234, 179, 8, 0.2);
+}
+.emergency-btn.student-out:hover {
+  box-shadow: 0 4px 16px rgba(234, 179, 8, 0.3);
+  transform: translateY(-1px);
+}
+
+.emergency-btn.class-support {
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  color: white;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.25);
+}
+.emergency-btn.class-support:hover {
+  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.35);
+  transform: translateY(-1px);
+}
+
+/* ---- Confirmation Modal ---- */
+.emergency-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  animation: tp-fadeIn 0.2s ease;
+}
+
+.emergency-modal {
+  background: white;
+  border-radius: 20px;
+  padding: 32px;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  text-align: center;
+}
+
+.emergency-modal-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.emergency-modal h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+  color: var(--text-main);
+}
+
+.emergency-modal p {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.emergency-modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.modal-btn-cancel {
+  padding: 10px 24px;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  background: white;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-btn-cancel:hover {
+  background: #f9fafb;
+}
+
+.modal-btn-confirm {
+  padding: 10px 24px;
+  border-radius: 10px;
+  border: none;
+  font-weight: 700;
+  font-size: 14px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-btn-confirm:hover {
+  transform: translateY(-1px);
+}
+
+.modal-btn-confirm.red { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+.modal-btn-confirm.orange { background: linear-gradient(135deg, #f97316, #ea580c); }
+.modal-btn-confirm.yellow { background: linear-gradient(135deg, #eab308, #ca8a04); color: #422006; }
+.modal-btn-confirm.purple { background: linear-gradient(135deg, #7c3aed, #6d28d9); }
+
+/* Student Out — Roster Picker inside Modal */
+.student-roster-picker {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.student-roster-picker .roster-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.student-roster-picker .roster-pick-item:hover {
+  background: #f0fdf4;
+}
+
+.student-roster-picker .roster-pick-item.selected {
+  background: #dcfce7;
+  font-weight: 600;
+}
+
+/* ---- Announcement Banner ---- */
+.announcements-section {
+  margin-bottom: 28px;
+}
+
+.announcement-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #eff6ff 0%, #eef2ff 100%);
+  border: 1px solid #c7d2fe;
+  margin-bottom: 10px;
+  transition: all 0.2s ease;
+  animation: tp-slideIn 0.35s ease;
+}
+
+@keyframes tp-slideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.announcement-card.read {
+  opacity: 0.5;
+  transform: scale(0.98);
+}
+
+.announcement-icon {
+  background: #dbeafe;
+  color: #2563eb;
+  padding: 10px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.announcement-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.announcement-content h4 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e3a5f;
+  margin-bottom: 4px;
+}
+
+.announcement-content p {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.announcement-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.announcement-read-btn {
+  background: none;
+  border: 1px solid #93c5fd;
+  color: #2563eb;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.announcement-read-btn:hover {
+  background: #2563eb;
+  color: white;
+}
+
+.no-announcements {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 14px;
+  background: #f8fafc;
+  border-radius: 14px;
+  border: 1px dashed var(--border-light);
+}
+
+/* ---- Tab Navigation ---- */
+.tp-tabs {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 5px;
+  border-radius: 14px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tp-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.22s ease;
+  white-space: nowrap;
+}
+
+.tp-tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.tp-tab.active {
+  background: white;
+  color: var(--primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.tp-tab-badge {
+  background: var(--primary);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 20px;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* ---- Tab Content ---- */
+.tp-tab-content {
+  animation: tp-fadeIn 0.3s ease;
+}
+
+/* ---- Roster Section ---- */
+.roster-class-selector {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.roster-class-pill {
+  padding: 8px 18px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border-light);
+  background: white;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.roster-class-pill.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(21, 128, 61, 0.2);
+}
+
+.roster-table-wrap {
+  overflow-x: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border-light);
+  background: white;
+}
+
+.roster-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.roster-table thead {
+  background: #f8fafc;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.roster-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-light);
+  white-space: nowrap;
+}
+
+.roster-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+.roster-table tbody tr {
+  transition: background 0.15s;
+}
+
+.roster-table tbody tr:hover {
+  background: #f0fdf4;
+}
+
+.roster-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.roster-student-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.roster-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--primary-light), #dcfce7);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.roster-symbols {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.roster-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: default;
+  position: relative;
+}
+
+.roster-symbol[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 110%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e293b;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+.roster-symbol.allergy { background: #fef3c7; }
+.roster-symbol.accommodation { background: #dbeafe; }
+.roster-symbol.no-photo { background: #fce7f3; }
+.roster-symbol.birthday { background: #fde68a; }
+
+.roster-seashells {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: #0ea5e9;
+  font-size: 13px;
+}
+
+.attendance-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.att-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border-light);
+  background: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.att-btn:hover {
+  transform: scale(1.1);
+}
+
+.att-btn.present {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.att-btn.absent {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.att-btn.late {
+  background: #fef3c7;
+  border-color: #fde68a;
+}
+
+/* ---- Glass Card Panels (used by multiple tabs) ---- */
+.tp-glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+}
+
+.tp-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.tp-section-header h2 {
+  font-size: 1.1rem;
+  color: var(--text-main);
+  margin: 0;
+}
+
+/* ---- Behavior / Medical Tab ---- */
+.behavior-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.tp-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tp-form-group.full-width {
+  grid-column: 1 / -1;
+}
+
+.tp-form-group label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.tp-form-group input,
+.tp-form-group select,
+.tp-form-group textarea {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border-light);
+  font-size: 14px;
+  color: var(--text-main);
+  background: white;
+  transition: border-color 0.2s;
+}
+
+.tp-form-group input:focus,
+.tp-form-group select:focus,
+.tp-form-group textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.1);
+}
+
+.tp-form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.tp-submit-btn {
+  padding: 12px 28px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, var(--primary), #10b981);
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.tp-submit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(21, 128, 61, 0.3);
+}
+
+.tp-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ---- Success Toast ---- */
+.tp-toast {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  background: #065f46;
+  color: white;
+  padding: 14px 24px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 8px 24px rgba(6, 95, 70, 0.3);
+  z-index: 9999;
+  animation: tp-toast-in 0.35s ease;
+}
+
+@keyframes tp-toast-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Loading Skeleton ---- */
+.tp-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 40px;
+}
+
+.tp-skeleton-line {
+  height: 18px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: tp-shimmer 1.5s infinite;
+}
+
+@keyframes tp-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 900px) {
+  .teacher-portal {
+    padding: 16px;
+  }
+
+  .emergency-strip {
+    justify-content: center;
+  }
+
+  .behavior-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .teacher-portal {
+    padding: 10px;
+  }
+
+  .emergency-strip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .emergency-btn {
+    justify-content: center;
+  }
+
+  .tp-tabs {
+    gap: 2px;
+    padding: 3px;
+  }
+
+  .tp-tab {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .roster-table {
+    font-size: 12px;
+  }
+
+  .roster-table th,
+  .roster-table td {
+    padding: 8px 10px;
+  }
+
+  .announcement-card {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .announcement-read-btn {
+    align-self: flex-start;
+  }
+}

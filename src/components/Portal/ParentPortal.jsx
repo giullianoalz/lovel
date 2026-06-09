@@ -1,20 +1,156 @@
 import React, { useState, useEffect } from 'react';
-import { Star, Gift, BookOpen, Calendar, Award, AlertTriangle, ThumbsUp, Clock, Heart, Users, MessageSquare } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import {
+  Star, Gift, BookOpen, Calendar, Award, AlertTriangle, ThumbsUp,
+  Clock, Heart, Users, MessageSquare, QrCode, Plus, X, Trash2, ShieldCheck
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import './ParentPortal.css';
+
+const RELATIONSHIPS = ['Parent', 'Guardian', 'Grandparent', 'Aunt/Uncle', 'Sibling', 'Family Friend', 'Other'];
+
+const PickupModal = ({ children, onClose, onCreated }) => {
+  const [form, setForm] = useState({ pickupPerson: '', relationship: 'Parent', validDate: '', studentId: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [created, setCreated] = useState(null);
+
+  const today = new Date().toISOString().split('T')[0];
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.pickupPerson || !form.validDate) return;
+    setSubmitting(true);
+    try {
+      const res = await api.post('/portal/parent/pickup', {
+        pickupPerson: form.pickupPerson,
+        relationship: form.relationship,
+        validDate: form.validDate,
+        studentName: children.find(c => c.id === form.studentId)?.fullName || '',
+      });
+      setCreated(res.data);
+      onCreated(res.data);
+    } catch (err) {
+      console.error('Failed to create pickup auth:', err);
+    }
+    setSubmitting(false);
+  };
+
+  const qrPayload = created
+    ? JSON.stringify({ token: created.qrCodeHash, person: created.pickupPerson, valid: created.validDate })
+    : null;
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="pickup-modal">
+        <button className="modal-close" onClick={onClose}><X size={18} /></button>
+
+        {!created ? (
+          <>
+            <div className="modal-header">
+              <div className="modal-icon"><QrCode size={22} /></div>
+              <div>
+                <h2>Authorize Pickup</h2>
+                <p>Generate a QR code for a trusted person to pick up your child.</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="pickup-form">
+              {children.length > 1 && (
+                <div className="form-group">
+                  <label>Student</label>
+                  <select value={form.studentId} onChange={e => setForm(f => ({ ...f, studentId: e.target.value }))}>
+                    <option value="">All Children</option>
+                    {children.map(c => <option key={c.id} value={c.id}>{c.fullName}</option>)}
+                  </select>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>Authorized Person's Name *</label>
+                <input
+                  type="text"
+                  placeholder="Full name"
+                  value={form.pickupPerson}
+                  onChange={e => setForm(f => ({ ...f, pickupPerson: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Relationship</label>
+                <select value={form.relationship} onChange={e => setForm(f => ({ ...f, relationship: e.target.value }))}>
+                  {RELATIONSHIPS.map(r => <option key={r}>{r}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Valid Date *</label>
+                <input
+                  type="date"
+                  min={today}
+                  value={form.validDate}
+                  onChange={e => setForm(f => ({ ...f, validDate: e.target.value }))}
+                  required
+                />
+              </div>
+
+              <button type="submit" className="generate-btn" disabled={submitting}>
+                {submitting ? 'Generating...' : <><QrCode size={16} /> Generate QR Code</>}
+              </button>
+            </form>
+          </>
+        ) : (
+          <div className="qr-result">
+            <div className="qr-success-badge"><ShieldCheck size={20} /> Authorization Created</div>
+            <h3>{created.pickupPerson}</h3>
+            <p className="qr-valid-date">
+              Valid for: <strong>{new Date(created.validDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</strong>
+            </p>
+
+            <div className="qr-wrapper">
+              <QRCodeSVG
+                value={qrPayload}
+                size={200}
+                bgColor="#ffffff"
+                fgColor="#1e293b"
+                level="M"
+                includeMargin={true}
+              />
+            </div>
+
+            <p className="qr-instructions">
+              Show this QR code at the front desk. Staff will scan it to verify the pickup authorization.
+            </p>
+
+            <div className="qr-actions">
+              <button className="qr-new-btn" onClick={() => setCreated(null)}>Create Another</button>
+              <button className="qr-done-btn" onClick={onClose}>Done</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const ParentPortal = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeChild, setActiveChild] = useState(0);
+  const [pickupAuths, setPickupAuths] = useState([]);
+  const [showPickupModal, setShowPickupModal] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     const load = async () => {
       try {
-        const response = await api.get('/portal/parent');
-        setData(response.data);
+        const [portalRes, pickupRes] = await Promise.all([
+          api.get('/portal/parent'),
+          api.get('/portal/parent/pickup'),
+        ]);
+        setData(portalRes.data);
+        setPickupAuths(pickupRes.data);
       } catch (error) {
         console.error('Error loading parent portal:', error);
       }
@@ -23,11 +159,27 @@ const ParentPortal = () => {
     load();
   }, []);
 
+  const handlePickupCreated = (auth) => {
+    setPickupAuths(prev => [auth, ...prev]);
+  };
+
+  const handleDeleteAuth = async (id) => {
+    try {
+      await api.delete(`/portal/parent/pickup/${id}`);
+      setPickupAuths(prev => prev.filter(a => a.id !== id));
+    } catch (err) {
+      console.error('Failed to delete auth:', err);
+    }
+  };
+
   if (loading) return <div className="portal-loading">Loading your family portal...</div>;
   if (!data) return <div className="portal-loading">Unable to load portal data.</div>;
 
   const { children, announcements } = data;
   const child = children[activeChild] || null;
+
+  const today = new Date().toDateString();
+  const activeAuths = pickupAuths.filter(a => new Date(a.validDate) >= new Date(new Date().setHours(0,0,0,0)));
 
   return (
     <div className="parent-portal">
@@ -40,11 +192,45 @@ const ParentPortal = () => {
             <p>Track your children's progress, points, and academy updates.</p>
           </div>
         </div>
-        <button className="chat-shortcut" onClick={() => navigate('/chat')}>
-          <MessageSquare size={16} />
-          Chat with Teachers
-        </button>
+        <div className="header-actions">
+          <button className="pickup-shortcut" onClick={() => setShowPickupModal(true)}>
+            <QrCode size={16} />
+            Pickup Auth
+            {activeAuths.length > 0 && <span className="auth-badge">{activeAuths.length}</span>}
+          </button>
+          <button className="chat-shortcut" onClick={() => navigate('/chat')}>
+            <MessageSquare size={16} />
+            Chat with Teachers
+          </button>
+        </div>
       </div>
+
+      {/* Active Pickup Authorizations Strip */}
+      {activeAuths.length > 0 && (
+        <div className="pickup-strip">
+          <div className="pickup-strip-label">
+            <ShieldCheck size={15} />
+            Active Pickup Authorizations
+          </div>
+          <div className="pickup-chips">
+            {activeAuths.map(auth => (
+              <div key={auth.id} className="pickup-chip">
+                <QrCode size={13} />
+                <span className="chip-name">{auth.pickupPerson}</span>
+                <span className="chip-date">
+                  {new Date(auth.validDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+                <button className="chip-delete" onClick={() => handleDeleteAuth(auth.id)} title="Revoke">
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button className="pickup-add-mini" onClick={() => setShowPickupModal(true)}>
+            <Plus size={14} /> Add
+          </button>
+        </div>
+      )}
 
       {/* Children Tabs */}
       {children.length > 1 && (
@@ -122,7 +308,7 @@ const ParentPortal = () => {
           <div className="parent-grid">
             {/* Classes */}
             <div className="parent-section">
-              <h3><Calendar size={18} /> Classes & Schedule</h3>
+              <h3><Calendar size={18} /> Classes &amp; Schedule</h3>
               {child.enrollments?.length === 0 ? (
                 <p className="empty-text">No active classes.</p>
               ) : (
@@ -180,6 +366,48 @@ const ParentPortal = () => {
                 </div>
               )}
             </div>
+
+            {/* Pickup Authorizations section */}
+            <div className="parent-section pickup-section">
+              <h3><QrCode size={18} /> Pickup Authorizations</h3>
+              {pickupAuths.length === 0 ? (
+                <div className="pickup-empty">
+                  <p className="empty-text">No authorizations yet.</p>
+                  <button className="create-pickup-btn" onClick={() => setShowPickupModal(true)}>
+                    <Plus size={14} /> Authorize Someone
+                  </button>
+                </div>
+              ) : (
+                <div className="pickup-list">
+                  {pickupAuths.slice(0, 5).map(auth => {
+                    const isPast = new Date(auth.validDate) < new Date(new Date().setHours(0,0,0,0));
+                    return (
+                      <div key={auth.id} className={`pickup-item ${isPast ? 'expired' : 'valid'}`}>
+                        <div className="pickup-item-info">
+                          <span className="pickup-person">{auth.pickupPerson}</span>
+                          <span className="pickup-date">
+                            {new Date(auth.validDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          </span>
+                        </div>
+                        <div className="pickup-item-actions">
+                          <span className={`pickup-status-badge ${isPast ? 'expired' : 'valid'}`}>
+                            {isPast ? 'Expired' : 'Active'}
+                          </span>
+                          {!isPast && (
+                            <button className="revoke-btn" onClick={() => handleDeleteAuth(auth.id)}>
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button className="create-pickup-btn mt-8" onClick={() => setShowPickupModal(true)}>
+                    <Plus size={14} /> New Authorization
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </>
       ) : (
@@ -205,6 +433,15 @@ const ParentPortal = () => {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Pickup Auth Modal */}
+      {showPickupModal && (
+        <PickupModal
+          children={children}
+          onClose={() => setShowPickupModal(false)}
+          onCreated={handlePickupCreated}
+        />
       )}
     </div>
   );

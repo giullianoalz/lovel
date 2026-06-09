@@ -17,6 +17,7 @@ import BehaviorTracker from './components/Behavior/BehaviorTracker'
 import ClassFitReport from './components/ClassFit/ClassFitReport'
 import FrontDeskAlerts from './components/Alerts/FrontDeskAlerts'
 import MarketingHub from './components/Marketing/MarketingHub'
+import TeacherPortal from './components/Portal/TeacherPortal'
 import './index.css'
 
 // Helper component to restrict access based on authentication status and roles
@@ -90,6 +91,14 @@ function App() {
                         element={
                           <ProtectedRoute allowedRoles={['PARENT']}>
                             <ParentPortal />
+                          </ProtectedRoute>
+                        } 
+                      />
+                      <Route 
+                        path="/portal/teacher" 
+                        element={
+                          <ProtectedRoute allowedRoles={['TEACHER', 'ADMIN']}>
+                            <TeacherPortal />
                           </ProtectedRoute>
                         } 
                       />
