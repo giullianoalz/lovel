@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { invalidate } from '../middleware/cache.js';
 
 export const createAnnouncement = async (req, res, next) => {
   try {
@@ -14,6 +15,7 @@ export const createAnnouncement = async (req, res, next) => {
       }
     });
 
+    invalidate('announcements:*'); // evict all users' announcement caches
     res.status(201).json({ message: 'Announcement created successfully', announcement });
   } catch (error) {
     next(error);
@@ -84,6 +86,7 @@ export const markAnnouncementRead = async (req, res, next) => {
       }
     });
 
+    invalidate(`announcements:${req.user.id}`); // stale isRead flag for this user
     res.json({ message: 'Announcement marked as read', read });
   } catch (error) {
     next(error);

@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { invalidate } from '../middleware/cache.js';
 
 /**
  * GET /api/classes
@@ -110,6 +111,7 @@ export const createClass = async (req, res, next) => {
       },
     });
 
+    invalidate('classes:*', 'registration:classes');
     res.status(201).json({ message: 'Class created successfully.', class: newClass });
   } catch (error) {
     next(error);
@@ -137,6 +139,7 @@ export const updateClass = async (req, res, next) => {
       },
     });
 
+    invalidate('classes:*', 'registration:classes');
     res.json({ message: 'Class updated successfully.', class: updatedClass });
   } catch (error) {
     next(error);
@@ -181,6 +184,8 @@ export const enrollStudent = async (req, res, next) => {
       },
     });
 
+    // Enrollments affect class counts and portal data
+    invalidate('classes:*', 'registration:classes', 'portal:student:*', 'portal:parent:*');
     res.status(201).json({ message: 'Student enrolled successfully.', enrollment });
   } catch (error) {
     next(error);
@@ -203,6 +208,7 @@ export const unenrollStudent = async (req, res, next) => {
       data: { status: 'inactive' },
     });
 
+    invalidate('classes:*', 'registration:classes', 'portal:student:*', 'portal:parent:*');
     res.json({ message: 'Student unenrolled successfully.', enrollment });
   } catch (error) {
     next(error);

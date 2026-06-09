@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
+import { withCache } from '../middleware/cache.js';
 import {
   createAnnouncement,
   listAnnouncements,
@@ -9,8 +10,8 @@ import {
 
 const router = Router();
 
-// GET /api/announcements
-router.get('/', authenticate, listAnnouncements);
+// GET /api/announcements — keyed per user (response includes per-user isRead flags)
+router.get('/', authenticate, withCache(req => `announcements:${req.user.id}`, 30), listAnnouncements);
 
 // POST /api/announcements (Management only)
 router.post('/', authenticate, requireRole('ADMIN'), createAnnouncement);

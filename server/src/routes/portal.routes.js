@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
+import { withCache } from '../middleware/cache.js';
 import {
   getStudentPortal,
   getParentPortal,
@@ -12,14 +13,21 @@ import {
 
 const router = Router();
 
-// GET /api/portal/student — Student dashboard
-router.get('/student', authenticate, requireRole('STUDENT'), getStudentPortal);
+// Portal caches are per-user. Teacher TTL is short (30 s) since it reflects today's live sessions.
+router.get('/student', authenticate, requireRole('STUDENT'),
+  withCache(req => `portal:student:${req.user.id}`, 60),
+  getStudentPortal
+);
 
-// GET /api/portal/parent — Parent dashboard (all children)
-router.get('/parent', authenticate, requireRole('PARENT'), getParentPortal);
+router.get('/parent', authenticate, requireRole('PARENT'),
+  withCache(req => `portal:parent:${req.user.id}`, 60),
+  getParentPortal
+);
 
-// GET /api/portal/teacher — Teacher dashboard
-router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'), getTeacherPortal);
+router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'),
+  withCache(req => `portal:teacher:${req.user.id}`, 30),
+  getTeacherPortal
+);
 
 // Pickup Authorization routes
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);

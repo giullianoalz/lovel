@@ -1,5 +1,6 @@
 import prisma from '../config/database.js';
 import { sleep } from '../utils/helpers.js';
+import { invalidate } from '../middleware/cache.js';
 
 /**
  * POST /api/registration/terms
@@ -26,6 +27,7 @@ export const createTerm = async (req, res, next) => {
     // 2. Clone Classes from the most recent active term (Optional step, can be manual too)
     // For now, we expect classes to be created and linked to this termId separately.
 
+    invalidate('registration:terms');
     res.status(201).json({ message: 'Registration Term created.', term });
   } catch (error) {
     next(error);
@@ -69,6 +71,7 @@ export const seedPriorityHolds = async (req, res, next) => {
       skipDuplicates: true,
     });
 
+    invalidate('registration:terms');
     res.json({ message: `Seeded ${holds.length} priority holds for the new term.`, count: holds.length });
   } catch (error) {
     next(error);
@@ -307,6 +310,7 @@ export const updateTerm = async (req, res, next) => {
         registrationCloses: new Date(registrationCloses)
       }
     });
+    invalidate('registration:terms');
     res.json({ message: 'Term updated', term });
   } catch (error) {
     next(error);

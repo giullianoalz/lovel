@@ -11,6 +11,7 @@ import { Server as SocketIOServer } from 'socket.io';
 // Middleware
 import { apiLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { cacheStats } from './middleware/cache.js';
 
 // Routes
 import authRoutes from './routes/auth.routes.js';
@@ -105,6 +106,11 @@ app.get('/api/health', (req, res) => {
     version: '1.0.0',
   });
 });
+
+// Cache debug (development only)
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/api/cache-stats', (req, res) => res.json(cacheStats()));
+}
 
 // Phase 1 routes
 app.use('/api/auth', authRoutes);

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
+import { withCache } from '../middleware/cache.js';
 import {
   createTerm,
   seedPriorityHolds,
@@ -19,12 +20,12 @@ import {
 const router = Router();
 
 // --- ADMIN ROUTES ---
-router.get('/terms', authenticate, requireRole('ADMIN'), getTerms);
+router.get('/terms', authenticate, requireRole('ADMIN'), withCache('registration:terms', 120), getTerms);
 router.post('/terms', authenticate, requireRole('ADMIN'), createTerm);
 router.put('/terms/:id', authenticate, requireRole('ADMIN'), updateTerm);
 router.post('/terms/:id/seed-priority', authenticate, requireRole('ADMIN'), seedPriorityHolds);
 
-router.get('/classes', authenticate, requireRole('ADMIN'), getRegistrationClasses);
+router.get('/classes', authenticate, requireRole('ADMIN'), withCache('registration:classes', 60), getRegistrationClasses);
 router.get('/classes/:id/roster', authenticate, requireRole('ADMIN'), getClassRoster);
 
 router.post('/promote/:classId', authenticate, requireRole('ADMIN'), promoteFromWaitlist);
