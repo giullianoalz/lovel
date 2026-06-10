@@ -154,8 +154,8 @@ const AddStudentModal = ({ onClose, onSave, families = [] }) => {
       snackAuthorized: false,
       snackPunches: 0,
       snackHistory: [],
-      prizePoints: 0,
-      prizeHistory: [],
+      seashells: 0,
+      seashellHistory: [],
       materials: []
     };
 

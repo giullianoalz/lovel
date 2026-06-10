@@ -20,7 +20,7 @@ model User {
   allergies             String?
   snackAuthorized       Boolean                   @default(false) @map("snack_authorized")
   snackPunches          Int                       @default(0) @map("snack_punches")
-  prizePoints           Int                       @default(0) @map("prize_points")
+  seashells             Int                       @default(0) @map("prize_points")
   createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   baseSalary            Decimal?                  @map("base_salary") @db.Decimal(10, 2)

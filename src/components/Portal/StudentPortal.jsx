@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Star, Gift, BookOpen, Calendar, Award, AlertTriangle, ThumbsUp, Clock, TrendingUp } from 'lucide-react';
+import { Shell, Gift, BookOpen, Calendar, Award, AlertTriangle, ThumbsUp, Clock, TrendingUp } from 'lucide-react';
 import api from '../../lib/api';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './StudentPortal.css';
@@ -28,7 +28,7 @@ const StudentPortal = () => {
   if (error) return <div className="portal-loading"><ErrorBanner message={error} onRetry={load} /></div>;
   if (!data) return null;
 
-  const { student, enrollments, prizeHistory, behaviorSummary, materials, announcements } = data;
+  const { student, enrollments, seashellHistory, behaviorSummary, materials, announcements } = data;
 
   return (
     <div className="student-portal">
@@ -44,13 +44,13 @@ const StudentPortal = () => {
       {/* Points Overview */}
       <div className="points-grid">
         <div className="points-card prize-card">
-          <div className="points-icon"><Star size={28} fill="#fbbf24" color="#fbbf24" /></div>
-          <div className="points-value">{student.prizePoints || 0}</div>
-          <div className="points-label">Prize Points</div>
+          <div className="points-icon"><Shell size={28} color="#0ea5e9" /></div>
+          <div className="points-value">{student.seashells || 0}</div>
+          <div className="points-label">Seashells</div>
           <div className="points-bar">
-            <div className="points-bar-fill" style={{ width: `${Math.min((student.prizePoints || 0) / 100 * 100, 100)}%` }} />
+            <div className="points-bar-fill" style={{ width: `${Math.min((student.seashells || 0) / 100 * 100, 100)}%` }} />
           </div>
-          <span className="points-hint">{Math.max(100 - (student.prizePoints || 0), 0)} to next reward level</span>
+          <span className="points-hint">{Math.max(100 - (student.seashells || 0), 0)} to next reward level</span>
         </div>
         <div className="points-card snack-card">
           <div className="points-icon">🍪</div>
@@ -105,10 +105,10 @@ const StudentPortal = () => {
         <div className="portal-section">
           <h2><Gift size={20} /> Recent Rewards</h2>
           <div className="prize-list">
-            {prizeHistory.length === 0 ? (
+            {seashellHistory.length === 0 ? (
               <p className="empty-text">No rewards yet — keep going!</p>
             ) : (
-              prizeHistory.slice(0, 8).map((p, i) => (
+              seashellHistory.slice(0, 8).map((p, i) => (
                 <div key={i} className="prize-item">
                   <div className="prize-info">
                     <span className="prize-reason">{p.reason}</span>

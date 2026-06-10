@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Star, Gift, BookOpen, Calendar, Award, AlertTriangle, ThumbsUp,
-  Clock, Heart, Users, MessageSquare, QrCode, Plus, X, Trash2, ShieldCheck
+  Clock, Heart, Users, MessageSquare, QrCode, Plus, X, Trash2, ShieldCheck, Shell
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
@@ -268,10 +268,10 @@ const ParentPortal = () => {
 
             <div className="child-stats">
               <div className="child-stat">
-                <Star size={20} fill="#fbbf24" color="#fbbf24" />
+                <Shell size={20} color="#0ea5e9" />
                 <div className="stat-info">
-                  <span className="stat-number">{child.prizePoints || 0}</span>
-                  <span className="stat-text">Prize Points</span>
+                  <span className="stat-number">{child.seashells || 0}</span>
+                  <span className="stat-text">Seashells</span>
                 </div>
               </div>
               <div className="child-stat">
@@ -339,11 +339,11 @@ const ParentPortal = () => {
             {/* Recent Rewards */}
             <div className="parent-section">
               <h3><Gift size={18} /> Recent Rewards</h3>
-              {child.prizeHistory?.length === 0 ? (
+              {child.seashellHistory?.length === 0 ? (
                 <p className="empty-text">No rewards yet.</p>
               ) : (
                 <div className="reward-list">
-                  {child.prizeHistory?.slice(0, 6).map((p, i) => (
+                  {child.seashellHistory?.slice(0, 6).map((p, i) => (
                     <div key={i} className="reward-item">
                       <span className="reward-reason">{p.reason}</span>
                       <span className={`reward-pts ${p.type === 'EARNED' ? 'pos' : 'neg'}`}>

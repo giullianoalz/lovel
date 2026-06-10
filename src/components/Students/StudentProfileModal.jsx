@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Star, Gift, Check, TrendingDown, CreditCard } from 'lucide-react';
+import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard } from 'lucide-react';
 import { database } from '../../lib/database';
 import SnackCabinetModal from './SnackCabinetModal';
 import './StudentProfileModal.css';
@@ -28,7 +28,7 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
   const handleRedeem = async () => {
     if (!redeemItem || !redeemCost || redeeming) return;
     setRedeeming(true);
-    const result = await database.redeemPrizePoints(student.id, redeemItem, redeemCost);
+    const result = await database.redeemSeashells(student.id, redeemItem, redeemCost);
     if(result && result.success) {
       onUpdate(); // Trigger parent refresh to get updated student data
       setShowRedeem(false);
@@ -102,9 +102,9 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
               <h3 style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
                 <Star size={18} fill="currentColor" color="#fbbf24" /> Prize History
               </h3>
-              {student.prizeHistory && student.prizeHistory.length > 0 ? (
+              {student.seashellHistory && student.seashellHistory.length > 0 ? (
                 <ul className="snack-history-list">
-                  {student.prizeHistory.map(record => {
+                  {student.seashellHistory.map(record => {
                     const dateObj = new Date(record.date);
                     const isEarned = record.type === 'earned';
                     return (
@@ -162,9 +162,9 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
 
             <div className="snack-card-container prize-card">
               <div className="snack-balance-header">
-                <h3><Star size={20} fill="currentColor" /> Prize Points</h3>
+                <h3><Shell size={20} /> Seashells</h3>
                 <div className="punch-balance">
-                  <span className="punch-number">{student.prizePoints || 0}</span>
+                  <span className="punch-number">{student.seashells || 0}</span>
                   <span className="punch-label">Total Points</span>
                 </div>
               </div>
@@ -176,7 +176,7 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
                   style={{marginTop: '20px', width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(0,0,0,0.1)'}}
                 >
                   <Gift size={18} />
-                  <span>Redeem Prize</span>
+                  <span>Redeem Seashells</span>
                 </button>
               ) : (
                 <div className="redeem-form">

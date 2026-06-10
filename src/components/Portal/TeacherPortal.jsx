@@ -19,20 +19,20 @@ const getDemoSchedule = () => [
     sessionId: 'demo-1', classId: 'cls-1',
     className: 'Ocean Explorers — Morning', startTime: '09:00', endTime: '11:30',
     roster: [
-      { id: 's1', name: 'Luna García',    age: 7, allergies: true,  accommodation: false, noPhoto: false, upcomingBirthday: true,  seashells: 42, prizePoints: 120, attendance: 'PENDING' },
-      { id: 's2', name: 'Max Johnson',    age: 8, allergies: false, accommodation: true,  noPhoto: false, upcomingBirthday: false, seashells: 35, prizePoints: 85,  attendance: 'PENDING' },
-      { id: 's3', name: 'Sofia Rodriguez',age: 6, allergies: true,  accommodation: false, noPhoto: true,  upcomingBirthday: false, seashells: 58, prizePoints: 200, attendance: 'PENDING' },
-      { id: 's4', name: 'Ethan Williams', age: 7, allergies: false, accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 21, prizePoints: 40,  attendance: 'PENDING' },
-      { id: 's5', name: 'Isabella Chen',  age: 8, allergies: false, accommodation: true,  noPhoto: false, upcomingBirthday: true,  seashells: 64, prizePoints: 310, attendance: 'PENDING' },
+      { id: 's1', name: 'Luna García',    age: 7, allergies: true,  accommodation: false, noPhoto: false, upcomingBirthday: true,  seashells: 120, attendance: 'PENDING' },
+      { id: 's2', name: 'Max Johnson',    age: 8, allergies: false, accommodation: true,  noPhoto: false, upcomingBirthday: false, seashells: 85,  attendance: 'PENDING' },
+      { id: 's3', name: 'Sofia Rodriguez',age: 6, allergies: true,  accommodation: false, noPhoto: true,  upcomingBirthday: false, seashells: 200, attendance: 'PENDING' },
+      { id: 's4', name: 'Ethan Williams', age: 7, allergies: false, accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 40,  attendance: 'PENDING' },
+      { id: 's5', name: 'Isabella Chen',  age: 8, allergies: false, accommodation: true,  noPhoto: false, upcomingBirthday: true,  seashells: 310, attendance: 'PENDING' },
     ],
   },
   {
     sessionId: 'demo-2', classId: 'cls-2',
     className: 'Wave Riders — Afternoon', startTime: '13:00', endTime: '15:30',
     roster: [
-      { id: 's6', name: 'Mia Thompson', age: 9, allergies: false, accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 30, prizePoints: 75,  attendance: 'PENDING' },
-      { id: 's7', name: 'Noah Davis',   age: 8, allergies: true,  accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 47, prizePoints: 140, attendance: 'PENDING' },
-      { id: 's8', name: 'Ava Martinez', age: 7, allergies: false, accommodation: true,  noPhoto: true,  upcomingBirthday: false, seashells: 55, prizePoints: 90,  attendance: 'PENDING' },
+      { id: 's6', name: 'Mia Thompson', age: 9, allergies: false, accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 75,  attendance: 'PENDING' },
+      { id: 's7', name: 'Noah Davis',   age: 8, allergies: true,  accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 140, attendance: 'PENDING' },
+      { id: 's8', name: 'Ava Martinez', age: 7, allergies: false, accommodation: true,  noPhoto: true,  upcomingBirthday: false, seashells: 90,  attendance: 'PENDING' },
     ],
   },
 ];
@@ -70,7 +70,7 @@ const TeacherPortal = () => {
 
   /* ── Prize bar ── */
   const [selectedForPrize, setSelectedForPrize] = useState({});
-  const [prizePoints, setPrizePoints] = useState('');
+  const [shellsToAward, setShellsToAward] = useState('');
   const [prizeReason, setPrizeReason] = useState('');
   const [awarding, setAwarding] = useState(false);
 
@@ -229,9 +229,9 @@ const TeacherPortal = () => {
   /* ── Prize ── */
   const handleAwardPoints = async () => {
     const ids = Object.keys(selectedForPrize).filter((id) => selectedForPrize[id]);
-    if (!ids.length || !prizePoints || !prizeReason) return;
+    if (!ids.length || !shellsToAward || !prizeReason) return;
     setAwarding(true);
-    const ok = await database.awardPrizePoints(ids, prizeReason, prizePoints);
+    const ok = await database.awardSeashells(ids, prizeReason, shellsToAward);
     if (ok) { setPrizePoints(''); setPrizeReason(''); setSelectedForPrize({}); showToast('⭐ Points awarded!'); }
     setAwarding(false);
   };
@@ -507,15 +507,15 @@ const TeacherPortal = () => {
               <div className="prize-bar-content">
                 <div className="prize-indicator">
                   <Star fill="#fbbf24" size={18} color="#fbbf24" />
-                  <span>Award Points ({selectedCount} selected)</span>
+                  <span>Award Seashells ({selectedCount} selected)</span>
                 </div>
                 <div className="prize-bar-inputs">
                   <input type="text" placeholder="Reason..." value={prizeReason}
                     onChange={(e) => setPrizeReason(e.target.value)} className="prize-input-mini" />
-                  <input type="number" placeholder="Pts" value={prizePoints}
-                    onChange={(e) => setPrizePoints(e.target.value)} className="prize-input-mini points-mini" />
+                  <input type="number" placeholder="🐚" value={shellsToAward}
+                    onChange={(e) => setShellsToAward(e.target.value)} className="prize-input-mini points-mini" />
                   <button className="prize-award-btn" onClick={handleAwardPoints}
-                    disabled={awarding || selectedCount === 0 || !prizePoints || !prizeReason}>
+                    disabled={awarding || selectedCount === 0 || !shellsToAward || !prizeReason}>
                     Apply
                   </button>
                 </div>
@@ -530,7 +530,6 @@ const TeacherPortal = () => {
                     <th>Student</th>
                     <th>Symbols</th>
                     <th>Seashells</th>
-                    <th>Points</th>
                     <th>Attendance</th>
                     <th style={{ textAlign: 'center' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
@@ -587,9 +586,6 @@ const TeacherPortal = () => {
                       </td>
                       <td>
                         <div className="roster-seashells"><Shell size={13} /> {student.seashells}</div>
-                      </td>
-                      <td>
-                        <div className="points-badge"><Star size={13} fill="#fbbf24" color="#fbbf24" /> {student.prizePoints || 0}</div>
                       </td>
                       <td>
                         <div className="attendance-toggle">

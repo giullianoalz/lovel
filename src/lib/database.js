@@ -40,8 +40,8 @@ let mockStudents = [
     snackAuthorized: true, 
     snackPunches: 8, 
     snackHistory: [], 
-    prizePoints: 120, // Initial mock data
-    prizeHistory: [
+    seashells: 120, // Initial mock data
+    seashellHistory: [
       { id: 'pz_1', reason: 'Participation', points: 10, date: '2026-04-20T10:00:00Z', type: 'earned' }
     ],
     familyId: 'f1', 
@@ -63,8 +63,8 @@ let mockStudents = [
     snackAuthorized: false, 
     snackPunches: 0, 
     snackHistory: [], 
-    prizePoints: 45,
-    prizeHistory: [],
+    seashells: 45,
+    seashellHistory: [],
     familyId: 'f2', 
     status: 'Active',
     materials: [
@@ -78,8 +78,8 @@ let mockStudents = [
     snackAuthorized: true, 
     snackPunches: 2, 
     snackHistory: [], 
-    prizePoints: 0,
-    prizeHistory: [],
+    seashells: 0,
+    seashellHistory: [],
     familyId: 'f3', 
     status: 'Inactive',
     materials: []
@@ -198,8 +198,8 @@ export const database = {
           snackAuthorized: dbStudent.snackAuthorized,
           snackPunches: dbStudent.snackPunches,
           snackHistory: [],
-          prizePoints: dbStudent.prizePoints,
-          prizeHistory: [],
+          seashells: dbStudent.seashells,
+          seashellHistory: [],
           familyId: dbStudent.familyMembers?.[0]?.familyId || null,
           // Formatear estado (ej. "ACTIVE" -> "Active")
           status: dbStudent.status.charAt(0).toUpperCase() + dbStudent.status.slice(1).toLowerCase(),
@@ -422,16 +422,16 @@ export const database = {
   },
 
   // --- Prizes System ---
-  awardPrizePoints: async (studentIds, reason, points) => {
+  awardSeashells: async (studentIds, reason, points) => {
     // studentIds is an array of IDs for bulk operations
     const ids = Array.isArray(studentIds) ? studentIds : [studentIds];
     
     ids.forEach(id => {
       const student = mockStudents.find(s => s.id === id);
       if (student) {
-        student.prizePoints = (student.prizePoints || 0) + parseInt(points);
-        if (!student.prizeHistory) student.prizeHistory = [];
-        student.prizeHistory.unshift({
+        student.seashells = (student.seashells || 0) + parseInt(points);
+        if (!student.seashellHistory) student.seashellHistory = [];
+        student.seashellHistory.unshift({
           id: `pz_${Date.now()}_${id}`,
           reason: reason,
           points: parseInt(points),
@@ -444,18 +444,18 @@ export const database = {
     return true;
   },
 
-  redeemPrizePoints: async (studentId, prizeName, cost) => {
+  redeemSeashells: async (studentId, prizeName, cost) => {
     const student = mockStudents.find(s => s.id === studentId);
     if (!student) return { success: false, error: 'Student not found' };
     
     // Check if enough points
-    if ((student.prizePoints || 0) < parseInt(cost)) {
+    if ((student.seashells || 0) < parseInt(cost)) {
       return { success: false, error: 'Insufficient points' };
     }
 
-    student.prizePoints -= parseInt(cost);
-    if (!student.prizeHistory) student.prizeHistory = [];
-    student.prizeHistory.unshift({
+    student.seashells -= parseInt(cost);
+    if (!student.seashellHistory) student.seashellHistory = [];
+    student.seashellHistory.unshift({
       id: `rz_${Date.now()}`,
       reason: `Redeemed: ${prizeName}`,
       points: -parseInt(cost),
@@ -463,8 +463,8 @@ export const database = {
       type: 'redeemed'
     });
     
-    console.log(`[Database] Student ${student.name} redeemed ${prizeName} for ${cost} points. Remaining: ${student.prizePoints}`);
-    return { success: true, newBalance: student.prizePoints };
+    console.log(`[Database] Student ${student.name} redeemed ${prizeName} for ${cost} points. Remaining: ${student.seashells}`);
+    return { success: true, newBalance: student.seashells };
   },
 
   // --- Conversations ---

@@ -79,7 +79,7 @@ export const getFamily = async (req, res, next) => {
                 phone: true,
                 status: true,
                 snackPunches: true,
-                prizePoints: true,
+                seashells: true,
               },
             },
           },

@@ -37,7 +37,7 @@ export const getTeacherPortal = async (req, res, next) => {
                     allergies: true,
                     medicalNotes: true,
                     accommodationNotes: true,
-                    prizePoints: true, // Used for seashells
+                    seashells: true,
                   }
                 }
               }
@@ -83,7 +83,7 @@ export const getTeacherPortal = async (req, res, next) => {
           accommodation: student.accommodationNotes ? true : false,
           noPhoto: false, // Schema doesn't currently store this, defaulting to false
           upcomingBirthday: false, // Requires DOB to be tracked in schema, using placeholder
-          seashells: student.prizePoints,
+          seashells: student.seashells,
           attendance: session.attendance.find(a => a.studentId === student.id)?.status || 'PENDING'
         };
       })
@@ -116,7 +116,7 @@ export const getStudentPortal = async (req, res, next) => {
         medicalNotes: true,
         accommodationNotes: true,
         snackPunches: true,
-        prizePoints: true,
+        seashells: true,
         status: true,
       },
     });
@@ -275,7 +275,7 @@ export const getParentPortal = async (req, res, next) => {
                     allergies: true,
                     medicalNotes: true,
                     snackPunches: true,
-                    prizePoints: true,
+                    seashells: true,
                     avatarUrl: true,
                     status: true,
                   },
