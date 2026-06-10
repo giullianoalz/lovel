@@ -14,7 +14,6 @@ import RegistrationAdmin from './components/Registration/RegistrationAdmin'
 import StudentPortal from './components/Portal/StudentPortal'
 import ParentPortal from './components/Portal/ParentPortal'
 import BehaviorTracker from './components/Behavior/BehaviorTracker'
-import ClassFitReport from './components/ClassFit/ClassFitReport'
 import FrontDeskAlerts from './components/Alerts/FrontDeskAlerts'
 import MarketingHub from './components/Marketing/MarketingHub'
 import TeacherPortal from './components/Portal/TeacherPortal'
@@ -118,14 +117,6 @@ function App() {
                         element={
                           <ProtectedRoute allowedRoles={['ADMIN', 'TEACHER']}>
                             <BehaviorTracker />
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/class-fit" 
-                        element={
-                          <ProtectedRoute allowedRoles={['ADMIN', 'TEACHER']}>
-                            <ClassFitReport />
                           </ProtectedRoute>
                         } 
                       />

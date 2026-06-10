@@ -276,10 +276,6 @@ const Sidebar = () => {
                 <AlertTriangle size={20} />
                 <span>Comportamiento</span>
               </NavLink>
-              <NavLink to="/class-fit" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-                <Activity size={20} />
-                <span>Class-Fit Report</span>
-              </NavLink>
               <NavLink to="/marketing" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Camera size={20} />
                 <span>Marketing Hub</span>
