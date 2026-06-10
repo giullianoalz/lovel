@@ -19,6 +19,22 @@ import MarketingHub from './components/Marketing/MarketingHub'
 import TeacherPortal from './components/Portal/TeacherPortal'
 import './index.css'
 
+// Root redirect: teachers/admins → Teacher Portal, others → Dashboard
+const SmartRoot = () => {
+  const { role } = useAuth();
+  if (role === 'ADMIN' || role === 'TEACHER') return <Navigate to="/portal/teacher" replace />;
+  if (role === 'STUDENT') return <Navigate to="/portal/student" replace />;
+  if (role === 'PARENT')  return <Navigate to="/portal/parent"  replace />;
+  return <Navigate to="/dashboard" replace />;
+};
+
+// ADMIN/TEACHER land on Teacher Portal; STUDENT/PARENT use Dashboard
+const SmartDashboard = () => {
+  const { role } = useAuth();
+  if (role === 'ADMIN' || role === 'TEACHER') return <Navigate to="/portal/teacher" replace />;
+  return <Dashboard />;
+};
+
 // Helper component to restrict access based on authentication status and roles
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, role, loading } = useAuth();
@@ -71,8 +87,8 @@ function App() {
                   <Sidebar />
                   <main className="content">
                     <Routes>
-                      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/" element={<SmartRoot />} />
+                      <Route path="/dashboard" element={<SmartDashboard />} />
                       <Route path="/chat" element={<ChatHub />} />
                       <Route path="/calendar" element={<CalendarView />} />
                       

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, Bell,
+  ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, Bell, MessageSquare, Calendar as CalendarIcon,
   Check, Users, FileText, Calendar, Shell, AlertTriangle, Stethoscope,
   BookOpen, CheckCircle2, X, Clock, Star, Gift, History, Eye, EyeOff,
   ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List,
@@ -50,6 +51,7 @@ const fmtTime = (t) =>
 /* ============================================================ */
 const TeacherPortal = () => {
   const { user, role } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('session');
 
   /* ── Notifications ── */
@@ -445,6 +447,40 @@ const TeacherPortal = () => {
           )}
         </button>
       </div>
+
+      {/* ── TODAY'S CLASSES STRIP ───────────────────────────── */}
+      {schedule.length > 0 && (
+        <div className="today-strip">
+          <span className="today-strip-label">Today</span>
+          {schedule.map((cls, idx) => {
+            const now = new Date();
+            const [startH, startM] = cls.startTime.split(':').map(Number);
+            const [endH,   endM  ] = cls.endTime.split(':').map(Number);
+            const start = new Date(); start.setHours(startH, startM, 0);
+            const end   = new Date(); end.setHours(endH,   endM,   0);
+            const isLive = now >= start && now <= end;
+            const isPast = now > end;
+            return (
+              <button key={cls.classId}
+                className={`today-class-chip ${isLive ? 'live' : ''} ${isPast ? 'past' : ''} ${idx === selectedClassIdx ? 'selected' : ''}`}
+                onClick={() => { setSelectedClassIdx(idx); setActiveTab('session'); }}>
+                {isLive && <span className="live-dot" />}
+                <span className="chip-name">{cls.className}</span>
+                <span className="chip-time">{fmtTime(cls.startTime)}</span>
+                {isLive && (
+                  <span className="live-badge-chip">LIVE</span>
+                )}
+              </button>
+            );
+          })}
+          <button className="today-strip-action" onClick={() => navigate('/chat')}>
+            <MessageSquare size={14} /> Chat
+          </button>
+          <button className="today-strip-action" onClick={() => navigate('/calendar')}>
+            <CalendarIcon size={14} /> Calendar
+          </button>
+        </div>
+      )}
 
       {/* ── TABS ─────────────────────────────────────────────── */}
       <div className="tp-tabs">

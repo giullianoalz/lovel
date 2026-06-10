@@ -101,7 +101,7 @@ const Sidebar = () => {
                 <span>Teacher Portal</span>
               </NavLink>
             )}
-            {(role === 'ADMIN' || role === 'TEACHER') && (
+            {(role === 'STUDENT' || role === 'PARENT') && (
               <NavLink to="/dashboard" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <LayoutDashboard size={20} />
                 <span>Dashboard</span>
