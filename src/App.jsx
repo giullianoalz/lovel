@@ -112,14 +112,7 @@ function App() {
                           </ProtectedRoute>
                         } 
                       />
-                      <Route 
-                        path="/session" 
-                        element={
-                          <ProtectedRoute allowedRoles={['ADMIN', 'TEACHER']}>
-                            <ClassSession />
-                          </ProtectedRoute>
-                        } 
-                      />
+                      <Route path="/session" element={<Navigate to="/portal/teacher" replace />} />
                       <Route 
                         path="/behavior" 
                         element={

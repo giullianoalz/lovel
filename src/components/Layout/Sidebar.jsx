@@ -272,11 +272,7 @@ const Sidebar = () => {
 
                 </>
               )}
-              <NavLink to="/session" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-                <ShieldCheck size={20} />
-                <span>Sesión de Clase</span>
-              </NavLink>
-              <NavLink to="/behavior" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+<NavLink to="/behavior" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <AlertTriangle size={20} />
                 <span>Comportamiento</span>
               </NavLink>
