@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, Megaphone,
+  ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, Bell,
   Check, Users, FileText, Calendar, Shell, AlertTriangle, Stethoscope,
   BookOpen, CheckCircle2, X, Clock, Star, Gift, History, Eye, EyeOff,
   ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List,
@@ -11,6 +11,9 @@ import * as xlsx from 'xlsx';
 import { useAuth } from '../../context/AuthContext';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
+import StudentProfileModal from '../Students/StudentProfileModal';
+import NotifDrawer from '../Notifications/NotifDrawer';
+import { useNotifications } from '../../hooks/useNotifications';
 import './TeacherPortal.css';
 
 /* ── Demo fallbacks ─────────────────────────────────────────── */
@@ -37,10 +40,6 @@ const getDemoSchedule = () => [
   },
 ];
 
-const getDemoAnnouncements = () => [
-  { id: 'ann-1', title: 'Staff Meeting Tomorrow', body: 'Reminder: All teachers are expected to attend the staff meeting at 3:30 PM in the main hall. We will discuss upcoming events and curriculum updates.', author: { fullName: 'Admin' }, publishedAt: new Date().toISOString(), isRead: false },
-  { id: 'ann-2', title: 'New Supply Request Form', body: 'Please use the new digital form for all supply requests starting this week. Paper forms will no longer be accepted.', author: { fullName: 'Office' }, publishedAt: new Date().toISOString(), isRead: false },
-];
 
 /* ── Helpers ────────────────────────────────────────────────── */
 const fmtTime = (t) =>
@@ -50,15 +49,20 @@ const fmtTime = (t) =>
 
 /* ============================================================ */
 const TeacherPortal = () => {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [activeTab, setActiveTab] = useState('session');
+
+  /* ── Notifications ── */
+  const notif = useNotifications(role);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifTab, setNotifTab] = useState('inbox');
+  const bellRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
 
   /* ── Portal data ── */
   const [schedule, setSchedule] = useState([]);
   const [selectedClassIdx, setSelectedClassIdx] = useState(0);
-  const [announcements, setAnnouncements] = useState([]);
 
   /* ── Emergency ── */
   const [emergencyModal, setEmergencyModal] = useState(null);
@@ -101,6 +105,9 @@ const TeacherPortal = () => {
   const [officePreviewHtml, setOfficePreviewHtml] = useState('');
   const [officeProcessing, setOfficeProcessing] = useState(false);
 
+  /* ── Student profile popup ── */
+  const [profileStudent, setProfileStudent] = useState(null);
+
   /* ── Allergy popover ── */
   const [visibleAllergy, setVisibleAllergy] = useState(null);
 
@@ -122,17 +129,11 @@ const TeacherPortal = () => {
   const loadPortalData = useCallback(async () => {
     setLoading(true);
     try {
-      const [portalRes, annRes] = await Promise.all([
-        api.get('/portal/teacher'),
-        api.get('/announcements'),
-      ]);
+      const portalRes = await api.get('/portal/teacher');
       const sc = portalRes.data.schedule || [];
-      const ann = (annRes.data.announcements || []).filter((a) => !a.isRead);
       setSchedule(sc.length > 0 ? sc : getDemoSchedule());
-      setAnnouncements(ann.length > 0 ? ann : getDemoAnnouncements());
     } catch {
       setSchedule(getDemoSchedule());
-      setAnnouncements(getDemoAnnouncements());
     } finally {
       setLoading(false);
     }
@@ -232,7 +233,7 @@ const TeacherPortal = () => {
     if (!ids.length || !shellsToAward || !prizeReason) return;
     setAwarding(true);
     const ok = await database.awardSeashells(ids, prizeReason, shellsToAward);
-    if (ok) { setPrizePoints(''); setPrizeReason(''); setSelectedForPrize({}); showToast('⭐ Points awarded!'); }
+    if (ok) { setShellsToAward(''); setPrizeReason(''); setSelectedForPrize({}); showToast('⭐ Points awarded!'); }
     setAwarding(false);
   };
 
@@ -325,12 +326,6 @@ const TeacherPortal = () => {
       showToast('⚠️ Alert sent (offline mode)');
     }
     setAlertModal(null);
-  };
-
-  /* ── Announcements ── */
-  const handleMarkRead = async (id) => {
-    try { await api.post(`/announcements/${id}/read`); } catch { /* noop */ }
-    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
   };
 
   /* ── Behavior / Medical ── */
@@ -437,28 +432,18 @@ const TeacherPortal = () => {
         </div>
       )}
 
-      {/* ── ANNOUNCEMENTS ────────────────────────────────────── */}
-      <div className="announcements-section">
-        {announcements.length > 0 ? (
-          announcements.map((ann) => (
-            <div key={ann.id} className="announcement-card">
-              <div className="announcement-icon"><Megaphone size={18} /></div>
-              <div className="announcement-content">
-                <h4>{ann.title}</h4>
-                <p>{ann.body}</p>
-                <span className="announcement-meta">{ann.author?.fullName} · {new Date(ann.publishedAt).toLocaleDateString()}</span>
-              </div>
-              <button className="announcement-read-btn" onClick={() => handleMarkRead(ann.id)}>
-                <Check size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} /> Mark Read
-              </button>
-            </div>
-          ))
-        ) : (
-          <div className="no-announcements">
-            <Megaphone size={20} style={{ marginBottom: 6, opacity: 0.4 }} /><br />
-            No new announcements — you're all caught up! ✨
-          </div>
-        )}
+      {/* ── TOP BAR: title + notification bell ───────────────── */}
+      <div className="tp-topbar">
+        <div className="tp-topbar-left">
+          <h1 className="tp-page-title">Teacher Portal</h1>
+          <span className="tp-greeting">Welcome back, {user?.fullName?.split(' ')[0]} 👋</span>
+        </div>
+        <button ref={bellRef} className="tp-bell-btn" onClick={() => setNotifOpen(p => !p)}>
+          <Bell size={20} />
+          {notif.unreadCount > 0 && (
+            <span className="tp-bell-badge">{notif.unreadCount > 9 ? '9+' : notif.unreadCount}</span>
+          )}
+        </button>
       </div>
 
       {/* ── TABS ─────────────────────────────────────────────── */}
@@ -522,6 +507,10 @@ const TeacherPortal = () => {
               </div>
             </div>
 
+            {/* Two-column layout: roster+history left, notes right */}
+            <div className="session-two-col">
+            <div className="session-col-left">
+
             {/* Roster table */}
             <div className="roster-table-wrap">
               <table className="roster-table">
@@ -552,7 +541,9 @@ const TeacherPortal = () => {
                         <div className="roster-student-name">
                           <div className="roster-avatar">{student.name.split(' ').map((n) => n[0]).join('')}</div>
                           <div>
-                            <div>{student.name}</div>
+                            <button className="student-name-link" onClick={() => setProfileStudent(student)}>
+                              {student.name}
+                            </button>
                             {/* Quick action icons */}
                             <div style={{ display: 'flex', gap: 4, marginTop: 3 }}>
                               <button title="Send Alert" onClick={() => setAlertModal(student)}
@@ -676,6 +667,10 @@ const TeacherPortal = () => {
               </div>
             </div>
 
+            </div>{/* end session-col-left */}
+
+            {/* Right column: Notes & Materials */}
+            <div className="session-col-right">
             {/* ── Session Notes & Materials ── */}
             <div className="session-resources-panel">
               <div className="resources-header">
@@ -826,7 +821,9 @@ const TeacherPortal = () => {
                   </button>
                 </div>
               </div>
-            </div>
+            </div>{/* end session-resources-panel */}
+            </div>{/* end session-col-right */}
+            </div>{/* end session-two-col */}
           </>
         )}
 
@@ -1016,6 +1013,38 @@ const TeacherPortal = () => {
               onClick={() => setAlertModal(null)}>Cancel</button>
           </div>
         </div>
+      )}
+
+      {/* ── NOTIFICATION DRAWER ──────────────────────────────── */}
+      <NotifDrawer
+        open={notifOpen}
+        onClose={() => setNotifOpen(false)}
+        activeTab={notifTab}
+        setActiveTab={setNotifTab}
+        anchorRef={bellRef}
+        inboxItems={notif.inboxItems}
+        laterItems={notif.laterItems}
+        archiveItems={notif.archiveItems}
+        markRead={notif.markRead}
+        markLater={notif.markLater}
+        restoreToInbox={notif.restoreToInbox}
+        markAllRead={notif.markAllRead}
+      />
+
+      {/* ── STUDENT PROFILE MODAL ───────────────────────────── */}
+      {profileStudent && (
+        <StudentProfileModal
+          student={profileStudent}
+          onClose={() => setProfileStudent(null)}
+          onUpdate={(updated) => {
+            setSchedule((prev) =>
+              prev.map((cls) => ({
+                ...cls,
+                roster: cls.roster.map((s) => s.id === updated.id ? { ...s, ...updated } : s),
+              }))
+            );
+          }}
+        />
       )}
 
       {/* ── FILE PREVIEW MODAL ───────────────────────────────── */}

@@ -6,7 +6,6 @@ import {
   Calendar,
   Users,
   CreditCard,
-  ShieldCheck,
   LogOut,
   LayoutDashboard,
   Menu,
@@ -15,92 +14,23 @@ import {
   Bell,
   AlertTriangle,
   Camera,
-  Activity,
   UserCircle,
   Compass,
-  Clock,
-  Inbox,
-  Archive
 } from 'lucide-react';
-import api from '../../lib/api';
+import NotifDrawer from '../Notifications/NotifDrawer';
+import { useNotifications } from '../../hooks/useNotifications';
 import './Sidebar.css';
 
 const Sidebar = () => {
   const { user, role, logout } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [dismissedIds, setDismissedIds] = useState(() => {
-    try { return new Set(JSON.parse(sessionStorage.getItem('notif_dismissed') || '[]')); }
-    catch { return new Set(); }
-  });
-  const [showArchive, setShowArchive] = useState(false);
-  const dropdownRef = useRef(null);
+  const [notifTab, setNotifTab] = useState('inbox');
+  const notif = useNotifications(role);
+  const bellRef = useRef(null);
 
   const closeMenu = () => setIsOpen(false);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (role !== 'ADMIN' && role !== 'TEACHER') return;
-    api.get('/announcements').then(res => {
-      const items = (res.data.announcements || []).slice(0, 20).map(a => ({
-        id: a.id,
-        text: a.title,
-        time: new Date(a.createdAt),
-        path: '/dashboard',
-        unread: !a.isRead,
-      }));
-      setNotifications(items);
-    }).catch(() => {});
-  }, [role]);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handler = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setIsNotifOpen(false);
-        setShowArchive(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const activeNotifs = notifications.filter(n => !dismissedIds.has(n.id));
-  const archivedNotifs = notifications.filter(n => dismissedIds.has(n.id));
-  const unreadCount = activeNotifs.filter(n => n.unread).length;
-
-  const handleNotifClick = () => {
-    setIsNotifOpen(prev => !prev);
-    setShowArchive(false);
-  };
-
-  const handleDismiss = (id, e) => {
-    e.stopPropagation();
-    const next = new Set(dismissedIds);
-    next.add(id);
-    setDismissedIds(next);
-    sessionStorage.setItem('notif_dismissed', JSON.stringify([...next]));
-  };
-
-  const handleRestoreAll = () => {
-    setDismissedIds(new Set());
-    sessionStorage.removeItem('notif_dismissed');
-  };
-
-  const handleNotifAction = (path) => {
-    setIsNotifOpen(false);
-    navigate(path);
-  };
-
-  const formatTime = (date) => {
-    const diffMins = Math.floor((Date.now() - date) / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const h = Math.floor(diffMins / 60);
-    if (h < 24) return `${h}h ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
 
   return (
     <>
@@ -116,82 +46,19 @@ const Sidebar = () => {
           className="mobile-logo"
         />
         
-        <div className="notif-wrapper" ref={dropdownRef} style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', display: 'flex', zIndex: 100 }}>
-          <button className="global-notif-bell" onClick={handleNotifClick}
-            style={{ position: 'relative', background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            <Bell size={20} color="var(--text-main)" />
-            {unreadCount > 0 && (
-              <span className="notif-badge" style={{ position: 'absolute', top: '-2px', right: '-2px', background: '#ef4444', color: 'white', width: '18px', height: '18px', borderRadius: '50%', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
-                {unreadCount}
-              </span>
-            )}
-          </button>
-
-          {isNotifOpen && (
-            <div className="notif-dropdown">
-              <div className="notif-header">
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button className={`notif-tab-btn ${!showArchive ? 'active' : ''}`} onClick={() => setShowArchive(false)}>
-                    <Inbox size={13} /> Inbox {activeNotifs.length > 0 && `(${activeNotifs.length})`}
-                  </button>
-                  <button className={`notif-tab-btn ${showArchive ? 'active' : ''}`} onClick={() => setShowArchive(true)}>
-                    <Archive size={13} /> Seen later {archivedNotifs.length > 0 && `(${archivedNotifs.length})`}
-                  </button>
-                </div>
-                <button onClick={() => setIsNotifOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={16}/></button>
-              </div>
-
-              <div className="notif-body">
-                {!showArchive ? (
-                  activeNotifs.length === 0 ? (
-                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                      <Bell size={28} style={{ opacity: 0.3, marginBottom: '8px' }} />
-                      <p style={{ margin: 0 }}>All caught up!</p>
-                    </div>
-                  ) : (
-                    activeNotifs.map(n => (
-                      <div key={n.id} className={`notif-item ${n.unread ? 'unread' : ''}`}>
-                        <div onClick={() => handleNotifAction(n.path)} style={{ cursor: 'pointer', flex: 1 }}>
-                          <p style={{ margin: '0 0 4px 0', fontSize: '13px' }}>{n.text}</p>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                            <Clock size={10} /> {formatTime(n.time)}
-                          </span>
-                        </div>
-                        <button className="notif-dismiss-btn" onClick={(e) => handleDismiss(n.id, e)} title="See later">
-                          <Clock size={13} />
-                        </button>
-                      </div>
-                    ))
-                  )
-                ) : (
-                  archivedNotifs.length === 0 ? (
-                    <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                      <p style={{ margin: 0 }}>No deferred notifications.</p>
-                    </div>
-                  ) : (
-                    archivedNotifs.map(n => (
-                      <div key={n.id} className="notif-item archived">
-                        <div style={{ flex: 1 }}>
-                          <p style={{ margin: '0 0 4px 0', fontSize: '13px', opacity: 0.7 }}>{n.text}</p>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                            <Clock size={10} /> {formatTime(n.time)}
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  )
-                )}
-              </div>
-
-              {showArchive && archivedNotifs.length > 0 && (
-                <div className="notif-footer">
-                  <button className="notif-footer-btn" onClick={handleRestoreAll}>Move all back to inbox</button>
-                </div>
+        {(role === 'ADMIN' || role === 'TEACHER') && (
+          <div style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', zIndex: 200 }}>
+            <button ref={bellRef} className="global-notif-bell" onClick={() => setIsNotifOpen(p => !p)}
+              style={{ position: 'relative', background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Bell size={20} color="var(--text-main)" />
+              {notif.unreadCount > 0 && (
+                <span className="notif-badge" style={{ position: 'absolute', top: '-2px', right: '-2px', background: '#ef4444', color: 'white', width: '18px', height: '18px', borderRadius: '50%', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', border: '2px solid white' }}>
+                  {notif.unreadCount > 9 ? '9+' : notif.unreadCount}
+                </span>
               )}
-            </div>
-          )}
-        </div>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Overlay for mobile blur effect */}
@@ -284,6 +151,19 @@ const Sidebar = () => {
           )}
         </nav>
 
+        {/* Desktop bell */}
+        {(role === 'ADMIN' || role === 'TEACHER') && (
+          <div className="sidebar-notif-anchor desk-only">
+            <button ref={bellRef} className="sidebar-bell-btn" onClick={() => setIsNotifOpen(p => !p)}>
+              <Bell size={18} />
+              <span>Notificaciones</span>
+              {notif.unreadCount > 0 && (
+                <span className="sidebar-notif-pill">{notif.unreadCount > 9 ? '9+' : notif.unreadCount}</span>
+              )}
+            </button>
+          </div>
+        )}
+
         <div className="sidebar-footer">
           <div className="user-profile">
             <div className="avatar">
@@ -304,6 +184,23 @@ const Sidebar = () => {
           </button>
         </div>
       </aside>
+
+      {/* Shared NotifDrawer — opens from sidebar bell (desktop) or mobile bell */}
+      <NotifDrawer
+        open={isNotifOpen}
+        onClose={() => setIsNotifOpen(false)}
+        activeTab={notifTab}
+        setActiveTab={setNotifTab}
+        anchorRef={bellRef}
+        position="sidebar"
+        inboxItems={notif.inboxItems}
+        laterItems={notif.laterItems}
+        archiveItems={notif.archiveItems}
+        markRead={notif.markRead}
+        markLater={notif.markLater}
+        restoreToInbox={notif.restoreToInbox}
+        markAllRead={notif.markAllRead}
+      />
     </>
   );
 };
