@@ -763,3 +763,30 @@
   top: 0;
   left: 0;
 }
+/* Notes panel — right column */
+.notes-panel-card { margin-bottom: 16px; }
+.note-block { padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; }
+.note-block:last-child { margin-bottom: 0; }
+.note-block-label { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+.medical-note { background: #fff1f2; border-left: 3px solid #ef4444; }
+.medical-note .note-block-label { color: #dc2626; }
+.accommodation-note { background: #f0f9ff; border-left: 3px solid #3b82f6; }
+.accommodation-note .note-block-label { color: #2563eb; }
+.note-block p { margin: 0; font-size: 13px; color: var(--text-main); line-height: 1.5; }
+
+/* Payment card */
+.payment-card { margin-bottom: 16px; }
+.payment-summary { display: flex; flex-direction: column; gap: 10px; }
+.payment-row { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.payment-row span:first-child { color: var(--text-muted); }
+.payment-amount.owing { color: #dc2626; font-weight: 700; }
+.payment-amount.clear { color: #16a34a; font-weight: 700; }
+.payment-date { color: var(--text-main); font-weight: 600; }
+.view-billing-btn {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 4px; padding: 8px 14px; border-radius: 8px;
+  background: var(--primary); color: white; border: none;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.15s;
+}
+.view-billing-btn:hover { opacity: 0.85; }

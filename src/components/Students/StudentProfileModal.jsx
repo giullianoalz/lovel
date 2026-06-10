@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Star, Gift, Check, TrendingDown } from 'lucide-react';
+import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Star, Gift, Check, TrendingDown, CreditCard } from 'lucide-react';
 import { database } from '../../lib/database';
 import SnackCabinetModal from './SnackCabinetModal';
 import './StudentProfileModal.css';
@@ -62,11 +62,8 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
           <div className="profile-col">
             <div className="info-card">
               <h3>Health & Details</h3>
-              <p style={{ marginBottom: '8px' }}><strong>Age:</strong> {student.age || 'N/A'}</p>
               <p style={{ marginBottom: '8px' }}><strong>Allergies:</strong> {student.allergies || 'None'}</p>
-              {student.medicalNotes && <p style={{ marginBottom: '8px' }}><strong>Medical Notes:</strong> {student.medicalNotes}</p>}
-              {student.accommodationNotes && <p style={{ marginBottom: '8px' }}><strong>Accommodations:</strong> {student.accommodationNotes}</p>}
-              
+
               <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
                 <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'N/A'}</p>
@@ -206,6 +203,56 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
                     </button>
                   </div>
                 </div>
+              )}
+            </div>
+
+            {/* Notes panel — right side */}
+            {(student.medicalNotes || student.accommodationNotes) && (
+              <div className="info-card notes-panel-card">
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📋 Notes</h3>
+                {student.medicalNotes && (
+                  <div className="note-block medical-note">
+                    <span className="note-block-label">Medical</span>
+                    <p>{student.medicalNotes}</p>
+                  </div>
+                )}
+                {student.accommodationNotes && (
+                  <div className="note-block accommodation-note">
+                    <span className="note-block-label">Accommodation</span>
+                    <p>{student.accommodationNotes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Payment summary */}
+            <div className="info-card payment-card">
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CreditCard size={18} /> Account Balance
+              </h3>
+              {student.familyId ? (
+                <div className="payment-summary">
+                  <div className="payment-row">
+                    <span>Balance owing</span>
+                    <span className={`payment-amount ${(student.balanceOwing || 0) > 0 ? 'owing' : 'clear'}`}>
+                      {(student.balanceOwing || 0) > 0 ? `$${student.balanceOwing.toFixed(2)}` : 'Paid up ✓'}
+                    </span>
+                  </div>
+                  {student.nextInvoiceDate && (
+                    <div className="payment-row">
+                      <span>Next invoice</span>
+                      <span className="payment-date">{new Date(student.nextInvoiceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    </div>
+                  )}
+                  <button
+                    className="view-billing-btn"
+                    onClick={() => window.location.href = `/billing?family=${student.familyId}`}
+                  >
+                    <CreditCard size={14} /> View Full Account
+                  </button>
+                </div>
+              ) : (
+                <p className="text-muted" style={{ fontSize: '13px' }}>No family account linked.</p>
               )}
             </div>
 

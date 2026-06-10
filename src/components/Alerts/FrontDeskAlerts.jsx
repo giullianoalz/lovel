@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy } from 'lucide-react';
+import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import api from '../../lib/api';
 import './FrontDeskAlerts.css';
@@ -18,6 +19,7 @@ const FrontDeskAlerts = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
   const socketRef = useRef(null);
+  const navigate = useNavigate();
 
   const loadAlerts = async (status = 'active') => {
     setLoading(true);
@@ -142,9 +144,19 @@ const FrontDeskAlerts = () => {
                           <TypeIcon size={20} />
                         </div>
                         <div>
-                          <h3 className="alert-student-name">{alert.studentName || 'Class Alert'}</h3>
-                          {alert.studentAge && <span className="alert-age">Age {alert.studentAge}</span>}
-                          <span className="alert-type-badge" style={{ backgroundColor: `${typeColor}15`, color: typeColor, border: `1px solid ${typeColor}30`, fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', marginLeft: alert.studentName ? '8px' : '0', fontWeight: '600' }}>
+                          {alert.studentName ? (
+                            <button
+                              className="alert-student-name-link"
+                              onClick={() => navigate(`/students?highlight=${alert.studentId}`)}
+                              title="View student profile"
+                            >
+                              {alert.studentName}
+                              <ExternalLink size={12} />
+                            </button>
+                          ) : (
+                            <h3 className="alert-student-name">Class Alert</h3>
+                          )}
+                          <span className="alert-type-badge" style={{ backgroundColor: `${typeColor}15`, color: typeColor, border: `1px solid ${typeColor}30`, fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', fontWeight: '600' }}>
                             {alert.alertType}
                           </span>
                         </div>
@@ -155,14 +167,39 @@ const FrontDeskAlerts = () => {
                       </div>
                     </div>
 
-                    <div className="alert-details">
-                      <div className="alert-detail-row">
-                        <User size={13} />
-                        <span>Reported by <strong>{alert.teacherName}</strong></span>
+                    <div className="alert-body-row">
+                      <div className="alert-details">
+                        <div className="alert-detail-row">
+                          <User size={13} />
+                          <span>Reported by <strong>{alert.teacherName}</strong></span>
+                        </div>
+                        {alert.reason && (
+                          <div className="alert-reason">
+                            <span>{alert.reason}</span>
+                          </div>
+                        )}
                       </div>
-                      {alert.reason && (
-                        <div className="alert-reason">
-                          <span>{alert.reason}</span>
+
+                      {(alert.student?.medicalNotes || alert.student?.accommodationNotes || alert.student?.allergies) && (
+                        <div className="alert-notes-panel">
+                          {alert.student?.allergies && (
+                            <div className="alert-note-item allergy">
+                              <span className="note-label">⚠️ Allergy</span>
+                              <span>{alert.student.allergies}</span>
+                            </div>
+                          )}
+                          {alert.student?.medicalNotes && (
+                            <div className="alert-note-item medical">
+                              <span className="note-label">🏥 Medical</span>
+                              <span>{alert.student.medicalNotes}</span>
+                            </div>
+                          )}
+                          {alert.student?.accommodationNotes && (
+                            <div className="alert-note-item accommodation">
+                              <span className="note-label">📋 Accommodation</span>
+                              <span>{alert.student.accommodationNotes}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

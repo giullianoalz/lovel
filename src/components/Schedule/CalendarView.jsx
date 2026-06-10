@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus } from 'lucide-react';
 import { database } from '../../lib/database';
+import { useAuth } from '../../context/AuthContext';
 import './CalendarView.css';
 
 const MOCK_EVENTS = [
@@ -174,6 +175,8 @@ const MultiDatePicker = ({ selectedDates, onChange }) => {
 };
 
 const CalendarView = () => {
+  const { role } = useAuth();
+  const canAddEvents = role === 'ADMIN' || role === 'TEACHER';
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
   const [currentDate, setCurrentDate] = useState(new Date(2026, 3, 20)); // Fake current date
   const [localEvents, setLocalEvents] = useState(MOCK_EVENTS);
@@ -861,30 +864,31 @@ const CalendarView = () => {
         </div>
 
         <div className="calendar-actions">
-          <div className="add-event-wrapper" style={{ position: 'relative' }} ref={addEventRef}>
-            <button 
-              className="add-event-btn" 
-              onClick={() => setIsAddEventDropdownOpen(!isAddEventDropdownOpen)}
-            >
-              <Plus size={16} />
-              <span>Add Event</span>
-              <span style={{ fontSize: '10px', marginLeft: '4px' }}>▼</span>
-            </button>
-            
-            {isAddEventDropdownOpen && (
-              <div className="add-event-dropdown">
+          {canAddEvents && (
+            <div className="add-event-wrapper" style={{ position: 'relative' }} ref={addEventRef}>
+              <button
+                className="add-event-btn"
+                onClick={() => setIsAddEventDropdownOpen(!isAddEventDropdownOpen)}
+              >
+                <Plus size={16} />
+                <span>Add Event</span>
+                <span style={{ fontSize: '10px', marginLeft: '4px' }}>▼</span>
+              </button>
 
-                <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
-                  <CalendarPlus size={16} />
-                  <span>Add New Event</span>
+              {isAddEventDropdownOpen && (
+                <div className="add-event-dropdown">
+                  <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
+                    <CalendarPlus size={16} />
+                    <span>Add New Event</span>
+                  </div>
+                  <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
+                    <CalendarIcon size={16} />
+                    <span>Add Non-Tutoring Event</span>
+                  </div>
                 </div>
-                <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
-                  <CalendarIcon size={16} />
-                  <span>Add Non-Tutoring Event</span>
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           <div className="filter-wrapper" style={{ position: 'relative' }} ref={searchRef}>
             <button 

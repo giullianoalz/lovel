@@ -157,3 +157,30 @@
   .regulation-container { padding: 16px; }
   .active-alerts-grid { grid-template-columns: 1fr; }
 }
+
+/* Student name link */
+.alert-student-name-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-size: 15px; font-weight: 700; color: var(--text-main);
+  transition: color 0.15s; text-align: left;
+}
+.alert-student-name-link:hover { color: var(--primary); text-decoration: underline; }
+
+/* Alert body row — left details + right notes */
+.alert-body-row { display: flex; gap: 12px; margin: 12px 0; align-items: flex-start; }
+.alert-details { flex: 1; }
+
+/* Right notes panel */
+.alert-notes-panel {
+  flex-shrink: 0; width: 180px; display: flex; flex-direction: column; gap: 6px;
+}
+.alert-note-item {
+  padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.4;
+}
+.alert-note-item .note-label {
+  display: block; font-weight: 700; font-size: 11px; margin-bottom: 2px;
+}
+.alert-note-item.allergy { background: #fef3c7; border-left: 3px solid #f59e0b; color: #78350f; }
+.alert-note-item.medical { background: #fee2e2; border-left: 3px solid #ef4444; color: #7f1d1d; }
+.alert-note-item.accommodation { background: #eff6ff; border-left: 3px solid #3b82f6; color: #1e3a8a; }
