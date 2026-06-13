@@ -421,6 +421,93 @@ export const database = {
     return newInvoiceId;
   },
 
+  // --- EMA Step Up: assign sequential LC-#### invoice numbers per student ---
+  // groups: [{ key, studentName, studentId, total, rowIndexes: [...] }]
+  // Returns the same groups enriched with { invoiceNumber, familyId, matched }.
+  processEmaBatch: async (groups) => {
+    const results = [];
+    for (const g of groups) {
+      const invoiceNumber = `${globalConfig.invoicePrefix}${globalConfig.nextInvoiceNumber}`;
+      globalConfig.nextInvoiceNumber++;
+
+      // Match the student (and thus the family) by name or external student ID.
+      const student = mockStudents.find(s =>
+        (g.studentName && s.name?.toLowerCase().trim() === g.studentName.toLowerCase().trim()) ||
+        (g.studentId && String(s.emaStudentId || '') === String(g.studentId))
+      );
+      const familyId = student?.familyId || null;
+
+      const newInv = {
+        id: invoiceNumber,
+        familyId,
+        studentId: student?.id || null,
+        studentName: g.studentName,
+        date: new Date().toISOString().split('T')[0],
+        dateRange: 'EMA Step Up Batch',
+        amount: g.total,
+        amountPaid: 0,
+        status: 'Sent',
+        source: 'EMA',
+        poNumbers: g.poNumbers || [],
+      };
+      mockInvoices.unshift(newInv);
+
+      results.push({ ...g, invoiceNumber, familyId, matched: !!student });
+    }
+    return results;
+  },
+
+  // --- EMA Step Up: reconcile a lump remittance against generated invoices ---
+  // lines: [{ poNumber, studentName, amount }] — remittance references Step Up PO #s.
+  // Matches each line to the invoice that covers that PO #, accrues amountPaid,
+  // marks invoices PAID once fully covered, and records ledger payments.
+  reconcileEmaRemittance: async (lines) => {
+    const report = { matched: [], unmatched: [], totalMatched: 0, invoicesPaid: [] };
+    const touched = new Set();
+
+    for (const line of lines) {
+      const amount = Number(line.amount) || 0;
+      // Primary match: PO # belongs to an invoice's poNumbers. Fallbacks: invoice id, student name.
+      const inv = mockInvoices.find(i =>
+        (line.poNumber && (i.poNumbers || []).includes(line.poNumber)) ||
+        (line.poNumber && i.id === line.poNumber) ||
+        (line.studentName && i.status !== 'Paid' && i.studentName?.toLowerCase().trim() === line.studentName.toLowerCase().trim())
+      );
+
+      if (inv) {
+        inv.amountPaid = (Number(inv.amountPaid) || 0) + amount;
+        report.matched.push({ ...line, invoiceNumber: inv.id, familyId: inv.familyId });
+        report.totalMatched += amount;
+        touched.add(inv.id);
+
+        if (inv.familyId) {
+          mockTransactions.push({
+            id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            studentId: inv.studentId || null,
+            familyId: inv.familyId,
+            amount: -Math.abs(amount),
+            type: 'Payment',
+            description: `EMA Step Up — ${line.poNumber || inv.id}`,
+            date: new Date().toISOString().split('T')[0],
+            invoiceId: inv.id,
+          });
+        }
+      } else {
+        report.unmatched.push(line);
+      }
+    }
+
+    // Settle status for every invoice that received funds.
+    for (const id of touched) {
+      const inv = mockInvoices.find(i => i.id === id);
+      if (!inv) continue;
+      inv.status = (Number(inv.amountPaid) || 0) >= (Number(inv.amount) || 0) ? 'Paid' : 'Partial';
+      if (inv.status === 'Paid') report.invoicesPaid.push(inv.id);
+    }
+
+    return report;
+  },
+
   // --- Prizes System ---
   awardSeashells: async (studentIds, reason, points) => {
     // studentIds is an array of IDs for bulk operations

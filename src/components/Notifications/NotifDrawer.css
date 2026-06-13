@@ -13,8 +13,9 @@
 /* ── Floating popup anchored top-right ───────────────────── */
 .notif-drawer {
   position: fixed;
-  top: 72px;        /* below the top bar / bell button */
+  top: 72px;
   right: 24px;
+  left: auto !important;
   width: 400px;
   max-height: calc(100vh - 96px);
   background: white;
@@ -37,7 +38,7 @@
 .notif-drawer--sidebar {
   top: 72px;
   right: 24px;
-  left: auto;
+  left: auto !important;
 }
 
 /* ── Header ──────────────────────────────────────────────── */

@@ -4,13 +4,14 @@ import { database } from '../../lib/database';
 import SnackCabinetModal from './SnackCabinetModal';
 import './StudentProfileModal.css';
 
-const StudentProfileModal = ({ student, onClose, onUpdate }) => {
+const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => {
+  const [student, setStudent] = useState(initialStudent);
   const [snackCabinet, setSnackCabinet] = useState([]);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
   const [showCabinet, setShowCabinet] = useState(false);
   const [materialSearch, setMaterialSearch] = useState('');
-  
+
   // Redeem state
   const [showRedeem, setShowRedeem] = useState(false);
   const [redeemItem, setRedeemItem] = useState('');
@@ -20,6 +21,20 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
   const isLowBalance = student.snackPunches < 7;
   const isNegative = student.snackPunches < 0;
 
+  /* Update local state immediately after a purchase/redeem */
+  const handlePurchaseUpdate = (result, snack) => {
+    if (!result?.success) return;
+    setStudent(prev => ({
+      ...prev,
+      snackPunches: result.newBalance,
+      snackHistory: [
+        { id: `sh_${Date.now()}`, date: new Date().toISOString(), snackName: snack.name, cost: snack.costPunches },
+        ...(prev.snackHistory || []),
+      ],
+    }));
+    onUpdate?.();
+  };
+
   const filteredMaterials = (student.materials || []).filter(m => 
     m.name.toLowerCase().includes(materialSearch.toLowerCase()) ||
     m.subject.toLowerCase().includes(materialSearch.toLowerCase())
@@ -28,14 +43,23 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
   const handleRedeem = async () => {
     if (!redeemItem || !redeemCost || redeeming) return;
     setRedeeming(true);
-    const result = await database.redeemSeashells(student.id, redeemItem, redeemCost);
-    if(result && result.success) {
-      onUpdate(); // Trigger parent refresh to get updated student data
+    const cost = Number(redeemCost);
+    const result = await database.redeemSeashells(student.id, redeemItem, cost);
+    if (result && result.success) {
+      setStudent(prev => ({
+        ...prev,
+        seashells: result.newBalance ?? Math.max(0, (prev.seashells || 0) - cost),
+        seashellHistory: [
+          { id: `ssh_${Date.now()}`, date: new Date().toISOString(), reason: redeemItem, points: -cost, type: 'redeemed' },
+          ...(prev.seashellHistory || []),
+        ],
+      }));
+      onUpdate?.();
       setShowRedeem(false);
       setRedeemItem('');
       setRedeemCost('');
     } else {
-      alert("Error redeeming: " + (result?.error || 'Unknown error'));
+      alert('Error redeeming: ' + (result?.error || 'Unknown error'));
     }
     setRedeeming(false);
   };
@@ -47,12 +71,14 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
         
         <header className="profile-header">
           <div className="student-main-info">
-            <div className="student-avatar large">{student.name[0]}</div>
+            <div className="student-avatar large">{(student.name || '?')[0]}</div>
             <div>
-              <h2 className="student-name" style={{fontSize: '24px', margin: '0 0 4px 0'}}>{student.name}</h2>
-              <span className={`status-tag ${student.status.replace(' ', '').toLowerCase()}`}>
-                {student.status}
-              </span>
+              <h2 className="student-name" style={{fontSize: '24px', margin: '0 0 4px 0'}}>{student.name || 'Student'}</h2>
+              {student.status && (
+                <span className={`status-tag ${student.status.replace(' ', '').toLowerCase()}`}>
+                  {student.status}
+                </span>
+              )}
             </div>
           </div>
         </header>
@@ -100,7 +126,7 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
 
             <div className="info-card history-card" style={{marginTop: '20px'}}>
               <h3 style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-                <Star size={18} fill="currentColor" color="#fbbf24" /> Prize History
+                <Shell size={18} color="#fbbf24" /> Prize History
               </h3>
               {student.seashellHistory && student.seashellHistory.length > 0 ? (
                 <ul className="snack-history-list">
@@ -317,11 +343,11 @@ const StudentProfileModal = ({ student, onClose, onUpdate }) => {
 
         {/* Snack Cabinet Pop-up Overlay */}
         {showCabinet && (
-          <SnackCabinetModal 
+          <SnackCabinetModal
             mode="purchase"
             student={student}
             onClose={() => setShowCabinet(false)}
-            onUpdate={onUpdate}
+            onUpdate={handlePurchaseUpdate}
           />
         )}
       </div>

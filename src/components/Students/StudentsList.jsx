@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, Filter, AlertCircle, Cookie, MoreHorizontal, Mail, MessageSquare, ShoppingBag, X, GraduationCap, DollarSign } from 'lucide-react';
+import { Search, UserPlus, AlertCircle, Cookie, MoreHorizontal, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase } from 'lucide-react';
 import { database } from '../../lib/database';
 import StudentProfileModal from './StudentProfileModal';
 import TeacherProfileModal from './TeacherProfileModal';
@@ -126,7 +126,7 @@ const StudentsList = () => {
           className={`dir-tab ${activeTab === 'teachers' ? 'active' : ''}`}
           onClick={() => { setActiveTab('teachers'); setSearchQuery(''); setStatusFilter('All'); }}
         >
-          <DollarSign size={18} />
+          <Briefcase size={18} />
           <span>Teachers & Payroll</span>
           <span className="tab-count">{teachers.length}</span>
         </button>

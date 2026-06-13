@@ -1,5 +1,10 @@
 import prisma from '../config/database.js';
 import crypto from 'crypto';
+import Stripe from 'stripe';
+
+const stripe = process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_SECRET_KEY.includes('your_')
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' })
+  : null;
 
 // GET /api/portal/teacher — Teacher dashboard (Today's classes, roster, etc)
 export const getTeacherPortal = async (req, res, next) => {
@@ -402,6 +407,138 @@ export const getParentPortal = async (req, res, next) => {
     });
 
     res.json({ children, announcements });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/portal/parent/billing — Family account, invoices & transaction history
+export const getParentBilling = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const familyMember = await prisma.familyMember.findFirst({
+      where: { userId },
+      select: { familyId: true, family: { select: { id: true, name: true } } },
+    });
+
+    if (!familyMember) return res.json({ balance: 0, invoices: [], transactions: [] });
+
+    const familyId = familyMember.familyId;
+
+    const [invoices, transactions] = await Promise.all([
+      prisma.invoice.findMany({
+        where: { familyId },
+        orderBy: { date: 'desc' },
+        include: { lines: true },
+      }),
+      prisma.transaction.findMany({
+        where: { familyId },
+        orderBy: { date: 'desc' },
+        take: 50,
+        include: { student: { select: { fullName: true } } },
+      }),
+    ]);
+
+    // Balance = sum of charges - sum of payments/refunds
+    const balance = transactions.reduce((acc, t) => {
+      const amt = Number(t.amount);
+      if (t.type === 'CHARGE') return acc + amt;
+      if (t.type === 'PAYMENT' || t.type === 'REFUND' || t.type === 'DISCOUNT') return acc - amt;
+      return acc;
+    }, 0);
+
+    res.json({
+      familyId,
+      familyName: familyMember.family.name,
+      balance: Math.round(balance * 100) / 100,
+      invoices: invoices.map(inv => ({
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        date: inv.date.toISOString().split('T')[0],
+        dueDate: inv.dueDate ? inv.dueDate.toISOString().split('T')[0] : null,
+        dateRange: inv.dateRange || '',
+        subtotal: Number(inv.subtotal),
+        total: Number(inv.totalAmount),
+        amountPaid: Number(inv.amountPaid),
+        amountDue: Math.max(0, Number(inv.totalAmount) - Number(inv.amountPaid)),
+        status: inv.status,
+        stripePaymentLink: inv.stripePaymentLink || null,
+        lines: inv.lines.map(l => ({
+          description: l.description,
+          amount: Number(l.amount),
+          quantity: l.quantity,
+        })),
+      })),
+      transactions: transactions.map(t => ({
+        id: t.id,
+        date: t.date.toISOString().split('T')[0],
+        description: t.description || '',
+        amount: Number(t.amount),
+        type: t.type,
+        studentName: t.student?.fullName || null,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/portal/parent/billing/pay/:invoiceId — Create Stripe Checkout session
+export const createPaymentSession = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { invoiceId } = req.params;
+
+    // Verify this invoice belongs to the parent's family
+    const familyMember = await prisma.familyMember.findFirst({ where: { userId } });
+    if (!familyMember) return res.status(403).json({ error: 'No family account.' });
+
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: invoiceId, familyId: familyMember.familyId },
+    });
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found.' });
+
+    const amountDue = Number(invoice.totalAmount) - Number(invoice.amountPaid);
+    if (amountDue <= 0) return res.status(400).json({ error: 'Invoice already paid.' });
+
+    // If a Stripe payment link already exists, return it
+    if (invoice.stripePaymentLink) {
+      return res.json({ url: invoice.stripePaymentLink, existing: true });
+    }
+
+    if (!stripe) {
+      return res.status(503).json({ error: 'Payment gateway not configured. Please contact the academy.' });
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'payment',
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(amountDue * 100),
+          product_data: {
+            name: `Invoice ${invoice.invoiceNumber}`,
+            description: invoice.dateRange || 'Lovelearning Academy',
+          },
+        },
+        quantity: 1,
+      }],
+      metadata: { invoiceId: invoice.id, familyId: familyMember.familyId },
+      success_url: `${frontendUrl}/portal/parent?payment=success`,
+      cancel_url: `${frontendUrl}/portal/parent?payment=cancelled`,
+    });
+
+    // Save the Stripe URL so subsequent visits skip re-creation
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { stripePaymentLink: session.url, stripePaymentLinkId: session.id },
+    });
+
+    res.json({ url: session.url });
   } catch (error) {
     next(error);
   }

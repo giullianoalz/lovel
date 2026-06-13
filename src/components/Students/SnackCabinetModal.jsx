@@ -62,8 +62,8 @@ const SnackCabinetModal = ({
     
     const result = await database.purchaseSnack(student.id, snack.id);
     if(result && result.success) {
-      onUpdate(); // Trigger parent refresh
-      onClose(); // Close cabinet after purchase
+      onUpdate(result, snack);
+      onClose();
     }
     setPurchasing(false);
   };

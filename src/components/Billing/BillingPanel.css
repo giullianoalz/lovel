@@ -187,6 +187,16 @@
   color: #991b1b;
 }
 
+.status-badge.sent {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.status-badge.partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .action-buttons {
   display: flex;
   gap: 8px;

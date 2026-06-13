@@ -9,6 +9,8 @@ import {
   createPickupAuth,
   getPickupAuths,
   deletePickupAuth,
+  getParentBilling,
+  createPaymentSession,
 } from '../controllers/portal.controller.js';
 
 const router = Router();
@@ -33,5 +35,9 @@ router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'),
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);
 router.post('/parent/pickup', authenticate, requireRole('PARENT'), createPickupAuth);
 router.delete('/parent/pickup/:id', authenticate, requireRole('PARENT'), deletePickupAuth);
+
+// Billing & Payments
+router.get('/parent/billing', authenticate, requireRole('PARENT'), getParentBilling);
+router.post('/parent/billing/pay/:invoiceId', authenticate, requireRole('PARENT'), createPaymentSession);
 
 export default router;

@@ -29,6 +29,8 @@ const BillingPanel = () => {
   const [isAddTxModalOpen, setIsAddTxModalOpen] = useState(false);
   const [isEmaModalOpen, setIsEmaModalOpen] = useState(false);
   const [emaSyncState, setEmaSyncState] = useState({ step: 1, matched: 0, newInvoices: [] });
+  const [isReconcileOpen, setIsReconcileOpen] = useState(false);
+  const [reconcile, setReconcile] = useState({ step: 1, text: '', lines: [], report: null });
   const [newTxForm, setNewTxForm] = useState({ type: 'Payment', amount: '', date: new Date().toISOString().split('T')[0], description: '', studentId: '' });
 
   const loadBilling = async () => {
@@ -97,69 +99,87 @@ const BillingPanel = () => {
     await loadBilling();
   };
 
+  // EMA CSV column indices (0-based) for the Step Up "DO NOT EDIT" export.
+  const EMA_COL = { PO_NUM: 0, PURCHASE_DATE: 1, STUDENT_NAME: 3, STUDENT_ID: 4, PROVIDER_ID: 6, START_DATE: 7, END_DATE: 8, AMOUNT: 9, INVOICE_NUM: 10 };
+  const PROVIDER_ID = '20000720';
+
   const handleEmaFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     setEmaSyncState({ ...emaSyncState, step: 2 });
-    
+
     const reader = new FileReader();
     reader.onload = async (event) => {
       const csvText = event.target.result;
       const lines = csvText.split('\n');
-      
-      if (lines.length < 2) {
-        alert("Invalid CSV format");
+
+      if (lines.length < 3) {
+        alert('Invalid CSV format — expected the Step Up "DO NOT EDIT" export with two header rows.');
         setEmaSyncState({ step: 1, matched: 0, newInvoices: [] });
         return;
       }
-      
-      const updatedLines = [];
-      let matchedCount = 0;
-      
-      // Keep headers
-      updatedLines.push(lines[0]);
-      updatedLines.push(lines[1]);
+
+      // Parse data rows (everything after the two header rows), grouping by student.
+      const parsedRows = []; // { cols, studentName, studentId, amount }
+      const groupMap = new Map(); // key -> { key, studentName, studentId, total, rowIndexes }
 
       for (let i = 2; i < lines.length; i++) {
-        const line = lines[i];
-        if (!line.trim()) continue;
-        
-        // Simple CSV split (assuming no commas inside data cells for this specific EMA export)
-        const cols = line.split(','); 
-        
-        // Indices based on EMA CSV format:
-        // 1: PURCHASE DA, 3: STUDENT NAM, 6: INDIVIDUAL PR, 7: START DATE, 8: END DATE, 9: AMOUNT, 10: BUSINESS INVOICE #
-        const purchaseDate = cols[1];
-        const studentName = cols[3];
-        const amountStr = cols[9];
-        
-        if (!studentName || !amountStr) {
-          updatedLines.push(line); // Pass through empty/invalid rows
-          continue;
-        }
+        if (!lines[i].trim()) { parsedRows.push(null); continue; }
+        const cols = lines[i].split(',');
+        const poNumber = (cols[EMA_COL.PO_NUM] || '').trim();
+        const studentName = (cols[EMA_COL.STUDENT_NAME] || '').trim();
+        const studentId = (cols[EMA_COL.STUDENT_ID] || '').trim();
+        const amount = parseFloat(cols[EMA_COL.AMOUNT]) || 0;
 
-        const amount = parseFloat(amountStr);
-        
-        // In real app, we query DB for an unpaid invoice matching student/amount
-        // For mock, we'll simulate finding a pre-existing invoice:
-        const existingInvoiceId = `LC-${Math.floor(1000 + Math.random() * 9000)}`;
-        
-        // Autofill the required columns
-        cols[6] = '20000720';      // INDIVIDUAL PR
-        cols[7] = purchaseDate;    // START DATE
-        cols[8] = purchaseDate;    // END DATE
-        cols[10] = existingInvoiceId; // BUSINESS INVOICE # (Pre-existing)
-        
-        matchedCount++;
+        if (!studentName) { parsedRows.push({ cols, skip: true }); continue; }
+
+        const key = studentId || studentName.toLowerCase();
+        if (!groupMap.has(key)) {
+          groupMap.set(key, { key, studentName, studentId, total: 0, rowIndexes: [], poNumbers: [] });
+        }
+        const g = groupMap.get(key);
+        g.total += amount;
+        g.rowIndexes.push(parsedRows.length);
+        if (poNumber) g.poNumbers.push(poNumber);
+        parsedRows.push({ cols, studentName, studentId, amount, key });
+      }
+
+      const groups = Array.from(groupMap.values());
+      if (groups.length === 0) {
+        alert('No student rows found in the CSV.');
+        setEmaSyncState({ step: 1, matched: 0, newInvoices: [] });
+        return;
+      }
+
+      // Assign sequential LC-#### invoice numbers (one per student) and record invoices.
+      const enriched = await database.processEmaBatch(groups);
+      const invoiceByKey = new Map(enriched.map(g => [g.key, g]));
+
+      // Rebuild the CSV with the three columns filled in.
+      const updatedLines = [lines[0], lines[1]];
+      for (const row of parsedRows) {
+        if (!row) { updatedLines.push(''); continue; }
+        const cols = row.cols;
+        if (!row.skip && row.key && invoiceByKey.has(row.key)) {
+          cols[EMA_COL.PROVIDER_ID] = PROVIDER_ID;
+          cols[EMA_COL.START_DATE] = cols[EMA_COL.PURCHASE_DATE];
+          cols[EMA_COL.END_DATE] = cols[EMA_COL.PURCHASE_DATE];
+          cols[EMA_COL.INVOICE_NUM] = invoiceByKey.get(row.key).invoiceNumber;
+        }
         updatedLines.push(cols.join(','));
       }
-      
-      const newCsvData = updatedLines.join('\n');
-      const blob = new Blob([newCsvData], { type: 'text/csv' });
+
+      const blob = new Blob([updatedLines.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
-      
-      setEmaSyncState({ step: 3, matched: matchedCount, downloadUrl: url });
+
+      setEmaSyncState({
+        step: 3,
+        matched: enriched.length,
+        rowCount: parsedRows.filter(r => r && !r.skip).length,
+        groups: enriched,
+        downloadUrl: url,
+      });
       await loadBilling();
     };
     reader.readAsText(file);
@@ -171,6 +191,69 @@ const BillingPanel = () => {
       URL.revokeObjectURL(emaSyncState.downloadUrl);
     }
     setTimeout(() => setEmaSyncState({ step: 1, matched: 0, newInvoices: [], downloadUrl: null }), 300);
+  };
+
+  // --- EMA Step Up remittance reconciliation ---
+  // Parse pasted/uploaded remittance text. Each line carries a Step Up PO #
+  // (e.g. 25670936-1) and a net amount; the student name is best-effort.
+  const parseRemittance = (raw) => {
+    const out = [];
+    for (const rawLine of raw.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const poMatch = line.match(/\d{5,}-\d+/);
+      const amounts = line.match(/[\d,]+\.\d{2}/g);
+      if (!poMatch || !amounts) continue;
+      const poNumber = poMatch[0];
+      const amount = parseFloat(amounts[amounts.length - 1].replace(/,/g, ''));
+      // Student name = what's left after stripping PO #, amounts and date-like tokens.
+      const studentName = line
+        .replace(poNumber, '')
+        .replace(/[\d,]+\.\d{2}/g, '')
+        .replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^[\s,;|]+|[\s,;|]+$/g, '')
+        .trim();
+      out.push({ poNumber, amount, studentName });
+    }
+    return out;
+  };
+
+  const handleParseRemittance = (text) => {
+    const lines = parseRemittance(text);
+    if (lines.length === 0) {
+      alert('Could not find any "PO number + amount" rows. Paste the lines from the Step Up remittance advice (e.g. "25670936-1   6/5/2026   Liam Killian   250.00").');
+      return;
+    }
+    // Annotate each line with the invoice it would match (preview only).
+    const annotated = lines.map(l => {
+      const inv = invoices.find(i =>
+        (i.poNumbers || []).includes(l.poNumber) ||
+        i.id === l.poNumber ||
+        (l.studentName && i.status !== 'Paid' && i.studentName?.toLowerCase().trim() === l.studentName.toLowerCase().trim())
+      );
+      return { ...l, invoiceNumber: inv?.id || null, matched: !!inv };
+    });
+    setReconcile({ step: 2, text, lines: annotated, report: null });
+  };
+
+  const handleRemittanceFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => handleParseRemittance(ev.target.result);
+    reader.readAsText(file);
+  };
+
+  const handleConfirmReconcile = async () => {
+    const report = await database.reconcileEmaRemittance(reconcile.lines);
+    setReconcile(r => ({ ...r, step: 3, report }));
+    await loadBilling();
+  };
+
+  const resetReconcile = () => {
+    setIsReconcileOpen(false);
+    setTimeout(() => setReconcile({ step: 1, text: '', lines: [], report: null }), 300);
   };
 
   if (loading && families.length === 0) return <div className="billing-container"><p>Loading financial data...</p></div>;
@@ -211,6 +294,9 @@ const BillingPanel = () => {
             <div className="table-actions">
               <button className="btn-export" style={{background: 'var(--primary)', color: 'white', borderColor: 'var(--primary)'}} onClick={() => setIsEmaModalOpen(true)}>
                 <UploadCloud size={16} /> EMA Auto-Sync
+              </button>
+              <button className="btn-export" style={{background: '#0369a1', color: 'white', borderColor: '#0369a1'}} onClick={() => setIsReconcileOpen(true)}>
+                <CheckCircle size={16} /> Reconcile Payment
               </button>
               <button className="btn-filter"><Filter size={16} /> Filter</button>
               <button className="btn-export"><Search size={16} /> Search</button>
@@ -292,28 +378,153 @@ const BillingPanel = () => {
               )}
 
               {emaSyncState.step === 3 && (
-              <div style={{textAlign: 'center', padding: '20px'}}>
-                <CheckCircle size={48} color="#10b981" style={{marginBottom: '16px'}} />
-                <h2 style={{color: 'var(--text-main)', marginBottom: '8px'}}>Sync Complete!</h2>
-                <p style={{color: 'var(--text-muted)', marginBottom: '24px'}}>
-                  Successfully matched <strong>{emaSyncState.matched} students</strong> with their existing invoices.
-                </p>
-
-                <div style={{background: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '24px', display: 'flex', gap: '8px', alignItems: 'center', textAlign: 'left'}}>
-                  <Check size={16} />
-                  <span>The <strong>BUSINESS INVOICE #</strong> column has been populated with the pre-existing invoice numbers.</span>
+              <div style={{padding: '20px'}}>
+                <div style={{textAlign: 'center', marginBottom: '20px'}}>
+                  <CheckCircle size={48} color="#10b981" style={{marginBottom: '12px'}} />
+                  <h2 style={{color: 'var(--text-main)', marginBottom: '4px'}}>Invoices Generated</h2>
+                  <p style={{color: 'var(--text-muted)', fontSize: '14px'}}>
+                    <strong>{emaSyncState.matched}</strong> invoice{emaSyncState.matched !== 1 ? 's' : ''} across <strong>{emaSyncState.rowCount}</strong> session row{emaSyncState.rowCount !== 1 ? 's' : ''}.
+                  </p>
                 </div>
 
+                <div style={{maxHeight: '260px', overflowY: 'auto', border: '1px solid var(--border-light)', borderRadius: '10px', marginBottom: '20px'}}>
+                  <table className="ledger-table" style={{margin: 0}}>
+                    <thead>
+                      <tr>
+                        <th>Student</th>
+                        <th>Invoice #</th>
+                        <th style={{textAlign: 'center'}}>Sessions</th>
+                        <th style={{textAlign: 'right'}}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(emaSyncState.groups || []).map(g => (
+                        <tr key={g.invoiceNumber}>
+                          <td>
+                            {g.studentName}
+                            {!g.matched && (
+                              <span title="No matching student in system — invoice still generated" style={{marginLeft: '6px', fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>unmatched</span>
+                            )}
+                          </td>
+                          <td style={{fontWeight: 600, color: 'var(--primary)'}}>{g.invoiceNumber}</td>
+                          <td style={{textAlign: 'center'}}>{g.rowIndexes.length}</td>
+                          <td style={{textAlign: 'right', fontWeight: 700}}>${g.total.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{background: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '20px', display: 'flex', gap: '8px', alignItems: 'center', textAlign: 'left'}}>
+                  <Check size={16} style={{flexShrink: 0}} />
+                  <span>Filled <strong>Provider ID</strong>, <strong>Start/End dates</strong>, and a sequential <strong>Business Invoice #</strong> for each student. Upload the file to Step Up.</span>
+                </div>
+
+                <div className="modal-actions" style={{justifyContent: 'center'}}>
+                  <a
+                    href={emaSyncState.downloadUrl}
+                    download="EMA_Completed.csv"
+                    className="btn-send"
+                    style={{display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none'}}
+                  >
+                    <Download size={16} /> Download Completed CSV
+                  </a>
+                </div>
+              </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* EMA Remittance Reconciliation Modal */}
+        {isReconcileOpen && (
+          <div className="modal-overlay" onClick={resetReconcile}>
+            <div className="tx-modal" onClick={e => e.stopPropagation()} style={{maxWidth: '640px'}}>
+              <div className="modal-head">
+                <h3>Reconcile EMA Payment</h3>
+                <button onClick={resetReconcile}><X size={20}/></button>
+              </div>
+
+              {reconcile.step === 1 && (
+                <div style={{padding: '8px 4px'}}>
+                  <p style={{color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px'}}>
+                    Paste the lines from the Step Up <strong>Remittance Advice</strong> (each line has a PO #, student, and net amount), or upload it as a CSV. The system matches each PO # back to its invoice and marks it paid.
+                  </p>
+                  <textarea
+                    className="form-control"
+                    rows={8}
+                    placeholder={'25670936-1   6/5/2026   Liam Killian   250.00\n25670944-1   6/5/2026   Emma Killian   250.00\n25677573-1   6/5/2026   jasper theis   60.00'}
+                    value={reconcile.text}
+                    onChange={e => setReconcile(r => ({ ...r, text: e.target.value }))}
+                    style={{width: '100%', fontFamily: 'monospace', fontSize: '13px', resize: 'vertical', boxSizing: 'border-box'}}
+                  />
+                  <div className="modal-actions" style={{marginTop: '16px', justifyContent: 'space-between'}}>
+                    <label className="btn-cancel" style={{cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '8px'}}>
+                      <FileText size={16} /> Upload CSV
+                      <input type="file" accept=".csv,.txt" style={{display: 'none'}} onChange={handleRemittanceFileUpload} />
+                    </label>
+                    <button className="btn-send" onClick={() => handleParseRemittance(reconcile.text)} disabled={!reconcile.text.trim()}>
+                      Parse & Preview
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {reconcile.step === 2 && (
+                <div style={{padding: '8px 4px'}}>
+                  <p style={{color: 'var(--text-muted)', fontSize: '13px', marginBottom: '12px'}}>
+                    Found <strong>{reconcile.lines.length}</strong> payment line{reconcile.lines.length !== 1 ? 's' : ''}. Review the matches, then confirm to mark invoices paid.
+                  </p>
+                  <div style={{maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--border-light)', borderRadius: '10px', marginBottom: '16px'}}>
+                    <table className="ledger-table" style={{margin: 0}}>
+                      <thead>
+                        <tr>
+                          <th>PO #</th>
+                          <th>Student</th>
+                          <th>Invoice</th>
+                          <th style={{textAlign: 'right'}}>Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reconcile.lines.map((l, idx) => (
+                          <tr key={idx}>
+                            <td style={{fontFamily: 'monospace', fontSize: '12px'}}>{l.poNumber}</td>
+                            <td>{l.studentName || '—'}</td>
+                            <td>
+                              {l.matched
+                                ? <span style={{fontWeight: 600, color: 'var(--primary)'}}>{l.invoiceNumber}</span>
+                                : <span title="No invoice covers this PO #" style={{fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>no match</span>}
+                            </td>
+                            <td style={{textAlign: 'right', fontWeight: 700}}>${l.amount.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="modal-actions" style={{justifyContent: 'space-between'}}>
+                    <button className="btn-cancel" onClick={() => setReconcile(r => ({ ...r, step: 1 }))}>Back</button>
+                    <button className="btn-send" onClick={handleConfirmReconcile}>
+                      Confirm & Apply {reconcile.lines.filter(l => l.matched).length} payment{reconcile.lines.filter(l => l.matched).length !== 1 ? 's' : ''}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {reconcile.step === 3 && reconcile.report && (
+                <div style={{textAlign: 'center', padding: '20px'}}>
+                  <CheckCircle size={48} color="#10b981" style={{marginBottom: '12px'}} />
+                  <h2 style={{color: 'var(--text-main)', marginBottom: '8px'}}>Payment Reconciled</h2>
+                  <p style={{color: 'var(--text-muted)', marginBottom: '20px'}}>
+                    Applied <strong>${reconcile.report.totalMatched.toFixed(2)}</strong> across <strong>{reconcile.report.matched.length}</strong> line{reconcile.report.matched.length !== 1 ? 's' : ''}.
+                    {' '}<strong>{reconcile.report.invoicesPaid.length}</strong> invoice{reconcile.report.invoicesPaid.length !== 1 ? 's' : ''} marked paid.
+                  </p>
+                  {reconcile.report.unmatched.length > 0 && (
+                    <div style={{background: '#fef3c7', color: '#92400e', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '20px', textAlign: 'left'}}>
+                      <strong>{reconcile.report.unmatched.length}</strong> line{reconcile.report.unmatched.length !== 1 ? 's' : ''} could not be matched to an invoice (PO #: {reconcile.report.unmatched.map(u => u.poNumber).join(', ')}). Review these manually.
+                    </div>
+                  )}
                   <div className="modal-actions" style={{justifyContent: 'center'}}>
-                    <a 
-                      href={emaSyncState.downloadUrl} 
-                      download="EMA_Fulfilled_Sync.csv" 
-                      className="btn-send" 
-                      style={{display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none'}}
-                      onClick={() => setTimeout(resetEmaSync, 1000)} // Close modal shortly after download triggers
-                    >
-                      <Download size={16} /> Download Completed CSV
-                    </a>
+                    <button className="btn-send" onClick={resetReconcile}>Done</button>
                   </div>
                 </div>
               )}
