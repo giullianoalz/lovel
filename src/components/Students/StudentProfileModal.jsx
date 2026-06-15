@@ -21,18 +21,40 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const isLowBalance = student.snackPunches < 7;
   const isNegative = student.snackPunches < 0;
 
+  /* Hydrate the full student record by id when the modal is opened with a
+     partial object (e.g. the minimal roster object from the Teacher Portal). */
+  useEffect(() => {
+    let cancelled = false;
+    const isPartial = !initialStudent?.snackHistory || !initialStudent?.materials || initialStudent?.status === undefined;
+    if (!initialStudent?.id || !isPartial) { setLoading(false); return; }
+    setLoading(true);
+    (async () => {
+      try {
+        const all = await database.fetchStudents();
+        const full = all.find(s => s.id === initialStudent.id);
+        if (full && !cancelled) setStudent(prev => ({ ...prev, ...full }));
+      } catch (e) {
+        console.error('Could not hydrate student profile:', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [initialStudent?.id]);
+
   /* Update local state immediately after a purchase/redeem */
   const handlePurchaseUpdate = (result, snack) => {
     if (!result?.success) return;
-    setStudent(prev => ({
-      ...prev,
+    const next = {
+      ...student,
       snackPunches: result.newBalance,
       snackHistory: [
         { id: `sh_${Date.now()}`, date: new Date().toISOString(), snackName: snack.name, cost: snack.costPunches },
-        ...(prev.snackHistory || []),
+        ...(student.snackHistory || []),
       ],
-    }));
-    onUpdate?.();
+    };
+    setStudent(next);
+    onUpdate?.(next);
   };
 
   const filteredMaterials = (student.materials || []).filter(m => 
@@ -46,15 +68,16 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
     const cost = Number(redeemCost);
     const result = await database.redeemSeashells(student.id, redeemItem, cost);
     if (result && result.success) {
-      setStudent(prev => ({
-        ...prev,
-        seashells: result.newBalance ?? Math.max(0, (prev.seashells || 0) - cost),
+      const next = {
+        ...student,
+        seashells: result.newBalance ?? Math.max(0, (student.seashells || 0) - cost),
         seashellHistory: [
           { id: `ssh_${Date.now()}`, date: new Date().toISOString(), reason: redeemItem, points: -cost, type: 'redeemed' },
-          ...(prev.seashellHistory || []),
+          ...(student.seashellHistory || []),
         ],
-      }));
-      onUpdate?.();
+      };
+      setStudent(next);
+      onUpdate?.(next);
       setShowRedeem(false);
       setRedeemItem('');
       setRedeemCost('');

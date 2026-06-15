@@ -5,6 +5,7 @@ import {
   Shell, AlertTriangle, ThumbsUp, Clock, Calendar, Gift, BookOpen,
   CreditCard, Receipt, CheckCircle, AlertCircle, ExternalLink, Download,
   ChevronDown, ChevronUp, Bell, Award, GraduationCap, Smartphone, Landmark, Copy,
+  ClipboardList, Lock, Star, Hourglass,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
@@ -64,12 +65,136 @@ const PAYMENT_METHODS = [
 
 const TABS = [
   { id: 'children',  label: 'Mis Hijos',      icon: <Users size={16} /> },
+  { id: 'register',  label: 'Inscripción',    icon: <ClipboardList size={16} /> },
   { id: 'billing',   label: 'Cuenta & Pagos',  icon: <CreditCard size={16} /> },
   { id: 'announcements', label: 'Anuncios',    icon: <Bell size={16} /> },
 ];
 
 const fmt = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const fmtShort = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+/* Human-readable countdown between now and a target date. */
+const countdown = (target, from = new Date()) => {
+  const ms = new Date(target) - new Date(from);
+  if (ms <= 0) return null;
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor((ms % 86400000) / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+};
+
+const REQUEST_STATUS_META = {
+  enrolled_first: { label: 'Inscrito en tu primera opción', cls: 'ok', icon: <CheckCircle size={15} /> },
+  enrolled: { label: 'Inscrito', cls: 'ok', icon: <CheckCircle size={15} /> },
+  waitlisted_first_enrolled_second: { label: 'En lista de espera (1ª) · Inscrito en 2ª opción', cls: 'partial', icon: <Hourglass size={15} /> },
+  waitlisted_both: { label: 'En lista de espera', cls: 'wait', icon: <Hourglass size={15} /> },
+  pending: { label: 'Solicitud en proceso', cls: 'wait', icon: <Hourglass size={15} /> },
+};
+
+/* ────────── Registration: per-child card ────────── */
+const RegistrationChildCard = ({ child, classes, onClaim, onSubmit, submitting }) => {
+  const [first, setFirst] = useState('');
+  const [second, setSecond] = useState('');
+  const busy = submitting === child.id;
+
+  // Already has a processed request → show outcome (read-only).
+  if (child.isRegistered) {
+    const meta = REQUEST_STATUS_META[child.requestStatus] || REQUEST_STATUS_META.pending;
+    return (
+      <div className="reg-child-card">
+        <div className="reg-child-head">
+          <div className="reg-child-avatar">{child.name?.[0]}</div>
+          <div><h4>{child.name}</h4></div>
+        </div>
+        <div className={`reg-status-banner ${meta.cls}`}>{meta.icon}<span>{meta.label}</span></div>
+        {child.enrollments.length > 0 && (
+          <ul className="reg-enrolled-list">
+            {child.enrollments.map(e => (
+              <li key={e.classId}><CheckCircle size={13} /> {e.className}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
+  // Window not open for this child yet.
+  if (!child.windowOpen) {
+    return (
+      <div className="reg-child-card locked">
+        <div className="reg-child-head">
+          <div className="reg-child-avatar">{child.name?.[0]}</div>
+          <div><h4>{child.name}</h4></div>
+        </div>
+        <div className="reg-status-banner locked">
+          <Lock size={15} />
+          <span>Tu ventana de inscripción aún no abre.</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="reg-child-card">
+      <div className="reg-child-head">
+        <div className="reg-child-avatar">{child.name?.[0]}</div>
+        <div><h4>{child.name}</h4></div>
+        {child.hasPriority && <span className="reg-priority-tag"><Star size={12} /> Cupo garantizado</span>}
+      </div>
+
+      {/* Guaranteed-spot one-click claim */}
+      {child.hasPriority && child.priorityClassId && (
+        <div className="reg-guaranteed">
+          <div className="reg-guaranteed-text">
+            <Star size={16} />
+            <div>
+              <strong>{child.priorityClassName}</strong>
+              <span>Tu lugar está reservado. Recláma­lo con un clic.</span>
+            </div>
+          </div>
+          <button className="reg-claim-btn" disabled={busy} onClick={() => onClaim(child.id, child.priorityClassId)}>
+            {busy ? 'Procesando…' : 'Reclamar mi cupo'}
+          </button>
+        </div>
+      )}
+
+      {/* First / second choice selection */}
+      <div className="reg-choices">
+        <div className="reg-field">
+          <label>Primera opción</label>
+          <select value={first} onChange={e => setFirst(e.target.value)}>
+            <option value="">Elige un pod…</option>
+            {classes.map(c => (
+              <option key={c.id} value={c.id} disabled={c.available <= 0}>
+                {c.name} — {c.available > 0 ? `${c.available} cupos` : 'Lleno (lista de espera)'}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="reg-field">
+          <label>Segunda opción <span className="reg-optional">(opcional)</span></label>
+          <select value={second} onChange={e => setSecond(e.target.value)}>
+            <option value="">Sin segunda opción</option>
+            {classes.filter(c => c.id !== first).map(c => (
+              <option key={c.id} value={c.id} disabled={c.available <= 0}>
+                {c.name} — {c.available > 0 ? `${c.available} cupos` : 'Lleno (lista de espera)'}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          className="reg-submit-btn"
+          disabled={!first || busy}
+          onClick={() => onSubmit(child.id, first, second || null)}
+        >
+          {busy ? 'Procesando…' : 'Enviar inscripción'}
+        </button>
+      </div>
+    </div>
+  );
+};
 
 /* ────────── Pickup Modal ────────── */
 const PickupModal = ({ children, onClose, onCreated }) => {
@@ -253,6 +378,10 @@ const ParentPortal = () => {
   const [payError, setPayError]     = useState(null);
   const [showHowToPay, setShowHowToPay] = useState(false);
   const [copiedId, setCopiedId]     = useState(null);
+  const [registration, setRegistration] = useState(null);
+  const [regLoading, setRegLoading] = useState(false);
+  const [regError, setRegError]     = useState(null);
+  const [regSubmitting, setRegSubmitting] = useState(null);
   const navigate = useNavigate();
 
   const handleCopy = (id, value) => {
@@ -292,9 +421,43 @@ const ParentPortal = () => {
 
   useEffect(() => { load(); }, []);
 
+  const loadRegistration = async () => {
+    setRegLoading(true); setRegError(null);
+    try {
+      const res = await api.get('/registration/parent');
+      setRegistration(res.data);
+    } catch (err) {
+      setRegError(err.userMessage || 'No se pudo cargar la inscripción.');
+    } finally {
+      setRegLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (tab === 'billing') loadBilling();
+    if (tab === 'register') loadRegistration();
   }, [tab]);
+
+  const handleRegSubmit = async (studentId, firstChoiceClassId, secondChoiceClassId) => {
+    if (!registration?.term) return;
+    setRegSubmitting(studentId); setRegError(null);
+    try {
+      await api.post('/registration/request', {
+        termId: registration.term.id,
+        studentId,
+        firstChoiceClassId,
+        secondChoiceClassId,
+      });
+      await loadRegistration();
+    } catch (err) {
+      setRegError(err.response?.data?.message || 'No se pudo procesar la inscripción.');
+    } finally {
+      setRegSubmitting(null);
+    }
+  };
+
+  const handleRegClaim = (studentId, priorityClassId) =>
+    handleRegSubmit(studentId, priorityClassId, null);
 
   const handlePickupCreated = (auth) => setPickupAuths(prev => [auth, ...prev]);
 
@@ -541,6 +704,83 @@ const ParentPortal = () => {
               </div>
             )}
           </>
+        )}
+
+        {/* ══════════ REGISTRATION TAB ══════════ */}
+        {tab === 'register' && (
+          <div className="reg-tab">
+            {regLoading ? (
+              <div className="pp-loading-inner"><span className="pp-spinner" />Cargando inscripción…</div>
+            ) : regError && !registration ? (
+              <div className="pp-billing-error">
+                <AlertCircle size={32} />
+                <p>{regError}</p>
+                <button className="pp-secondary-btn" onClick={loadRegistration}>Reintentar</button>
+              </div>
+            ) : !registration?.term ? (
+              <div className="pp-billing-empty">
+                <ClipboardList size={32} />
+                <p>No hay inscripción abierta en este momento.</p>
+                <span style={{ fontSize: 13, color: '#94a3b8' }}>Te avisaremos cuando abra el próximo término.</span>
+              </div>
+            ) : (
+              <>
+                {(() => {
+                  const t = registration.term;
+                  const nowRef = t.now;
+                  let phase;
+                  if (new Date(nowRef) < new Date(t.window1OpensAt)) {
+                    phase = { label: 'Abre en', value: countdown(t.window1OpensAt, nowRef), cls: 'soon' };
+                  } else if (new Date(nowRef) <= new Date(t.registrationCloses)) {
+                    phase = { label: 'Cierra en', value: countdown(t.registrationCloses, nowRef), cls: 'open' };
+                  } else {
+                    phase = { label: 'Cerrada', value: null, cls: 'closed' };
+                  }
+                  return (
+                    <div className={`reg-term-header ${phase.cls}`}>
+                      <div>
+                        <span className="reg-term-eyebrow">Inscripción</span>
+                        <h2>{t.name}</h2>
+                      </div>
+                      {phase.value && (
+                        <div className="reg-countdown">
+                          <Clock size={15} />
+                          <span>{phase.label} <strong>{phase.value}</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {regError && (
+                  <div className="pp-pay-error">
+                    <AlertCircle size={16} /> {regError}
+                    <button onClick={() => setRegError(null)}><X size={14} /></button>
+                  </div>
+                )}
+
+                {registration.students.length === 0 ? (
+                  <div className="pp-billing-empty">
+                    <Users size={32} />
+                    <p>No hay estudiantes vinculados a tu cuenta.</p>
+                  </div>
+                ) : (
+                  <div className="reg-children-grid">
+                    {registration.students.map(child => (
+                      <RegistrationChildCard
+                        key={child.id}
+                        child={child}
+                        classes={registration.classes}
+                        onClaim={handleRegClaim}
+                        onSubmit={handleRegSubmit}
+                        submitting={regSubmitting}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         )}
 
         {/* ══════════ BILLING TAB ══════════ */}

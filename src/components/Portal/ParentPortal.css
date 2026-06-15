@@ -561,3 +561,101 @@
 }
 .pp-paymethod-copy:hover { background: color-mix(in srgb, var(--accent) 8%, white); }
 .pp-paymethod-copy code { font-family: 'SF Mono', Menlo, monospace; font-weight: 600; }
+
+/* ── Registration tab ── */
+.reg-tab { display: flex; flex-direction: column; gap: 20px; }
+
+.reg-term-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 22px 26px; border-radius: 18px; color: white;
+  background: linear-gradient(135deg, #047857, #065f46);
+  box-shadow: 0 8px 24px rgba(4,120,87,0.18);
+}
+.reg-term-header.soon  { background: linear-gradient(135deg, #0369a1, #075985); }
+.reg-term-header.closed { background: linear-gradient(135deg, #64748b, #475569); }
+.reg-term-eyebrow {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+  opacity: 0.85;
+}
+.reg-term-header h2 { margin: 2px 0 0; font-size: 22px; }
+.reg-countdown {
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(255,255,255,0.18); padding: 8px 14px; border-radius: 10px;
+  font-size: 13px; backdrop-filter: blur(6px);
+}
+.reg-countdown strong { font-size: 15px; }
+
+.reg-children-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
+}
+
+.reg-child-card {
+  background: white; border: 1px solid var(--border-light); border-radius: 16px;
+  padding: 18px; display: flex; flex-direction: column; gap: 14px;
+}
+.reg-child-card.locked { opacity: 0.85; }
+
+.reg-child-head { display: flex; align-items: center; gap: 12px; }
+.reg-child-avatar {
+  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+  background: var(--primary-light); color: var(--primary);
+  display: flex; align-items: center; justify-content: center; font-weight: 700;
+}
+.reg-child-head h4 { margin: 0; font-size: 16px; color: var(--text-main); }
+.reg-priority-tag {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; color: #b45309; background: #fef3c7;
+  padding: 3px 9px; border-radius: 20px;
+}
+
+.reg-status-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-radius: 10px; font-size: 13px; font-weight: 600;
+}
+.reg-status-banner.ok      { background: #dcfce7; color: #166534; }
+.reg-status-banner.partial { background: #fef3c7; color: #92400e; }
+.reg-status-banner.wait    { background: #e0f2fe; color: #075985; }
+.reg-status-banner.locked  { background: #f1f5f9; color: #64748b; }
+
+.reg-enrolled-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.reg-enrolled-list li {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-main);
+}
+.reg-enrolled-list svg { color: var(--primary); }
+
+.reg-guaranteed {
+  border: 1px dashed #f59e0b; background: #fffbeb; border-radius: 12px; padding: 14px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.reg-guaranteed-text { display: flex; gap: 10px; align-items: flex-start; color: #92400e; }
+.reg-guaranteed-text svg { color: #f59e0b; flex-shrink: 0; margin-top: 2px; }
+.reg-guaranteed-text strong { display: block; font-size: 14px; color: var(--text-main); }
+.reg-guaranteed-text span { font-size: 12px; color: #92400e; }
+.reg-claim-btn {
+  background: #f59e0b; color: white; border: none; border-radius: 10px;
+  padding: 10px; font-weight: 700; font-size: 14px; cursor: pointer; transition: background 0.15s;
+}
+.reg-claim-btn:hover:not(:disabled) { background: #d97706; }
+.reg-claim-btn:disabled { opacity: 0.6; cursor: default; }
+
+.reg-choices { display: flex; flex-direction: column; gap: 12px; }
+.reg-field { display: flex; flex-direction: column; gap: 5px; }
+.reg-field label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.reg-optional { font-weight: 400; opacity: 0.7; }
+.reg-field select {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border-light);
+  border-radius: 9px; font-size: 13px; background: white; color: var(--text-main);
+  box-sizing: border-box;
+}
+.reg-submit-btn {
+  margin-top: 4px; background: var(--primary); color: white; border: none;
+  border-radius: 10px; padding: 11px; font-weight: 700; font-size: 14px;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.reg-submit-btn:hover:not(:disabled) { opacity: 0.9; }
+.reg-submit-btn:disabled { opacity: 0.5; cursor: default; }
+
+@media (max-width: 600px) {
+  .reg-term-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .reg-children-grid { grid-template-columns: 1fr; }
+}

@@ -127,7 +127,31 @@ export const submitRegistrationRequest = async (req, res, next) => {
     const { termId, studentId, firstChoiceClassId, secondChoiceClassId } = req.body;
 
     const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
-    
+
+    // Window guard: registration must be open, and Window 1 requires a priority hold.
+    const now = new Date();
+    if (now < term.window1OpensAt) {
+      return res.status(403).json({ message: 'La inscripción aún no ha abierto.' });
+    }
+    if (now > term.registrationCloses) {
+      return res.status(403).json({ message: 'La inscripción ya cerró.' });
+    }
+    if (now < term.window2OpensAt) {
+      // Still in Window 1 — only students with a pending priority hold may register.
+      const hold = await prisma.priorityHold.findFirst({
+        where: { termId, studentId, status: 'pending' },
+      });
+      if (!hold) {
+        return res.status(403).json({ message: 'Tu ventana de inscripción aún no ha abierto.' });
+      }
+    }
+
+    // Prevent duplicate registration requests for the same term.
+    const existing = await prisma.registrationRequest.findFirst({ where: { termId, studentId } });
+    if (existing) {
+      return res.status(409).json({ message: 'Este estudiante ya tiene una solicitud para este término.' });
+    }
+
     // 1. Transaction to ensure data integrity during resolution
     const result = await prisma.$transaction(async (tx) => {
       
@@ -196,6 +220,113 @@ export const submitRegistrationRequest = async (req, res, next) => {
     });
 
     res.json({ message: 'Registration request processed.', result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/registration/parent
+ * Consolidated parent view: the open term, each child's window eligibility &
+ * status, and the term's pods with live availability. One round-trip, no N+1.
+ */
+export const getParentRegistration = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    // The parent's children = STUDENT members of the parent's families.
+    const familyMembers = await prisma.familyMember.findMany({
+      where: { userId },
+      select: { familyId: true },
+    });
+    const familyIds = familyMembers.map(f => f.familyId);
+
+    const studentMembers = await prisma.familyMember.findMany({
+      where: { familyId: { in: familyIds }, user: { role: 'STUDENT' } },
+      select: { user: { select: { id: true, fullName: true } } },
+    });
+    const students = studentMembers.map(s => s.user);
+    const studentIds = students.map(s => s.id);
+
+    // Most relevant registrable term: not yet closed, soonest to open.
+    const now = new Date();
+    const term = await prisma.registrationTerm.findFirst({
+      where: { registrationCloses: { gte: now } },
+      orderBy: { window1OpensAt: 'asc' },
+    });
+
+    if (!term) return res.json({ term: null, students: [], classes: [] });
+
+    const classesRaw = await prisma.class.findMany({
+      where: { termId: term.id },
+      include: {
+        _count: { select: { enrollments: { where: { status: 'active' } } } },
+        teacher: { select: { fullName: true } },
+      },
+    });
+    const classes = classesRaw.map(c => ({
+      id: c.id,
+      name: c.name,
+      capacity: c.maxStudents,
+      enrolled: c._count.enrollments,
+      available: Math.max(0, c.maxStudents - c._count.enrollments),
+      teacherName: c.teacher?.fullName || null,
+      meetingUrl: c.meetingUrl || '',
+    }));
+
+    const [holds, requests, enrollments] = await Promise.all([
+      prisma.priorityHold.findMany({ where: { termId: term.id, studentId: { in: studentIds }, status: 'pending' } }),
+      prisma.registrationRequest.findMany({ where: { termId: term.id, studentId: { in: studentIds } } }),
+      prisma.classEnrollment.findMany({
+        where: { studentId: { in: studentIds }, status: 'active', class: { termId: term.id } },
+        include: { class: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    const studentStatus = students.map(s => {
+      const hold = holds.find(h => h.studentId === s.id);
+      const request = requests.find(r => r.studentId === s.id);
+      const myEnrollments = enrollments
+        .filter(e => e.studentId === s.id)
+        .map(e => ({ classId: e.class.id, className: e.class.name }));
+
+      let window = 3;
+      if (now >= term.window1OpensAt && now < term.window2OpensAt && hold) window = 1;
+      else if (now >= term.window2OpensAt && now < term.window3OpensAt) window = 2;
+      else if (now >= term.window3OpensAt) window = 3;
+
+      // Can this student register right now? Window 1 needs a hold; W2/W3 open to all.
+      let windowOpen = false;
+      if (now >= term.window1OpensAt && now < term.window2OpensAt) windowOpen = !!hold;
+      else if (now >= term.window2OpensAt && now <= term.registrationCloses) windowOpen = true;
+
+      return {
+        id: s.id,
+        name: s.fullName,
+        window,
+        windowOpen,
+        hasPriority: !!hold,
+        priorityClassId: hold?.classId || null,
+        priorityClassName: hold ? (classes.find(c => c.id === hold.classId)?.name || null) : null,
+        isRegistered: !!request,
+        requestStatus: request?.status || null,
+        enrollments: myEnrollments,
+      };
+    });
+
+    res.json({
+      term: {
+        id: term.id,
+        name: term.name,
+        window1OpensAt: term.window1OpensAt,
+        window2OpensAt: term.window2OpensAt,
+        window3OpensAt: term.window3OpensAt,
+        registrationCloses: term.registrationCloses,
+        now: now.toISOString(),
+      },
+      students: studentStatus,
+      classes,
+    });
   } catch (error) {
     next(error);
   }

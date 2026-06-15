@@ -6,6 +6,7 @@ import {
   createTerm,
   seedPriorityHolds,
   getRegistrationStatus,
+  getParentRegistration,
   submitRegistrationRequest,
   promoteFromWaitlist,
   getTerms,
@@ -35,6 +36,9 @@ router.post('/classes/:id/holds/sweep', authenticate, requireRole('ADMIN'), swee
 router.post('/classes/:id/holds/remind', authenticate, requireRole('ADMIN'), remindHolds);
 
 // --- PARENT/USER ROUTES ---
+// Consolidated parent registration view (open term, children eligibility, pods)
+router.get('/parent', authenticate, getParentRegistration);
+
 // Check window and status for a student
 router.get('/status/:studentId', authenticate, getRegistrationStatus);
 
