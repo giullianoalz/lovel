@@ -17,7 +17,9 @@ import {
   sweepHolds,
   remindHolds,
   getBillingSummary,
-  resendBillingEmail
+  resendBillingEmail,
+  adminRegisterStudent,
+  getTermElectives,
 } from '../controllers/registration.controller.js';
 
 const router = Router();
@@ -31,6 +33,9 @@ router.post('/terms/:id/seed-priority', authenticate, requireRole('ADMIN'), seed
 router.get('/classes', authenticate, requireRole('ADMIN'), withCache('registration:classes', 60), getRegistrationClasses);
 router.get('/classes/:id/roster', authenticate, requireRole('ADMIN'), getClassRoster);
 
+// Electives for a specific term (used by Manual Registration UI)
+router.get('/terms/:id/electives', authenticate, requireRole('ADMIN'), getTermElectives);
+
 router.post('/promote/:classId', authenticate, requireRole('ADMIN'), promoteFromWaitlist);
 
 router.delete('/holds/:id', authenticate, requireRole('ADMIN'), revokeHold);
@@ -39,6 +44,9 @@ router.post('/classes/:id/holds/remind', authenticate, requireRole('ADMIN'), rem
 
 router.get('/billing-summary', authenticate, requireRole('ADMIN'), getBillingSummary);
 router.post('/requests/:id/resend-email', authenticate, requireRole('ADMIN'), resendBillingEmail);
+
+// Admin manual registration — bypasses window guards
+router.post('/admin-register', authenticate, requireRole('ADMIN'), adminRegisterStudent);
 
 // --- PARENT/USER ROUTES ---
 // Consolidated parent registration view (open term, children eligibility, pods)

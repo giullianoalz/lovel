@@ -179,6 +179,27 @@ export const submitRegistrationRequest = async (req, res, next) => {
         electiveChoices: electiveIds.length ? { create: electiveIds.map(electiveId => ({ electiveId })) } : undefined,
       };
 
+      // Get familyId to post the charge to the global billing ledger
+      const familyMember = await tx.familyMember.findFirst({
+        where: { userId: studentId },
+        select: { familyId: true }
+      });
+      const familyId = familyMember?.familyId;
+
+      const postCharge = async (className) => {
+        if (familyId && billing.totalQuarterly > 0) {
+          await tx.transaction.create({
+            data: {
+              familyId,
+              studentId,
+              amount: billing.totalQuarterly,
+              type: 'CHARGE',
+              description: `Registration - ${term.name} - ${className}`
+            }
+          });
+        }
+      };
+
       // 2. Try First Choice
       if (firstClass._count.enrollments < firstClass.maxStudents) {
         // SUCCESS: Enroll in first choice
@@ -195,6 +216,8 @@ export const submitRegistrationRequest = async (req, res, next) => {
           where: { termId, studentId, classId: firstChoiceClassId },
           data: { status: 'claimed' }
         });
+
+        await postCharge(firstClass.name);
 
         return { status: 'enrolled_first', class: firstClass.name, requestId: request.id, className: firstClass.name, electives };
       }
@@ -220,6 +243,8 @@ export const submitRegistrationRequest = async (req, res, next) => {
           const request = await tx.registrationRequest.create({
             data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_first_enrolled_second', ...billingData }
           });
+
+          await postCharge(secondClass.name);
 
           return { status: 'waitlisted_first_enrolled_second', first: firstClass.name, second: secondClass.name, requestId: request.id, className: secondClass.name, electives };
         }
@@ -472,12 +497,43 @@ export const getTerms = async (req, res, next) => {
       _count: { id: true },
     });
     const seededTermIds = new Set(holdCounts.map(h => h.termId));
-    const termsWithSeedStatus = terms.map(term => ({ ...term, seeded: seededTermIds.has(term.id) }));
+    const termsWithSeedStatus = terms.map(term => ({
+      ...term,
+      // Ensure Decimal fields are serialised as plain numbers for the client
+      regularRate: Number(term.regularRate),
+      anchoredRate: Number(term.anchoredRate),
+      seeded: seededTermIds.has(term.id),
+    }));
     res.json({ terms: termsWithSeedStatus });
   } catch (error) {
     next(error);
   }
 };
+
+/**
+ * GET /api/registration/terms/:id/electives
+ * Returns all electives for a specific term (used by the Manual Registration UI).
+ */
+export const getTermElectives = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const electives = await prisma.elective.findMany({
+      where: { termId: id },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, price: true },
+    });
+    res.json({
+      electives: electives.map(e => ({
+        id: e.id,
+        name: e.name,
+        price: Number(e.price),
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 /**
  * PUT /api/registration/terms/:id
@@ -533,8 +589,10 @@ export const getRegistrationClasses = async (req, res, next) => {
       enrolled: c._count.enrollments,
       holds: c._count.priorityHolds,
       waitlist: c._count.waitlistEntries,
-      meetingUrl: c.meetingUrl || ''
+      meetingUrl: c.meetingUrl || '',
+      groupType: c.groupType || 'REGULAR',  // needed by billing preview
     }));
+
 
     res.json({ classes: formattedClasses });
   } catch (error) {
@@ -717,3 +775,154 @@ export const resendBillingEmail = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * POST /api/registration/admin-register
+ * Admin-only: register any student on behalf of a parent, bypassing all
+ * registration window restrictions. Runs through the same pricing calculator
+ * and billing email logic as the self-service parent flow.
+ */
+export const adminRegisterStudent = async (req, res, next) => {
+  try {
+    const {
+      termId,
+      studentId,
+      firstChoiceClassId,
+      secondChoiceClassId,
+      electiveIds = [],
+      ixlPlan = 'NONE',
+      skipEmail = false,
+    } = req.body;
+
+    if (!termId || !studentId || !firstChoiceClassId) {
+      return res.status(400).json({ message: 'termId, studentId y firstChoiceClassId son requeridos.' });
+    }
+
+    const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
+
+    // Prevent duplicate registrations
+    const existing = await prisma.registrationRequest.findFirst({ where: { termId, studentId } });
+    if (existing) {
+      return res.status(409).json({ message: 'Este estudiante ya tiene una solicitud para este término.' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const firstClass = await tx.class.findUniqueOrThrow({
+        where: { id: firstChoiceClassId },
+        include: { _count: { select: { enrollments: { where: { status: 'active' } } } } },
+      });
+
+      const electives = electiveIds.length
+        ? await tx.elective.findMany({ where: { id: { in: electiveIds } } })
+        : [];
+
+      const billing = calculateRegistrationBilling({ term, groupType: firstClass.groupType, electives, ixlPlan });
+      const billingData = {
+        ixlPlan,
+        baseRate: billing.baseRate,
+        electivesTotal: billing.electivesTotal,
+        ixlTotal: billing.ixlTotal,
+        totalQuarterly: billing.totalQuarterly,
+        depositAmount: billing.depositAmount,
+        depositDueDate: billing.depositDueDate,
+        electiveChoices: electiveIds.length ? { create: electiveIds.map(electiveId => ({ electiveId })) } : undefined,
+      };
+
+      const familyMember = await tx.familyMember.findFirst({
+        where: { userId: studentId },
+        select: { familyId: true }
+      });
+      const familyId = familyMember?.familyId;
+
+      const postCharge = async (className) => {
+        if (familyId && billing.totalQuarterly > 0) {
+          await tx.transaction.create({
+            data: {
+              familyId,
+              studentId,
+              amount: billing.totalQuarterly,
+              type: 'CHARGE',
+              description: `Admin Registration - ${term.name} - ${className}`
+            }
+          });
+        }
+      };
+
+      // Try first choice
+      if (firstClass._count.enrollments < firstClass.maxStudents) {
+        await tx.classEnrollment.create({ data: { classId: firstChoiceClassId, studentId, status: 'active' } });
+        const request = await tx.registrationRequest.create({
+          data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'enrolled_first', ...billingData },
+        });
+        await postCharge(firstClass.name);
+        return { status: 'enrolled_first', requestId: request.id, className: firstClass.name, electives };
+      }
+
+      // First choice full — add to waitlist
+      await tx.waitlistEntry.create({ data: { classId: firstChoiceClassId, studentId, status: 'waiting' } });
+
+      if (secondChoiceClassId) {
+        const secondClass = await tx.class.findUniqueOrThrow({
+          where: { id: secondChoiceClassId },
+          include: { _count: { select: { enrollments: { where: { status: 'active' } } } } },
+        });
+        if (secondClass._count.enrollments < secondClass.maxStudents) {
+          await tx.classEnrollment.create({ data: { classId: secondChoiceClassId, studentId, status: 'active' } });
+          const request = await tx.registrationRequest.create({
+            data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_first_enrolled_second', ...billingData },
+          });
+          await postCharge(secondClass.name);
+          return { status: 'waitlisted_first_enrolled_second', requestId: request.id, className: secondClass.name, electives };
+        }
+        await tx.waitlistEntry.create({ data: { classId: secondChoiceClassId, studentId, status: 'waiting' } });
+      }
+
+      const request = await tx.registrationRequest.create({
+        data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_both', ...billingData },
+      });
+      return { status: 'waitlisted_both', requestId: request.id, className: firstClass.name, electives };
+    });
+
+    // Fire billing email (outside transaction — a failed send never rolls back the enrollment)
+    let emailResult = { ok: false, error: 'skipped' };
+    if (!skipEmail && result.requestId) {
+      const [student, familyMember] = await Promise.all([
+        prisma.user.findUnique({ where: { id: studentId }, select: { fullName: true, email: true } }),
+        prisma.familyMember.findFirst({
+          where: { userId: studentId },
+          select: { family: { select: { members: { where: { isInvoiceRecipient: true }, select: { user: { select: { email: true } } } } } } },
+        }),
+      ]);
+      const recipientEmail = familyMember?.family?.members?.[0]?.user?.email || student?.email;
+      const requestRow = await prisma.registrationRequest.findUnique({ where: { id: result.requestId } });
+
+      emailResult = recipientEmail
+        ? await sendRegistrationBillingEmail({
+            to: recipientEmail,
+            studentName: student?.fullName || 'Estudiante',
+            className: result.className,
+            electiveNames: result.electives.map(e => e.name),
+            request: requestRow,
+            term,
+          })
+        : { ok: false, error: 'No hay correo de destinatario' };
+
+      await prisma.registrationRequest.update({
+        where: { id: result.requestId },
+        data: {
+          emailStatus: emailResult.ok ? 'SENT' : 'FAILED',
+          emailSentAt: emailResult.ok ? new Date() : null,
+        },
+      });
+    }
+
+    res.status(201).json({
+      message: 'Registro completado por el administrador.',
+      result,
+      emailSent: emailResult.ok,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

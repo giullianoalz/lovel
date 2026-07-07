@@ -192,8 +192,9 @@ const CalendarView = () => {
   const [rosterSearch, setRosterSearch] = useState('');
   const [appAlert, setAppAlert] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null });
   
-  // Admin simulation for now
-  const isAdmin = true;
+  // Only staff can edit/delete scheduled classes or manage the Zoom link —
+  // parents/students only get to view the calendar.
+  const isAdmin = role === 'ADMIN' || role === 'TEACHER';
 
   // Advanced Search States
   const [isSearchOpen, setIsSearchOpen] = useState(false);

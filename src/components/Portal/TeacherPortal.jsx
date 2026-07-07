@@ -499,7 +499,7 @@ const TeacherPortal = () => {
       {/* ── TOP BAR: title + notification bell ───────────────── */}
       <div className="tp-topbar">
         <div className="tp-topbar-left">
-          <span className="tp-greeting">Welcome back, {role === 'ADMIN' ? 'Team' : user?.fullName?.split(' ')[0]} 👋</span>
+          <span className="tp-greeting">{schedule.length > 0 ? `${schedule.length} class${schedule.length !== 1 ? 'es' : ''} today` : 'No classes scheduled'}</span>
         </div>
       </div>
 

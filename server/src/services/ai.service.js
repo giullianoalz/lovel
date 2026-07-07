@@ -51,7 +51,7 @@ const normalize = (history) => {
 const replyWithClaude = async (messages, system) => {
   if (!anthropic) return 'The AI assistant is not configured yet. Please contact the Love Learning team for help.';
   const response = await anthropic.messages.create({
-    model: 'claude-opus-4-8',
+    model: 'claude-opus-4-5',
     max_tokens: 1024,
     system,
     messages,

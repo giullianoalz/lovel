@@ -53,8 +53,96 @@ const RegistrationAdmin = () => {
   const [billingLoading, setBillingLoading] = useState(false);
   const [resendingId, setResendingId] = useState(null);
 
+  // ── Manual Registration state ──────────────────────────────────────────────
+  const [manualTermElectives, setManualTermElectives] = useState([]);
+  const [manualTermClasses, setManualTermClasses] = useState([]);
+  const [manualForm, setManualForm] = useState({
+    termId: '',
+    studentId: '',
+    firstChoiceClassId: '',
+    secondChoiceClassId: '',
+    electiveIds: [],
+    ixlPlan: 'NONE',
+    skipEmail: false,
+  });
+  const [manualStudentSearch, setManualStudentSearch] = useState('');
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualPreview, setManualPreview] = useState(null); // billing preview
+  const [manualResult, setManualResult] = useState(null);  // success result
+
   const showAlert = (message, title = 'Notification', type = 'info', onConfirm = null) => {
     setAppAlert({ isOpen: true, title, message, type, onConfirm });
+  };
+
+  // Recalculate billing preview client-side whenever the manual form changes.
+  // Mirrors registrationPricing.service.js so the admin sees the exact totals
+  // before submitting — no extra round-trip needed.
+  const recalcManualPreview = (form, classes, electives) => {
+    const cls = classes.find(c => c.id === form.firstChoiceClassId);
+    const term = terms.find(t => t.id === form.termId);
+    if (!cls || !term) { setManualPreview(null); return; }
+
+    const IXL_PRICES = { NONE: 0, CORE: 5, CORE_SPANISH: 10 };
+    const baseRate = cls.groupType === 'ANCHORED' ? Number(term.anchoredRate || 0) : Number(term.regularRate || 0);
+    const selectedElectives = electives.filter(e => form.electiveIds.includes(e.id));
+    const electivesTotal = selectedElectives.reduce((s, e) => s + Number(e.price || 130), 0);
+    const ixlTotal = IXL_PRICES[form.ixlPlan] ?? 0;
+    const totalQuarterly = baseRate + electivesTotal + ixlTotal;
+    const depositAmount = Math.round(totalQuarterly * 0.15 * 100) / 100;
+    setManualPreview({ baseRate, electivesTotal, ixlTotal, totalQuarterly, depositAmount });
+  };
+
+  const updateManualForm = (patch) => {
+    setManualForm(prev => {
+      const next = { ...prev, ...patch };
+      recalcManualPreview(next, manualTermClasses, manualTermElectives);
+      return next;
+    });
+  };
+
+  // When term changes, load its classes and electives
+  const handleManualTermChange = async (termId) => {
+    updateManualForm({ termId, firstChoiceClassId: '', secondChoiceClassId: '', electiveIds: [] });
+    setManualPreview(null);
+    if (!termId) { setManualTermClasses([]); setManualTermElectives([]); return; }
+    try {
+      const [classRes, electiveRes] = await Promise.all([
+        api.get(`/registration/classes?termId=${termId}`),
+        api.get(`/registration/terms/${termId}/electives`).catch(() => ({ data: { electives: [] } })),
+      ]);
+      setManualTermClasses(classRes.data.classes || []);
+      setManualTermElectives(electiveRes.data.electives || []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleManualElectiveToggle = (id) => {
+    updateManualForm({
+      electiveIds: manualForm.electiveIds.includes(id)
+        ? manualForm.electiveIds.filter(x => x !== id)
+        : [...manualForm.electiveIds, id],
+    });
+  };
+
+  const handleManualSubmit = async (e) => {
+    e.preventDefault();
+    if (!manualForm.termId || !manualForm.studentId || !manualForm.firstChoiceClassId) return;
+    setManualSubmitting(true);
+    try {
+      const res = await api.post('/registration/admin-register', manualForm);
+      setManualResult(res.data);
+      // Reset form
+      setManualForm({ termId: '', studentId: '', firstChoiceClassId: '', secondChoiceClassId: '', electiveIds: [], ixlPlan: 'NONE', skipEmail: false });
+      setManualPreview(null);
+      setManualStudentSearch('');
+      // Reload billing summary to reflect the new registration
+      if (activeTab === 'billing') loadBillingSummary();
+    } catch (err) {
+      showAlert(err.response?.data?.message || 'Error procesando el registro.', 'Error', 'warning');
+    } finally {
+      setManualSubmitting(false);
+    }
   };
 
   const loadTerms = async () => {
@@ -368,6 +456,9 @@ const RegistrationAdmin = () => {
         <button className={`tab ${activeTab === 'billing' ? 'active' : ''}`} onClick={() => setActiveTab('billing')}>
           Billing
         </button>
+        <button className={`tab ${activeTab === 'manual' ? 'active' : ''}`} onClick={() => setActiveTab('manual')}>
+          ✍️ Manual Registration
+        </button>
       </div>
 
       <div className="tab-content">
@@ -420,6 +511,238 @@ const RegistrationAdmin = () => {
             {terms.length === 0 && (
               <div style={{ padding: '20px', color: 'var(--text-muted)' }}>No terms created yet. Create one to get started!</div>
             )}
+          </div>
+        )}
+
+        {/* ── MANUAL REGISTRATION TAB ─────────────────────────────────────── */}
+        {activeTab === 'manual' && (
+          <div className="manual-reg-view">
+            {manualResult && (
+              <div className="manual-reg-success glass-card">
+                <CheckCircle size={28} color="var(--primary)" />
+                <div>
+                  <h3>Registration Complete</h3>
+                  <p className="text-muted">
+                    Status: <strong>{manualResult.result?.status?.replace(/_/g, ' ')}</strong>
+                    {' · '}Class: <strong>{manualResult.result?.className}</strong>
+                    {' · '}Email: <strong>{manualResult.emailSent ? '✅ Sent' : '⚠️ Not sent'}</strong>
+                  </p>
+                </div>
+                <button className="btn-outline" onClick={() => setManualResult(null)}>Register Another</button>
+              </div>
+            )}
+
+            <div className="manual-reg-grid">
+              {/* ── FORM ── */}
+              <div className="glass-card manual-reg-form-card">
+                <h2 className="manual-reg-title">Register on Behalf of a Parent</h2>
+                <p className="text-muted manual-reg-subtitle">
+                  Bypasses registration windows. Runs the full pricing engine and can send the billing confirmation email automatically.
+                </p>
+
+                <form onSubmit={handleManualSubmit} className="reg-form">
+
+                  {/* STUDENT SEARCH */}
+                  <div className="manual-reg-section">
+                    <label className="reg-form-label">1. Select Student</label>
+                    <input
+                      type="text"
+                      className="form-control reg-input-full"
+                      placeholder="Search by name..."
+                      value={manualStudentSearch}
+                      onChange={e => setManualStudentSearch(e.target.value)}
+                    />
+                    {manualStudentSearch.length > 1 && (
+                      <div className="manual-reg-student-list">
+                        {allStudents
+                          .filter(s => s.fullName.toLowerCase().includes(manualStudentSearch.toLowerCase()))
+                          .map(s => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              className={`manual-reg-student-item ${manualForm.studentId === s.id ? 'selected' : ''}`}
+                              onClick={() => { updateManualForm({ studentId: s.id }); setManualStudentSearch(s.fullName); }}
+                            >
+                              <div className="reg-search-avatar">{s.fullName.split(' ').map(n => n[0]).join('').substring(0,2)}</div>
+                              <span>{s.fullName}</span>
+                              {manualForm.studentId === s.id && <CheckCircle size={16} color="var(--primary)" />}
+                            </button>
+                          ))
+                        }
+                      </div>
+                    )}
+                    {manualForm.studentId && (
+                      <div className="manual-reg-selected-badge">
+                        <CheckCircle size={14} color="var(--primary)" />
+                        {allStudents.find(s => s.id === manualForm.studentId)?.fullName}
+                        <button type="button" className="btn-text" style={{ marginLeft: 'auto', fontSize: '12px' }}
+                          onClick={() => { updateManualForm({ studentId: '' }); setManualStudentSearch(''); }}>
+                          Change
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* TERM */}
+                  <div className="manual-reg-section">
+                    <label className="reg-form-label">2. Term</label>
+                    <select
+                      className="form-control reg-input-full"
+                      value={manualForm.termId}
+                      onChange={e => handleManualTermChange(e.target.value)}
+                      required
+                    >
+                      <option value="">— Select a term —</option>
+                      {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+
+                  {/* FIRST CHOICE CLASS */}
+                  {manualForm.termId && (
+                    <div className="manual-reg-section">
+                      <label className="reg-form-label">3. First Choice Class</label>
+                      <select
+                        className="form-control reg-input-full"
+                        value={manualForm.firstChoiceClassId}
+                        onChange={e => updateManualForm({ firstChoiceClassId: e.target.value, secondChoiceClassId: '' })}
+                        required
+                      >
+                        <option value="">— Select a class —</option>
+                        {manualTermClasses.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.enrolled}/{c.capacity} enrolled{c.enrolled >= c.capacity ? ' · FULL' : ''})
+                          </option>
+                        ))}
+                      </select>
+                      {manualForm.firstChoiceClassId && (() => {
+                        const cls = manualTermClasses.find(c => c.id === manualForm.firstChoiceClassId);
+                        const isFull = cls && cls.enrolled >= cls.capacity;
+                        return isFull ? (
+                          <p className="manual-reg-warn">⚠️ This class is full. The student will be added to the waitlist.</p>
+                        ) : null;
+                      })()}
+                    </div>
+                  )}
+
+                  {/* SECOND CHOICE CLASS */}
+                  {manualForm.firstChoiceClassId && (
+                    <div className="manual-reg-section">
+                      <label className="reg-form-label">4. Second Choice Class <span className="text-muted">(optional — backup if first is full)</span></label>
+                      <select
+                        className="form-control reg-input-full"
+                        value={manualForm.secondChoiceClassId}
+                        onChange={e => updateManualForm({ secondChoiceClassId: e.target.value })}
+                      >
+                        <option value="">— None —</option>
+                        {manualTermClasses
+                          .filter(c => c.id !== manualForm.firstChoiceClassId)
+                          .map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} ({c.enrolled}/{c.capacity})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* ELECTIVES */}
+                  {manualTermElectives.length > 0 && (
+                    <div className="manual-reg-section">
+                      <label className="reg-form-label">5. Electives <span className="text-muted">(each $130)</span></label>
+                      <div className="manual-reg-electives">
+                        {manualTermElectives.map(e => (
+                          <button
+                            key={e.id}
+                            type="button"
+                            className={`badge manual-reg-elective-btn ${manualForm.electiveIds.includes(e.id) ? 'active' : ''}`}
+                            onClick={() => handleManualElectiveToggle(e.id)}
+                          >
+                            {e.name} — ${Number(e.price || 130).toFixed(0)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* IXL PLAN */}
+                  <div className="manual-reg-section">
+                    <label className="reg-form-label">{manualTermElectives.length > 0 ? '6.' : '5.'} IXL Plan</label>
+                    <div className="manual-reg-ixl-options">
+                      {[{ value: 'NONE', label: 'None', price: '$0' }, { value: 'CORE', label: 'Core', price: '+$5/mo' }, { value: 'CORE_SPANISH', label: 'Core + Spanish', price: '+$10/mo' }].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`manual-reg-ixl-btn ${manualForm.ixlPlan === opt.value ? 'selected' : ''}`}
+                          onClick={() => updateManualForm({ ixlPlan: opt.value })}
+                        >
+                          <span>{opt.label}</span>
+                          <span className="manual-reg-ixl-price">{opt.price}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* EMAIL TOGGLE */}
+                  <div className="manual-reg-section">
+                    <label className="manual-reg-email-toggle">
+                      <input
+                        type="checkbox"
+                        checked={!manualForm.skipEmail}
+                        onChange={e => updateManualForm({ skipEmail: !e.target.checked })}
+                      />
+                      <span>Send billing confirmation email to parent</span>
+                    </label>
+                  </div>
+
+                  <div className="reg-form-actions" style={{ marginTop: '8px' }}>
+                    <button
+                      type="submit"
+                      className="btn-primary"
+                      disabled={manualSubmitting || !manualForm.termId || !manualForm.studentId || !manualForm.firstChoiceClassId}
+                      style={{ width: '100%', justifyContent: 'center' }}
+                    >
+                      {manualSubmitting ? 'Processing...' : '✍️ Complete Manual Registration'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* ── BILLING PREVIEW ── */}
+              <div className="glass-card manual-reg-preview-card">
+                <h3 className="manual-reg-preview-title">Billing Preview</h3>
+                {manualPreview ? (
+                  <div className="manual-reg-preview-content">
+                    <div className="manual-reg-preview-row">
+                      <span>Base Rate</span>
+                      <span>${manualPreview.baseRate.toFixed(2)}</span>
+                    </div>
+                    <div className="manual-reg-preview-row">
+                      <span>Electives</span>
+                      <span>${manualPreview.electivesTotal.toFixed(2)}</span>
+                    </div>
+                    <div className="manual-reg-preview-row">
+                      <span>IXL ({manualForm.ixlPlan})</span>
+                      <span>${manualPreview.ixlTotal.toFixed(2)}/mo</span>
+                    </div>
+                    <div className="manual-reg-preview-divider" />
+                    <div className="manual-reg-preview-row total">
+                      <span>Total Quarterly</span>
+                      <span>${manualPreview.totalQuarterly.toFixed(2)}</span>
+                    </div>
+                    <div className="manual-reg-preview-row deposit">
+                      <span>15% Deposit</span>
+                      <span>${manualPreview.depositAmount.toFixed(2)}</span>
+                    </div>
+                    <p className="manual-reg-preview-note">These amounts will be saved to the student's registration record and included in the billing email.</p>
+                  </div>
+                ) : (
+                  <div className="manual-reg-preview-empty">
+                    <Users size={32} style={{ opacity: 0.3 }} />
+                    <p>Select a student, term, and class to see the billing breakdown.</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

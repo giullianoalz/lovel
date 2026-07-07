@@ -37,6 +37,7 @@ import calendarRoutes from './routes/calendar.routes.js';
 import rewardsRoutes from './routes/rewards.routes.js';
 import importRoutes from './routes/import.routes.js';
 import paymentsRoutes from './routes/payments.routes.js';
+import { startCronJobs } from './jobs/cron.jobs.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -212,6 +213,10 @@ httpServer.listen(PORT, () => {
   WebSocket:   ws://localhost:${PORT}
   ──────────────────────────
   `);
+
+  // Start all background scheduled jobs (overdue invoices, absences, snack alerts)
+  startCronJobs();
 });
+
 
 export { app, io };
