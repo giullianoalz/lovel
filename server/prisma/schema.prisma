@@ -188,8 +188,8 @@ model SessionCancellation {
   cancelledBy User    @relation("CancelledByStaff", fields: [cancelledById], references: [id])
   resolvedBy  User?   @relation("ResolvedByStaff", fields: [resolvedById], references: [id])
 
+  @@unique([sessionId, studentId])
   @@index([status])
-  @@index([sessionId])
   @@map("session_cancellations")
 }
 

@@ -121,48 +121,55 @@ export const createInvoice = async (req, res, next) => {
       return res.status(400).json({ error: 'familyId and transactionIds are required.' });
     }
 
-    // Calculate total from the specified transactions
+    // Only pull transactions that belong to this family and aren't already
+    // billed — otherwise a stale client selection (or a re-submit) would
+    // double-invoice a charge the family already owes on another invoice.
     const txs = await prisma.transaction.findMany({
-      where: { id: { in: transactionIds } },
+      where: { id: { in: transactionIds }, familyId, invoiceId: null },
     });
+
+    if (txs.length === 0) {
+      return res.status(400).json({ error: 'No uninvoiced transactions found for this family.' });
+    }
 
     const subtotal = txs.reduce((acc, t) => {
       if (t.type === 'CHARGE') return acc + Number(t.amount);
       return acc - Number(t.amount);
     }, 0);
 
-    // Generate sequential invoice number
-    const lastInvoice = await prisma.invoice.findFirst({
-      orderBy: { invoiceNumber: 'desc' },
-    });
-    let nextNum = 4391;
-    if (lastInvoice && lastInvoice.invoiceNumber.startsWith('LC-')) {
-      nextNum = parseInt(lastInvoice.invoiceNumber.replace('LC-', '')) + 1;
-    }
-    const invoiceNumber = `LC-${nextNum}`;
+    // Invoice creation + marking the source transactions as billed must be
+    // atomic — a crash between the two steps would leave transactions free
+    // to be picked up again by a second invoice (double-billing the family).
+    const invoice = await prisma.$transaction(async (tx) => {
+      // Numeric max, not string sort — `invoiceNumber` is text, so a naive
+      // ORDER BY desc breaks once numbers hit 5 digits ("LC-4391" > "LC-10000"
+      // lexicographically). See nextLcNumber below for the same fix used by EMA.
+      const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
 
-    const invoice = await prisma.invoice.create({
-      data: {
-        invoiceNumber,
-        familyId,
-        subtotal,
-        totalAmount: subtotal,
-        status: 'SENT',
-        dateRange: 'Current Unbilled',
-        dueDate: new Date(Date.now() + 30 * 86400000), // 30 days from now
-        lines: {
-          create: txs.map((t) => ({
-            description: t.description || 'Charge',
-            amount: t.amount,
-          })),
+      const created = await tx.invoice.create({
+        data: {
+          invoiceNumber,
+          familyId,
+          subtotal,
+          totalAmount: subtotal,
+          status: 'SENT',
+          dateRange: 'Current Unbilled',
+          dueDate: new Date(Date.now() + 30 * 86400000), // 30 days from now
+          lines: {
+            create: txs.map((t) => ({
+              description: t.description || 'Charge',
+              amount: t.amount,
+            })),
+          },
         },
-      },
-    });
+      });
 
-    // Mark transactions as invoiced
-    await prisma.transaction.updateMany({
-      where: { id: { in: transactionIds } },
-      data: { invoiceId: invoice.id },
+      await tx.transaction.updateMany({
+        where: { id: { in: txs.map((t) => t.id) } },
+        data: { invoiceId: created.id },
+      });
+
+      return created;
     });
 
     res.status(201).json({

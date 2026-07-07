@@ -340,6 +340,19 @@ export const cancelStudentSession = async (req, res, next) => {
       include: { class: { select: { id: true, name: true, enrollments: { where: { status: 'active' } } } } },
     });
 
+    // A student can only be cancelled from a given session once — a double
+    // submit here must not open two review items (and risk a double charge).
+    const existingCancellation = await prisma.sessionCancellation.findUnique({
+      where: { sessionId_studentId: { sessionId: session.id, studentId } },
+    });
+    if (existingCancellation) {
+      return res.status(409).json({
+        error: 'Already Cancelled',
+        message: 'This student\'s enrollment in this session was already cancelled.',
+        cancellation: existingCancellation,
+      });
+    }
+
     const classDateTime = new Date(session.date);
     const startOfDay = new Date(Date.UTC(classDateTime.getUTCFullYear(), classDateTime.getUTCMonth(), classDateTime.getUTCDate()));
     const startTime = new Date(session.startTime);
@@ -447,8 +460,14 @@ export const resolveCancellation = async (req, res, next) => {
       include: { student: { select: { id: true, fullName: true } }, session: { include: { class: { select: { name: true } } } } },
     });
 
+    // Idempotency guard: a double-click, two admins on the same queue, or a
+    // network retry must never charge the family twice for one cancellation.
+    if (cancellation.status === 'RESOLVED') {
+      return res.status(409).json({ error: 'Already Resolved', message: 'This cancellation was already resolved.' });
+    }
+
     const updated = await prisma.sessionCancellation.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, status: 'PENDING_REVIEW' },
       data: {
         status: 'RESOLVED',
         finalChargePercent: parseInt(finalChargePercent),
@@ -456,7 +475,11 @@ export const resolveCancellation = async (req, res, next) => {
         resolvedById,
         resolvedAt: new Date(),
       },
-    });
+    }).catch(() => null);
+
+    if (!updated) {
+      return res.status(409).json({ error: 'Already Resolved', message: 'This cancellation was already resolved.' });
+    }
 
     if (chargeAmount != null && parseFloat(chargeAmount) > 0) {
       const familyMember = await prisma.familyMember.findFirst({ where: { userId: cancellation.studentId } });
