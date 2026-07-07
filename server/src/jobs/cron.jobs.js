@@ -1,14 +1,16 @@
 import cron from 'node-cron';
 import prisma from '../config/database.js';
 import { sendNotification } from './notification.helper.js';
+import { getAcademySettings } from '../services/settings.service.js';
 
 /**
  * Scheduled background jobs for the Academy Management System.
  *
  * Schedule overview:
- *   - Overdue invoices check  → every day at 8:00 AM
- *   - Absence alert trigger   → every day at 5:00 PM (after last class)
- *   - Low snack-punches alert → every Monday at 7:00 AM
+ *   - Overdue invoices check       → every day at 8:00 AM
+ *   - Absence alert trigger        → every day at 5:00 PM (after last class)
+ *   - Low snack-punches alert      → every Monday at 7:00 AM
+ *   - Class starting-soon reminder → every 5 minutes
  *
  * All jobs are registered here and started by calling startCronJobs()
  * from index.js after the server starts.
@@ -190,6 +192,83 @@ const checkLowSnackPunches = async () => {
 };
 
 // ─────────────────────────────────────────────────────────────
+// JOB 4 — Class Starting-Soon Reminder
+// Every 5 minutes: notify parents of enrolled students when their
+// class starts within the admin-configured window (default 15 min).
+// Runs on a 5-minute tick, not per-minute, to keep this cheap — each
+// session is only ever within the reminder window for one or two ticks,
+// and sendNotification's dedupKey makes re-catching it on a later tick
+// (a missed run, server restart, etc.) a no-op rather than a duplicate push.
+// ─────────────────────────────────────────────────────────────
+const sendClassStartingSoonReminders = async () => {
+  try {
+    const settings = await getAcademySettings();
+    if (!settings.classReminderEnabled) return;
+
+    const minutesBefore = settings.classReminderMinutesBefore;
+    const now = new Date();
+    const todayDateOnly = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    const sessions = await prisma.session.findMany({
+      where: { date: todayDateOnly, status: 'SCHEDULED' },
+      include: {
+        class: {
+          select: {
+            name: true,
+            enrollments: {
+              where: { status: 'active' },
+              select: { studentId: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (sessions.length === 0) return;
+
+    for (const session of sessions) {
+      const startAt = new Date(todayDateOnly);
+      const st = new Date(session.startTime);
+      startAt.setUTCHours(st.getUTCHours(), st.getUTCMinutes(), st.getUTCSeconds());
+
+      const minutesUntilStart = (startAt.getTime() - now.getTime()) / 60000;
+      // Already started, or further out than the configured window — skip.
+      if (minutesUntilStart <= 0 || minutesUntilStart > minutesBefore) continue;
+
+      const studentIds = session.class.enrollments.map((e) => e.studentId);
+      if (studentIds.length === 0) continue;
+
+      const familyMembers = await prisma.familyMember.findMany({
+        where: { userId: { in: studentIds } },
+        select: { familyId: true },
+      });
+      const familyIds = [...new Set(familyMembers.map((f) => f.familyId))];
+      if (familyIds.length === 0) continue;
+
+      const parents = await prisma.familyMember.findMany({
+        where: { familyId: { in: familyIds }, user: { role: 'PARENT' } },
+        select: { userId: true },
+      });
+
+      const roundedMinutes = Math.max(1, Math.round(minutesUntilStart));
+      for (const parent of parents) {
+        await sendNotification({
+          userId: parent.userId,
+          type: 'CLASS_REMINDER',
+          title: `${session.class.name} starts soon`,
+          message: `Class starts in about ${roundedMinutes} minute(s).`,
+          referenceType: 'session',
+          referenceId: session.id,
+          dedupKey: `class-reminder-${session.id}-${parent.userId}`,
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[CRON] sendClassStartingSoonReminders error:', err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
 // REGISTER ALL JOBS
 // ─────────────────────────────────────────────────────────────
 export const startCronJobs = () => {
@@ -205,6 +284,11 @@ export const startCronJobs = () => {
 
   // Every Monday at 7:00 AM
   cron.schedule('0 7 * * 1', checkLowSnackPunches, {
+    timezone: 'America/New_York',
+  });
+
+  // Every 5 minutes
+  cron.schedule('*/5 * * * *', sendClassStartingSoonReminders, {
     timezone: 'America/New_York',
   });
 

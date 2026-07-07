@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { sendPushNotification } from '../utils/pushNotifications.js';
 
 /**
  * Creates a persistent in-app Notification row (deduplicated) and optionally
@@ -50,11 +51,14 @@ export const sendNotification = async ({
       },
     });
 
-    // Fire FCM push if the user has a device token
-    // (FCM Admin SDK can be wired in here in the future)
-    // const user = await prisma.user.findUnique({ where: { id: userId }, select: { fcmToken: true } });
-    // if (user?.fcmToken) { await sendFcmPush(user.fcmToken, title, message); }
-
+    // Fire the actual FCM push — the in-app row above is only visible once the
+    // user opens the app, which defeats the point of a time-sensitive alert
+    // like a class-starting-soon reminder.
+    await sendPushNotification([userId], title, message, {
+      type,
+      referenceType: referenceType || '',
+      referenceId: referenceId || '',
+    });
   } catch (err) {
     // Notifications should never crash the main flow
     console.error(`[Notification] Failed to send to userId=${userId}:`, err.message);

@@ -225,6 +225,12 @@ const Sidebar = () => {
                   <span>Lesson Plans</span>
                 </NavLink>
               )}
+              {role === 'ADMIN' && (
+                <NavLink to="/settings/notifications" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+                  <Bell size={20} />
+                  <span>Notification Settings</span>
+                </NavLink>
+              )}
             </div>
           )}
         </nav>

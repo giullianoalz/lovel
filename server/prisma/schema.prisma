@@ -463,6 +463,21 @@ model Notification {
   @@map("notifications")
 }
 
+// Single admin-wide row (fixed id) controlling automated push notifications —
+// not per-user preferences (see NotificationPreference below for that, which
+// is separate scaffolding). Lets the front desk tune timing/on-off without a
+// deploy once this needs to change.
+model AcademySettings {
+  id                         String    @id @default(uuid()) @db.Uuid
+  classReminderEnabled       Boolean   @default(true) @map("class_reminder_enabled")
+  classReminderMinutesBefore Int       @default(15) @map("class_reminder_minutes_before")
+  absenceAlertEnabled        Boolean   @default(true) @map("absence_alert_enabled")
+  updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById                String?   @map("updated_by") @db.Uuid
+
+  @@map("academy_settings")
+}
+
 model NotificationPreference {
   id       String  @id @default(uuid()) @db.Uuid
   userId   String  @map("user_id") @db.Uuid

@@ -25,6 +25,7 @@ const MyPayroll = lazy(() => import('./components/Payroll/MyPayroll'))
 const MedicalIncidents = lazy(() => import('./components/Medical/MedicalIncidents'))
 const LessonPlanReview = lazy(() => import('./components/LessonPlans/LessonPlanReview'))
 const AcademyFeed = lazy(() => import('./components/Feed/AcademyFeed'))
+const NotificationSettings = lazy(() => import('./components/Settings/NotificationSettings'))
 
 const RouteFallback = () => (
   <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
@@ -215,6 +216,14 @@ function App() {
                         element={
                           <ProtectedRoute allowedRoles={['ADMIN']}>
                             <LessonPlanReview />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route
+                        path="/settings/notifications"
+                        element={
+                          <ProtectedRoute allowedRoles={['ADMIN']}>
+                            <NotificationSettings />
                           </ProtectedRoute>
                         }
                       />

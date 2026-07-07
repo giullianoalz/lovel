@@ -1,5 +1,7 @@
 import prisma from '../config/database.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
+import { sendNotification } from '../jobs/notification.helper.js';
+import { getAcademySettings } from '../services/settings.service.js';
 
 // A student cancelling with less than this many hours' notice triggers a
 // suggested (not automatic) 50% charge that the admin must review.
@@ -233,8 +235,57 @@ export const updateAttendance = async (req, res, next) => {
     );
 
     res.json({ message: 'Attendance records updated successfully.' });
+
+    // Notify parents of anyone marked absent — fire-and-forget so a slow
+    // notification fan-out never delays the teacher's save confirmation.
+    const absentIds = attendanceRecords
+      .filter((r) => r.status.toUpperCase() === 'ABSENT')
+      .map((r) => r.studentId);
+    if (absentIds.length > 0) {
+      notifyParentsOfAbsence(req.params.id, absentIds).catch((err) =>
+        console.error('[Attendance] absence notification failed:', err.message)
+      );
+    }
   } catch (error) {
     next(error);
+  }
+};
+
+// Notifies each absent student's parent(s), respecting the admin's
+// absenceAlertEnabled toggle. dedupKey is per session+student so re-saving
+// the same attendance sheet (e.g. adding a note afterward) never re-notifies.
+const notifyParentsOfAbsence = async (sessionId, studentIds) => {
+  const settings = await getAcademySettings();
+  if (!settings.absenceAlertEnabled) return;
+
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { class: { select: { name: true } } },
+  });
+  if (!session) return;
+
+  const familyMembers = await prisma.familyMember.findMany({
+    where: { userId: { in: studentIds } },
+    select: { familyId: true, userId: true, user: { select: { fullName: true } } },
+  });
+
+  for (const studentFM of familyMembers) {
+    const parents = await prisma.familyMember.findMany({
+      where: { familyId: studentFM.familyId, user: { role: 'PARENT' } },
+      select: { userId: true },
+    });
+
+    for (const parent of parents) {
+      await sendNotification({
+        userId: parent.userId,
+        type: 'ABSENCE',
+        title: `${studentFM.user.fullName} was marked absent`,
+        message: `${studentFM.user.fullName} was marked absent from ${session.class.name} today.`,
+        referenceType: 'session',
+        referenceId: sessionId,
+        dedupKey: `absence-${sessionId}-${studentFM.userId}`,
+      });
+    }
   }
 };
 
