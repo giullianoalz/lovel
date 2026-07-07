@@ -1,10 +1,6 @@
 import prisma from '../config/database.js';
 import crypto from 'crypto';
-import Stripe from 'stripe';
-
-const stripe = process.env.STRIPE_SECRET_KEY && !process.env.STRIPE_SECRET_KEY.includes('your_')
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' })
-  : null;
+import stripe from '../config/stripe.js';
 
 // GET /api/portal/teacher — Teacher dashboard (Today's classes, roster, etc)
 export const getTeacherPortal = async (req, res, next) => {

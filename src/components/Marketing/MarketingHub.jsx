@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Camera, Star, Zap, Upload, X, Check, Calendar, Image, ChevronDown, Eye, Clock, User } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/api';
+import { useToast } from '../Layout/ToastProvider';
 import './MarketingHub.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 const MarketingHub = () => {
   const { role } = useAuth();
+  const toast = useToast();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('submit'); // 'submit' | 'gallery'
@@ -138,7 +140,7 @@ const MarketingHub = () => {
       await loadSubmissions();
     } catch (error) {
       console.error('Error submitting:', error);
-      alert('Error submitting content. Please try again.');
+      toast.error('Error submitting content. Please try again.');
     }
     setSubmitting(false);
   };

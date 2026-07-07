@@ -17,6 +17,11 @@ import BehaviorTracker from './components/Behavior/BehaviorTracker'
 import FrontDeskAlerts from './components/Alerts/FrontDeskAlerts'
 import MarketingHub from './components/Marketing/MarketingHub'
 import TeacherPortal from './components/Portal/TeacherPortal'
+import MyPayroll from './components/Payroll/MyPayroll'
+import MedicalIncidents from './components/Medical/MedicalIncidents'
+import LessonPlanReview from './components/LessonPlans/LessonPlanReview'
+import AcademyFeed from './components/Feed/AcademyFeed'
+import { ToastProvider } from './components/Layout/ToastProvider'
 import './index.css'
 
 // Root redirect: teachers/admins → Teacher Portal, others → Dashboard
@@ -51,9 +56,9 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
       }}>
         <div style={{ textAlign: 'center' }}>
           <p style={{ color: '#064e3b', fontWeight: '600', fontSize: '16px', marginBottom: '8px' }}>
-            Cargando tu experiencia académica...
+            Loading your academy experience...
           </p>
-          <span style={{ fontSize: '13px', color: '#166534', opacity: 0.8 }}>Conectando con la base de datos Neon</span>
+          <span style={{ fontSize: '13px', color: '#166534', opacity: 0.8 }}>Connecting to Neon database</span>
         </div>
       </div>
     );
@@ -74,6 +79,7 @@ function App() {
   return (
     <Router>
       <AuthProvider>
+        <ToastProvider>
         <Routes>
           {/* Public Login Route */}
           <Route path="/login" element={<Login />} />
@@ -89,6 +95,7 @@ function App() {
                     <Routes>
                       <Route path="/" element={<SmartRoot />} />
                       <Route path="/dashboard" element={<SmartDashboard />} />
+                      <Route path="/feed" element={<AcademyFeed />} />
                       <Route path="/chat" element={<ChatHub />} />
                       <Route path="/calendar" element={<CalendarView />} />
                       
@@ -162,21 +169,45 @@ function App() {
                           </ProtectedRoute>
                         } 
                       />
-                      <Route 
-                        path="/supervision" 
+                      <Route
+                        path="/supervision"
                         element={
                           <ProtectedRoute allowedRoles={['ADMIN']}>
                             <SupervisionPanel />
                           </ProtectedRoute>
-                        } 
+                        }
                       />
-                      <Route 
-                        path="/alerts" 
+                      <Route
+                        path="/my-payroll"
+                        element={
+                          <ProtectedRoute allowedRoles={['TEACHER']}>
+                            <MyPayroll />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route
+                        path="/alerts"
                         element={
                           <ProtectedRoute allowedRoles={['ADMIN']}>
                             <FrontDeskAlerts />
                           </ProtectedRoute>
-                        } 
+                        }
+                      />
+                      <Route
+                        path="/medical"
+                        element={
+                          <ProtectedRoute allowedRoles={['ADMIN']}>
+                            <MedicalIncidents />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route
+                        path="/lesson-plans"
+                        element={
+                          <ProtectedRoute allowedRoles={['ADMIN']}>
+                            <LessonPlanReview />
+                          </ProtectedRoute>
+                        }
                       />
 
                       {/* Catch-all redirect */}
@@ -188,6 +219,7 @@ function App() {
             } 
           />
         </Routes>
+        </ToastProvider>
       </AuthProvider>
     </Router>
   )

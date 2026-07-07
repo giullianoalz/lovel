@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard } from 'lucide-react';
+import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse } from 'lucide-react';
 import { database } from '../../lib/database';
+import api from '../../lib/api';
 import SnackCabinetModal from './SnackCabinetModal';
+import { useToast } from '../Layout/ToastProvider';
+import { useAuth } from '../../context/AuthContext';
 import './StudentProfileModal.css';
 
 const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => {
+  const toast = useToast();
+  const { role } = useAuth();
+  // Teachers only see academic/behavioral info — parent contact and billing stay
+  // inside the app so families can't be solicited directly outside of it.
+  const isTeacher = role === 'TEACHER';
   const [student, setStudent] = useState(initialStudent);
   const [snackCabinet, setSnackCabinet] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +25,28 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const [redeemItem, setRedeemItem] = useState('');
   const [redeemCost, setRedeemCost] = useState('');
   const [redeeming, setRedeeming] = useState(false);
+
+  /* ── Report (medical / behavior) ── */
+  const [reportType, setReportType] = useState(null); // 'medical' | 'behavior' | null
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [medForm, setMedForm] = useState({ time: new Date().toISOString().slice(0, 16), place: '', description: '', actionsTaken: '', sentHome: false });
+  const [behForm, setBehForm] = useState({ place: '', ruleBroken: '', category: '', description: '', severity: 'MINOR' });
+
+  const handleSubmitReport = async () => {
+    setReportSubmitting(true);
+    try {
+      if (reportType === 'medical') {
+        await api.post('/medical', { studentId: student.id, ...medForm });
+      } else {
+        await api.post('/behavior', { studentId: student.id, type: 'WARNING', ...behForm });
+      }
+      toast.success(`${reportType === 'medical' ? 'Medical' : 'Behavior'} report submitted`);
+      setReportType(null);
+    } catch (err) {
+      toast.error('Error submitting report');
+    }
+    setReportSubmitting(false);
+  };
 
   const isLowBalance = student.snackPunches < 7;
   const isNegative = student.snackPunches < 0;
@@ -62,8 +92,10 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
     m.subject.toLowerCase().includes(materialSearch.toLowerCase())
   );
 
+  const redeemExceedsBalance = Number(redeemCost) > (student.seashells || 0);
+
   const handleRedeem = async () => {
-    if (!redeemItem || !redeemCost || redeeming) return;
+    if (!redeemItem || !redeemCost || redeeming || redeemExceedsBalance) return;
     setRedeeming(true);
     const cost = Number(redeemCost);
     const result = await database.redeemSeashells(student.id, redeemItem, cost);
@@ -82,7 +114,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
       setRedeemItem('');
       setRedeemCost('');
     } else {
-      alert('Error redeeming: ' + (result?.error || 'Unknown error'));
+      toast.error('Redeem error: ' + (result?.error || 'Unknown error'));
     }
     setRedeeming(false);
   };
@@ -97,6 +129,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
             <div className="student-avatar large">{(student.name || '?')[0]}</div>
             <div>
               <h2 className="student-name" style={{fontSize: '24px', margin: '0 0 4px 0'}}>{student.name || 'Student'}</h2>
+              {student.birthday && <span className="text-muted" style={{fontSize: '12px'}}>🎂 {new Date(student.birthday).toLocaleDateString()}</span>}
               {student.status && (
                 <span className={`status-tag ${student.status.replace(' ', '').toLowerCase()}`}>
                   {student.status}
@@ -104,7 +137,57 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               )}
             </div>
           </div>
+          <div className="profile-header-actions">
+            <button className="report-btn medical-report-btn" onClick={() => setReportType('medical')}>
+              <HeartPulse size={15} /> Medical
+            </button>
+            <button className="report-btn behavior-report-btn" onClick={() => setReportType('behavior')}>
+              <AlertTriangle size={15} /> Behavior
+            </button>
+          </div>
         </header>
+
+        {/* ── Inline Report Form ── */}
+        {reportType && (
+          <div className="inline-report-form">
+            <div className="report-form-header">
+              <h3>{reportType === 'medical' ? '🩺 Medical Incident' : '📝 Behavior Incident'} — {student.name}</h3>
+              <button className="icon-btn" onClick={() => setReportType(null)}><X size={16} /></button>
+            </div>
+            {reportType === 'medical' ? (
+              <div className="report-fields">
+                <input type="datetime-local" value={medForm.time} onChange={e => setMedForm(p => ({...p, time: e.target.value}))} />
+                <input type="text" placeholder="Place (e.g. Classroom)" value={medForm.place} onChange={e => setMedForm(p => ({...p, place: e.target.value}))} />
+                <textarea placeholder="Description of incident..." value={medForm.description} onChange={e => setMedForm(p => ({...p, description: e.target.value}))} />
+                <textarea placeholder="Actions taken (bandaid, first aid...)" value={medForm.actionsTaken} onChange={e => setMedForm(p => ({...p, actionsTaken: e.target.value}))} />
+                <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13}}><input type="checkbox" checked={medForm.sentHome} onChange={e => setMedForm(p => ({...p, sentHome: e.target.checked}))} /> Sent home</label>
+              </div>
+            ) : (
+              <div className="report-fields">
+                <input type="text" placeholder="Place (e.g. Classroom)" value={behForm.place} onChange={e => setBehForm(p => ({...p, place: e.target.value}))} />
+                <select value={behForm.category} onChange={e => setBehForm(p => ({...p, category: e.target.value}))}>
+                  <option value="">Select category...</option>
+                  <option value="DISRESPECT">Disrespect</option>
+                  <option value="DISRUPTION">Disruption</option>
+                  <option value="AGGRESSION">Aggression</option>
+                  <option value="LANGUAGE">Inappropriate Language</option>
+                  <option value="SAFETY">Safety Violation</option>
+                  <option value="OTHER">Other</option>
+                </select>
+                <input type="text" placeholder="Rule broken" value={behForm.ruleBroken} onChange={e => setBehForm(p => ({...p, ruleBroken: e.target.value}))} />
+                <textarea placeholder="Description of incident..." value={behForm.description} onChange={e => setBehForm(p => ({...p, description: e.target.value}))} />
+                <select value={behForm.severity} onChange={e => setBehForm(p => ({...p, severity: e.target.value}))}>
+                  <option value="MINOR">Minor</option>
+                  <option value="MODERATE">Moderate</option>
+                  <option value="SEVERE">Severe</option>
+                </select>
+              </div>
+            )}
+            <button className="action-btn primary" onClick={handleSubmitReport} disabled={reportSubmitting} style={{marginTop:10}}>
+              {reportSubmitting ? 'Submitting...' : 'Submit Report'}
+            </button>
+          </div>
+        )}
 
         <div className="profile-body">
           {/* Left Column: Details & History */}
@@ -113,12 +196,14 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               <h3>Health & Details</h3>
               <p style={{ marginBottom: '8px' }}><strong>Allergies:</strong> {student.allergies || 'None'}</p>
 
-              <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
-                <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'N/A'}</p>
-                <p style={{ marginBottom: '4px' }}><strong>Phone:</strong> {student.parentPhone || 'N/A'}</p>
-                <p style={{ marginBottom: '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
-              </div>
+              {!isTeacher && (
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
+                  <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'N/A'}</p>
+                  <p style={{ marginBottom: '4px' }}><strong>Phone:</strong> {student.parentPhone || 'N/A'}</p>
+                  <p style={{ marginBottom: '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
+                </div>
+              )}
             </div>
 
             <div className="info-card history-card">
@@ -217,6 +302,11 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                   <span className="punch-label">Total Points</span>
                 </div>
               </div>
+              <div className="seashell-tiers">
+                <span className="tier-item" title="1 Seahorse = 100 Seashells">🐴 {Math.floor((student.seashells || 0) / 100)} seahorse{Math.floor((student.seashells || 0) / 100) !== 1 ? 's' : ''}</span>
+                <span className="tier-item" title="1 Starfish = 10 Seashells">⭐ {Math.floor(((student.seashells || 0) % 100) / 10)} starfish</span>
+                <span className="tier-item" title="Remaining Seashells">🐚 {(student.seashells || 0) % 10} shells</span>
+              </div>
               
               {!showRedeem ? (
                 <button 
@@ -229,28 +319,33 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                 </button>
               ) : (
                 <div className="redeem-form">
-                  <input 
-                    type="text" 
-                    placeholder="Physical Prize (e.g. Teddy Bear)" 
+                  <input
+                    type="text"
+                    placeholder="Physical Prize (e.g. Teddy Bear)"
                     value={redeemItem}
                     onChange={e => setRedeemItem(e.target.value)}
                     className="prize-input"
                   />
                   <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
-                    <input 
-                      type="number" 
-                      placeholder="Points" 
+                    <input
+                      type="number"
+                      placeholder="Points"
                       value={redeemCost}
                       onChange={e => setRedeemCost(e.target.value)}
                       className="prize-input points"
                     />
-                    <button className="action-btn primary" onClick={handleRedeem} disabled={redeeming || !redeemItem || !redeemCost}>
+                    <button className="action-btn primary" onClick={handleRedeem} disabled={redeeming || !redeemItem || !redeemCost || redeemExceedsBalance}>
                       <Check size={16} /> Confirm
                     </button>
                     <button className="icon-btn" onClick={() => setShowRedeem(false)} style={{background: 'rgba(255,255,255,0.2)', color: 'white'}}>
                       <X size={16} />
                     </button>
                   </div>
+                  {redeemExceedsBalance && (
+                    <p style={{ color: '#fecaca', fontSize: 12, margin: '6px 0 0' }}>
+                      Only {student.seashells || 0} seashells available — lower the amount.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -274,36 +369,38 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               </div>
             )}
 
-            {/* Payment summary */}
-            <div className="info-card payment-card">
-              <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CreditCard size={18} /> Account Balance
-              </h3>
-              {student.familyId ? (
-                <div className="payment-summary">
-                  <div className="payment-row">
-                    <span>Balance owing</span>
-                    <span className={`payment-amount ${(student.balanceOwing || 0) > 0 ? 'owing' : 'clear'}`}>
-                      {(student.balanceOwing || 0) > 0 ? `$${student.balanceOwing.toFixed(2)}` : 'Paid up ✓'}
-                    </span>
-                  </div>
-                  {student.nextInvoiceDate && (
+            {/* Payment summary — admin only */}
+            {!isTeacher && (
+              <div className="info-card payment-card">
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <CreditCard size={18} /> Account Balance
+                </h3>
+                {student.familyId ? (
+                  <div className="payment-summary">
                     <div className="payment-row">
-                      <span>Next invoice</span>
-                      <span className="payment-date">{new Date(student.nextInvoiceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      <span>Balance owing</span>
+                      <span className={`payment-amount ${(student.balanceOwing || 0) > 0 ? 'owing' : 'clear'}`}>
+                        {(student.balanceOwing || 0) > 0 ? `$${student.balanceOwing.toFixed(2)}` : 'Paid up ✓'}
+                      </span>
                     </div>
-                  )}
-                  <button
-                    className="view-billing-btn"
-                    onClick={() => window.location.href = `/billing?family=${student.familyId}`}
-                  >
-                    <CreditCard size={14} /> View Full Account
-                  </button>
-                </div>
-              ) : (
-                <p className="text-muted" style={{ fontSize: '13px' }}>No family account linked.</p>
-              )}
-            </div>
+                    {student.nextInvoiceDate && (
+                      <div className="payment-row">
+                        <span>Next invoice</span>
+                        <span className="payment-date">{new Date(student.nextInvoiceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                      </div>
+                    )}
+                    <button
+                      className="view-billing-btn"
+                      onClick={() => window.location.href = `/billing?family=${student.familyId}`}
+                    >
+                      <CreditCard size={14} /> View Full Account
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-muted" style={{ fontSize: '13px' }}>No family account linked.</p>
+                )}
+              </div>
+            )}
 
             <div className="info-card materials-card">
               <header className="section-header-row">

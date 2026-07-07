@@ -247,6 +247,20 @@
 .desc-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .teacher-cell { color: var(--text-muted); font-size: 12px; }
 
+.behavior-row.reviewable { cursor: pointer; }
+.behavior-row.reviewable:hover { background: #f8fafc; }
+
+.behavior-status-badge {
+  padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+}
+.behavior-status-badge.recorded { background: #fef3c7; color: #92400e; }
+.behavior-status-badge.downgraded { background: #f1f5f9; color: #64748b; }
+.behavior-status-badge.sent_to_parent { background: #dcfce7; color: #166534; }
+
+.review-summary {
+  padding: 12px; background: #f8fafc; border-radius: 10px; margin-bottom: 14px; font-size: 14px;
+}
+
 .behavior-loading, .behavior-empty {
   padding: 60px 20px;
   text-align: center;

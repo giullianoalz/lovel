@@ -5,6 +5,8 @@ import {
   UploadCloud, FileText, Check, User
 } from 'lucide-react';
 import { database } from '../../lib/database';
+import { useToast } from '../Layout/ToastProvider';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './BillingPanel.css';
 
 const formatDateUS = (dateStr) => {
@@ -16,12 +18,14 @@ const formatDateUS = (dateStr) => {
 };
 
 const BillingPanel = () => {
+  const toast = useToast();
   const [families, setFamilies] = useState([]);
   const [students, setStudents] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+  const [error, setError] = useState(null);
+
   const [selectedFamily, setSelectedFamily] = useState(null);
   const [activeTab, setActiveTab] = useState('Account'); // 'Account' | 'Invoices'
 
@@ -35,15 +39,21 @@ const BillingPanel = () => {
 
   const loadBilling = async () => {
     setLoading(true);
-    const fams = await database.fetchFamilies();
-    const studs = await database.fetchStudents();
-    const txs = await database.fetchAllTransactions();
-    const invs = await database.fetchAllInvoices();
-    setFamilies(fams);
-    setStudents(studs);
-    setTransactions(txs);
-    setInvoices(invs);
-    setLoading(false);
+    setError(null);
+    try {
+      const fams = await database.fetchFamilies();
+      const studs = await database.fetchStudents();
+      const txs = await database.fetchAllTransactions();
+      const invs = await database.fetchAllInvoices();
+      setFamilies(fams);
+      setStudents(studs);
+      setTransactions(txs);
+      setInvoices(invs);
+    } catch (err) {
+      setError(err.userMessage || 'Could not load billing data. Real financial figures could not be verified, so nothing is shown — please retry.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -65,38 +75,48 @@ const BillingPanel = () => {
   const handleAddTransaction = async () => {
     if (!newTxForm.amount || isNaN(newTxForm.amount)) return;
     setLoading(true);
-    
-    // 1. Create the charge
-    const newTx = await database.addTransaction({
-      familyId: selectedFamily.id,
-      studentId: newTxForm.studentId || null,
-      amount: parseFloat(newTxForm.amount),
-      type: newTxForm.type,
-      description: newTxForm.description || `Manual ${newTxForm.type}`,
-      date: newTxForm.date,
-      invoiceId: null
-    });
 
-    // 2. Auto-Generate Invoice if it's a Charge
-    if (newTx.type.toLowerCase() === 'charge') {
-      const newInv = await database.generateInvoice(selectedFamily.id, [newTx.id]);
-      alert(`Charge added. Invoice ${newInv.id} generated and emailed to the parent automatically.`);
+    try {
+      // 1. Create the charge
+      const newTx = await database.addTransaction({
+        familyId: selectedFamily.id,
+        studentId: newTxForm.studentId || null,
+        amount: parseFloat(newTxForm.amount),
+        type: newTxForm.type,
+        description: newTxForm.description || `Manual ${newTxForm.type}`,
+        date: newTxForm.date,
+        invoiceId: null
+      });
+
+      // 2. Auto-Generate Invoice if it's a Charge
+      if (newTx.type.toLowerCase() === 'charge') {
+        const newInv = await database.generateInvoice(selectedFamily.id, [newTx.id]);
+        toast.success(`Charge added. Invoice ${newInv.id} generated and sent to parent automatically.`);
+      }
+
+      setIsAddTxModalOpen(false);
+      await loadBilling();
+    } catch (err) {
+      setLoading(false);
+      toast.error(err.userMessage || 'Could not save the transaction. Please try again.');
     }
-
-    setIsAddTxModalOpen(false);
-    await loadBilling();
   };
 
   const handleGenerateInvoice = async () => {
     const uninvoicedCharges = transactions.filter(t => t.familyId === selectedFamily.id && t.type === 'Charge' && !t.invoiceId);
     if (uninvoicedCharges.length === 0) {
-      alert("No unbilled charges available to invoice.");
+      toast.info('No pending charges to invoice.');
       return;
     }
     setLoading(true);
-    await database.generateInvoice(selectedFamily.id, uninvoicedCharges.map(t => t.id));
-    setActiveTab('Invoices');
-    await loadBilling();
+    try {
+      await database.generateInvoice(selectedFamily.id, uninvoicedCharges.map(t => t.id));
+      setActiveTab('Invoices');
+      await loadBilling();
+    } catch (err) {
+      setLoading(false);
+      toast.error(err.userMessage || 'Could not generate the invoice. Please try again.');
+    }
   };
 
   // EMA CSV column indices (0-based) for the Step Up "DO NOT EDIT" export.
@@ -115,7 +135,7 @@ const BillingPanel = () => {
       const lines = csvText.split('\n');
 
       if (lines.length < 3) {
-        alert('Invalid CSV format — expected the Step Up "DO NOT EDIT" export with two header rows.');
+        toast.error('Invalid CSV format — expected the "DO NOT EDIT" Step Up export with two header rows.');
         setEmaSyncState({ step: 1, matched: 0, newInvoices: [] });
         return;
       }
@@ -147,40 +167,45 @@ const BillingPanel = () => {
 
       const groups = Array.from(groupMap.values());
       if (groups.length === 0) {
-        alert('No student rows found in the CSV.');
+        toast.error('No student rows found in the CSV.');
         setEmaSyncState({ step: 1, matched: 0, newInvoices: [] });
         return;
       }
 
       // Assign sequential LC-#### invoice numbers (one per student) and record invoices.
-      const enriched = await database.processEmaBatch(groups);
-      const invoiceByKey = new Map(enriched.map(g => [g.key, g]));
+      try {
+        const enriched = await database.processEmaBatch(groups);
+        const invoiceByKey = new Map(enriched.map(g => [g.key, g]));
 
-      // Rebuild the CSV with the three columns filled in.
-      const updatedLines = [lines[0], lines[1]];
-      for (const row of parsedRows) {
-        if (!row) { updatedLines.push(''); continue; }
-        const cols = row.cols;
-        if (!row.skip && row.key && invoiceByKey.has(row.key)) {
-          cols[EMA_COL.PROVIDER_ID] = PROVIDER_ID;
-          cols[EMA_COL.START_DATE] = cols[EMA_COL.PURCHASE_DATE];
-          cols[EMA_COL.END_DATE] = cols[EMA_COL.PURCHASE_DATE];
-          cols[EMA_COL.INVOICE_NUM] = invoiceByKey.get(row.key).invoiceNumber;
+        // Rebuild the CSV with the three columns filled in.
+        const updatedLines = [lines[0], lines[1]];
+        for (const row of parsedRows) {
+          if (!row) { updatedLines.push(''); continue; }
+          const cols = row.cols;
+          if (!row.skip && row.key && invoiceByKey.has(row.key)) {
+            cols[EMA_COL.PROVIDER_ID] = PROVIDER_ID;
+            cols[EMA_COL.START_DATE] = cols[EMA_COL.PURCHASE_DATE];
+            cols[EMA_COL.END_DATE] = cols[EMA_COL.PURCHASE_DATE];
+            cols[EMA_COL.INVOICE_NUM] = invoiceByKey.get(row.key).invoiceNumber;
+          }
+          updatedLines.push(cols.join(','));
         }
-        updatedLines.push(cols.join(','));
+
+        const blob = new Blob([updatedLines.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+
+        setEmaSyncState({
+          step: 3,
+          matched: enriched.length,
+          rowCount: parsedRows.filter(r => r && !r.skip).length,
+          groups: enriched,
+          downloadUrl: url,
+        });
+        await loadBilling();
+      } catch (err) {
+        toast.error(err.userMessage || 'Could not generate EMA invoices. No invoices were created — please try again.');
+        setEmaSyncState({ step: 1, matched: 0, newInvoices: [] });
       }
-
-      const blob = new Blob([updatedLines.join('\n')], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-
-      setEmaSyncState({
-        step: 3,
-        matched: enriched.length,
-        rowCount: parsedRows.filter(r => r && !r.skip).length,
-        groups: enriched,
-        downloadUrl: url,
-      });
-      await loadBilling();
     };
     reader.readAsText(file);
   };
@@ -222,7 +247,7 @@ const BillingPanel = () => {
   const handleParseRemittance = (text) => {
     const lines = parseRemittance(text);
     if (lines.length === 0) {
-      alert('Could not find any "PO number + amount" rows. Paste the lines from the Step Up remittance advice (e.g. "25670936-1   6/5/2026   Liam Killian   250.00").');
+      toast.error('No rows found with "PO # + amount". Paste the Step Up remittance lines (e.g. "25670936-1   6/5/2026   Liam Killian   250.00").');
       return;
     }
     // Annotate each line with the invoice it would match (preview only).
@@ -246,9 +271,13 @@ const BillingPanel = () => {
   };
 
   const handleConfirmReconcile = async () => {
-    const report = await database.reconcileEmaRemittance(reconcile.lines);
-    setReconcile(r => ({ ...r, step: 3, report }));
-    await loadBilling();
+    try {
+      const report = await database.reconcileEmaRemittance(reconcile.lines);
+      setReconcile(r => ({ ...r, step: 3, report }));
+      await loadBilling();
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not reconcile the payment. No invoices were marked paid — please try again.');
+    }
   };
 
   const resetReconcile = () => {
@@ -256,7 +285,14 @@ const BillingPanel = () => {
     setTimeout(() => setReconcile({ step: 1, text: '', lines: [], report: null }), 300);
   };
 
-  if (loading && families.length === 0) return <div className="billing-container"><p>Loading financial data...</p></div>;
+  if (error) return <div className="billing-container"><ErrorBanner message={error} onRetry={loadBilling} /></div>;
+
+  if (loading && families.length === 0) return (
+    <div className="billing-container" style={{ textAlign: 'center', padding: '80px 20px' }}>
+      <div className="spinner" style={{ marginBottom: '16px' }}></div>
+      <p style={{ color: 'var(--text-muted)' }}>Loading financial data...</p>
+    </div>
+  );
 
   // --- MAIN DASHBOARD VIEW (List of Families) ---
   if (!selectedFamily) {
@@ -538,13 +574,14 @@ const BillingPanel = () => {
   // --- FAMILY DETAILED VIEW ---
   const familyTxs = transactions.filter(t => t.familyId === selectedFamily.id).sort((a,b) => new Date(a.date) - new Date(b.date)); // Sort oldest first for running balance
   
-  // Calculate running balance
+  // Calculate running balance. Convention: positive = family owes money, negative = family has a credit.
+  // Matches calculateFamilyBalance() above so the family list and this detail view never disagree.
   let runningBal = 0;
   const ledgerTxs = familyTxs.map(tx => {
     const type = tx.type.toLowerCase();
-    if (type === 'charge') runningBal -= tx.amount;
-    if (type === 'payment' || type === 'refund') runningBal += Math.abs(tx.amount);
-    if (type === 'discount') runningBal += Math.abs(tx.amount);
+    if (type === 'charge') runningBal += tx.amount;
+    if (type === 'payment' || type === 'discount') runningBal -= Math.abs(tx.amount);
+    if (type === 'refund') runningBal += Math.abs(tx.amount);
     return { ...tx, runningBalance: runningBal };
   }).reverse(); // Reverse back to newest first for display
 
@@ -608,7 +645,13 @@ const BillingPanel = () => {
           {activeTab === 'Account' && (
             <div className="tab-pane">
               <div className="balance-header">
-                <h2>Balance Owing: <span style={{color: currentBalance < 0 ? '#dc2626' : 'var(--text-main)'}}>{currentBalance < 0 ? `$${Math.abs(currentBalance).toFixed(2)}` : `$0.00`}</span></h2>
+                {currentBalance > 0 ? (
+                  <h2>Balance Owing: <span style={{color: '#dc2626'}}>${currentBalance.toFixed(2)}</span></h2>
+                ) : currentBalance < 0 ? (
+                  <h2>Credit on Account: <span style={{color: '#166534'}}>${Math.abs(currentBalance).toFixed(2)}</span></h2>
+                ) : (
+                  <h2>Balance: <span style={{color: '#166534'}}>Paid in Full</span></h2>
+                )}
               </div>
 
               <div className="ledger-actions">
@@ -649,8 +692,8 @@ const BillingPanel = () => {
                           {type === 'payment' && <span className="tx-payment">Payment ${Math.abs(tx.amount).toFixed(2)}</span>}
                           {type === 'refund' && <span className="tx-refund">Refund ${Math.abs(tx.amount).toFixed(2)}</span>}
                         </td>
-                        <td style={{fontWeight: 700, color: tx.runningBalance < 0 ? '#dc2626' : '#166534'}}>
-                          {tx.runningBalance < 0 ? `($${Math.abs(tx.runningBalance).toFixed(2)})` : `$${tx.runningBalance.toFixed(2)}`}
+                        <td style={{fontWeight: 700, color: tx.runningBalance > 0 ? '#dc2626' : '#166534'}}>
+                          {tx.runningBalance < 0 ? `($${Math.abs(tx.runningBalance).toFixed(2)} credit)` : `$${tx.runningBalance.toFixed(2)}`}
                         </td>
                       </tr>
                     );
@@ -718,45 +761,20 @@ const BillingPanel = () => {
 
             <div className="tx-form">
               <div className="form-group">
-                <label>Student</label>
-                <div className="custom-dropdown" onClick={() => {
-                  const el = document.getElementById('student-dropdown-menu');
-                  el.style.display = el.style.display === 'block' ? 'none' : 'block';
-                }}>
-                  <div className="custom-dropdown-selected form-control">
-                    {newTxForm.studentId 
-                      ? students.find(s => s.id === newTxForm.studentId)?.name 
-                      : '— General (entire family) —'}
-                  </div>
-                  <div id="student-dropdown-menu" className="custom-dropdown-menu">
-                    <div 
-                      className="custom-dropdown-item" 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNewTxForm({...newTxForm, studentId: ''});
-                        document.getElementById('student-dropdown-menu').style.display = 'none';
-                      }}
-                    >
-                      — General (entire family) —
-                    </div>
-                    {students
-                      .filter(s => s.familyId === selectedFamily.id)
-                      .map(s => (
-                        <div 
-                          key={s.id} 
-                          className="custom-dropdown-item"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setNewTxForm({...newTxForm, studentId: s.id});
-                            document.getElementById('student-dropdown-menu').style.display = 'none';
-                          }}
-                        >
-                          {s.name}
-                        </div>
-                      ))
-                    }
-                  </div>
-                </div>
+                <label htmlFor="tx-student-select">Student</label>
+                <select
+                  id="tx-student-select"
+                  className="form-control"
+                  value={newTxForm.studentId}
+                  onChange={(e) => setNewTxForm({ ...newTxForm, studentId: e.target.value })}
+                >
+                  <option value="">— General (entire family) —</option>
+                  {students
+                    .filter(s => s.familyId === selectedFamily.id)
+                    .map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                </select>
               </div>
               <div className="form-group">
                 <label>Date</label>

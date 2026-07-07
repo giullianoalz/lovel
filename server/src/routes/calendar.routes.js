@@ -4,6 +4,7 @@ import { requireRole } from '../middleware/roles.js';
 import {
   getCalendarData,
   requestPTO,
+  cancelPTO,
   listSharedSpaces,
   reserveSpace
 } from '../controllers/calendar.controller.js';
@@ -15,6 +16,9 @@ router.get('/', authenticate, getCalendarData);
 
 // POST /api/calendar/pto
 router.post('/pto', authenticate, requireRole('TEACHER', 'ADMIN'), requestPTO);
+
+// DELETE /api/calendar/pto/:id
+router.delete('/pto/:id', authenticate, requireRole('TEACHER', 'ADMIN'), cancelPTO);
 
 // GET /api/calendar/spaces
 router.get('/spaces', authenticate, listSharedSpaces);

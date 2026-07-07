@@ -102,10 +102,6 @@ let mockTransactions = [
   { id: 'tx_5', studentId: '2', familyId: 'f2', amount: 5.00, type: 'Charge', description: 'Snack - Apple Juice', date: '2026-04-15', invoiceId: null }
 ];
 
-let mockInvoices = [
-  { id: 'LC-4390', familyId: 'f2', date: '2026-04-01', dateRange: '03/01/2026 - 03/31/2026', amount: 385.00, status: 'Sent' }
-];
-
 let globalConfig = {
   nextInvoiceNumber: 4391,
   invoicePrefix: 'LC-'
@@ -285,46 +281,59 @@ export const database = {
 
   // --- Snacks & Billing ---
   getSnackCabinet: async () => {
-    return Promise.resolve(mockSnackCabinet);
+    try {
+      const response = await api.get('/rewards/snacks');
+      return response.data.snacks;
+    } catch (error) {
+      console.error('Error fetching snacks, using mock:', error);
+      return mockSnackCabinet;
+    }
   },
 
   addSnack: async (snackData) => {
-    const newSnack = {
-      id: `snk_${Date.now()}`,
-      name: snackData.name,
-      costPunches: parseInt(snackData.cost),
-      image: snackData.image || 'https://images.unsplash.com/photo-1599598425947-330026296904?w=400&h=400&fit=crop' // default snack placeholder
-    };
-    mockSnackCabinet.push(newSnack);
-    return { success: true, snack: newSnack };
+    try {
+      const response = await api.post('/rewards/snacks', snackData);
+      return { success: true, snack: response.data.snack };
+    } catch (error) {
+      console.error('Error adding snack, using mock:', error);
+      const newSnack = {
+        id: `snk_${Date.now()}`,
+        name: snackData.name,
+        costPunches: parseInt(snackData.cost),
+        image: snackData.image || 'https://images.unsplash.com/photo-1599598425947-330026296904?w=400&h=400&fit=crop',
+      };
+      mockSnackCabinet.push(newSnack);
+      return { success: true, snack: newSnack };
+    }
   },
 
   deleteSnack: async (snackId) => {
-    mockSnackCabinet = mockSnackCabinet.filter(s => s.id !== snackId);
-    return { success: true };
+    try {
+      await api.delete(`/rewards/snacks/${snackId}`);
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting snack, using mock:', error);
+      mockSnackCabinet = mockSnackCabinet.filter(s => s.id !== snackId);
+      return { success: true };
+    }
   },
 
   purchaseSnack: async (studentId, snackId) => {
-    const student = mockStudents.find(s => s.id === studentId);
-    const snack = mockSnackCabinet.find(s => s.id === snackId);
-    
-    if (!student || !snack) return false;
+    try {
+      const response = await api.post('/rewards/snacks/purchase', { studentId, snackId });
+      return response.data; // { success, newBalance, snackName }
+    } catch (error) {
+      console.error('Error purchasing snack, using mock:', error);
+      const student = mockStudents.find(s => s.id === studentId);
+      const snack = mockSnackCabinet.find(s => s.id === snackId);
+      if (!student || !snack) return false;
 
-    // Allow punches to go negative
-    student.snackPunches -= snack.costPunches;
-    
-    const record = {
-      id: `sh_${Date.now()}`,
-      date: new Date().toISOString(),
-      snackName: snack.name,
-      cost: snack.costPunches
-    };
-    
-    if(!student.snackHistory) student.snackHistory = [];
-    student.snackHistory.unshift(record); // Add to beginning (most recent)
-    
-    console.log(`[Database] Purchased ${snack.name} for ${student.name}. Remaining punches: ${student.snackPunches}`);
-    return { success: true, newBalance: student.snackPunches };
+      student.snackPunches -= snack.costPunches; // Allow punches to go negative
+      const record = { id: `sh_${Date.now()}`, date: new Date().toISOString(), snackName: snack.name, cost: snack.costPunches };
+      if (!student.snackHistory) student.snackHistory = [];
+      student.snackHistory.unshift(record);
+      return { success: true, newBalance: student.snackPunches };
+    }
   },
 
   logSnackConsumption: async (studentId) => {
@@ -351,68 +360,26 @@ export const database = {
     return mockTransactions.filter(p => p.studentId === studentId);
   },
 
+  // Billing data is real money — never fall back to fabricated numbers if the
+  // API call fails. Let the error propagate so the UI shows a real error state.
   fetchAllTransactions: async () => {
-    try {
-      const response = await api.get('/billing/transactions');
-      return response.data.transactions;
-    } catch (error) {
-      console.error("Error fetching transactions, using mock:", error);
-      return mockTransactions;
-    }
+    const response = await api.get('/billing/transactions');
+    return response.data.transactions;
   },
 
   fetchAllInvoices: async () => {
-    try {
-      const response = await api.get('/billing/invoices');
-      return response.data.invoices;
-    } catch (error) {
-      console.error("Error fetching invoices, using mock:", error);
-      return mockInvoices;
-    }
+    const response = await api.get('/billing/invoices');
+    return response.data.invoices;
   },
 
   addTransaction: async (tx) => {
-    try {
-      const response = await api.post('/billing/transactions', tx);
-      return response.data.transaction;
-    } catch (error) {
-      console.error("Error adding transaction, using mock:", error);
-      const newTx = { ...tx, id: `tx_${Date.now()}` };
-      mockTransactions.push(newTx);
-      return newTx;
-    }
+    const response = await api.post('/billing/transactions', tx);
+    return response.data.transaction;
   },
 
   generateInvoice: async (familyId, transactionIds) => {
-    try {
-      const response = await api.post('/billing/invoices', { familyId, transactionIds });
-      return response.data.invoice;
-    } catch (error) {
-      console.error("Error generating invoice, using mock:", error);
-      // Fallback mock
-      const sum = mockTransactions
-        .filter(t => transactionIds.includes(t.id))
-        .reduce((acc, t) => acc + (t.type === 'Charge' ? t.amount : -t.amount), 0);
-        
-      const newInvoiceId = `${globalConfig.invoicePrefix}${globalConfig.nextInvoiceNumber}`;
-      globalConfig.nextInvoiceNumber++;
-        
-      const newInv = {
-        id: newInvoiceId,
-        familyId,
-        date: new Date().toISOString().split('T')[0],
-        dateRange: 'Current Unbilled',
-        amount: sum,
-        status: 'Sent'
-      };
-      mockInvoices.unshift(newInv);
-      
-      mockTransactions = mockTransactions.map(t => 
-        transactionIds.includes(t.id) ? { ...t, invoiceId: newInv.id } : t
-      );
-      
-      return newInv;
-    }
+    const response = await api.post('/billing/invoices', { familyId, transactionIds });
+    return response.data.invoice;
   },
 
   generateInvoiceId: async () => {
@@ -424,134 +391,64 @@ export const database = {
   // --- EMA Step Up: assign sequential LC-#### invoice numbers per student ---
   // groups: [{ key, studentName, studentId, total, rowIndexes: [...] }]
   // Returns the same groups enriched with { invoiceNumber, familyId, matched }.
+  // Real invoices with real money — no mock fallback if the API call fails.
   processEmaBatch: async (groups) => {
-    const results = [];
-    for (const g of groups) {
-      const invoiceNumber = `${globalConfig.invoicePrefix}${globalConfig.nextInvoiceNumber}`;
-      globalConfig.nextInvoiceNumber++;
-
-      // Match the student (and thus the family) by name or external student ID.
-      const student = mockStudents.find(s =>
-        (g.studentName && s.name?.toLowerCase().trim() === g.studentName.toLowerCase().trim()) ||
-        (g.studentId && String(s.emaStudentId || '') === String(g.studentId))
-      );
-      const familyId = student?.familyId || null;
-
-      const newInv = {
-        id: invoiceNumber,
-        familyId,
-        studentId: student?.id || null,
-        studentName: g.studentName,
-        date: new Date().toISOString().split('T')[0],
-        dateRange: 'EMA Step Up Batch',
-        amount: g.total,
-        amountPaid: 0,
-        status: 'Sent',
-        source: 'EMA',
-        poNumbers: g.poNumbers || [],
-      };
-      mockInvoices.unshift(newInv);
-
-      results.push({ ...g, invoiceNumber, familyId, matched: !!student });
-    }
-    return results;
+    const response = await api.post('/billing/ema/generate', { groups });
+    return response.data.groups;
   },
 
   // --- EMA Step Up: reconcile a lump remittance against generated invoices ---
   // lines: [{ poNumber, studentName, amount }] — remittance references Step Up PO #s.
   // Matches each line to the invoice that covers that PO #, accrues amountPaid,
   // marks invoices PAID once fully covered, and records ledger payments.
+  // Real money — no mock fallback if the API call fails.
   reconcileEmaRemittance: async (lines) => {
-    const report = { matched: [], unmatched: [], totalMatched: 0, invoicesPaid: [] };
-    const touched = new Set();
-
-    for (const line of lines) {
-      const amount = Number(line.amount) || 0;
-      // Primary match: PO # belongs to an invoice's poNumbers. Fallbacks: invoice id, student name.
-      const inv = mockInvoices.find(i =>
-        (line.poNumber && (i.poNumbers || []).includes(line.poNumber)) ||
-        (line.poNumber && i.id === line.poNumber) ||
-        (line.studentName && i.status !== 'Paid' && i.studentName?.toLowerCase().trim() === line.studentName.toLowerCase().trim())
-      );
-
-      if (inv) {
-        inv.amountPaid = (Number(inv.amountPaid) || 0) + amount;
-        report.matched.push({ ...line, invoiceNumber: inv.id, familyId: inv.familyId });
-        report.totalMatched += amount;
-        touched.add(inv.id);
-
-        if (inv.familyId) {
-          mockTransactions.push({
-            id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            studentId: inv.studentId || null,
-            familyId: inv.familyId,
-            amount: -Math.abs(amount),
-            type: 'Payment',
-            description: `EMA Step Up — ${line.poNumber || inv.id}`,
-            date: new Date().toISOString().split('T')[0],
-            invoiceId: inv.id,
-          });
-        }
-      } else {
-        report.unmatched.push(line);
-      }
-    }
-
-    // Settle status for every invoice that received funds.
-    for (const id of touched) {
-      const inv = mockInvoices.find(i => i.id === id);
-      if (!inv) continue;
-      inv.status = (Number(inv.amountPaid) || 0) >= (Number(inv.amount) || 0) ? 'Paid' : 'Partial';
-      if (inv.status === 'Paid') report.invoicesPaid.push(inv.id);
-    }
-
-    return report;
+    const response = await api.post('/billing/ema/reconcile', { lines });
+    return response.data;
   },
 
   // --- Prizes System ---
   awardSeashells: async (studentIds, reason, points) => {
-    // studentIds is an array of IDs for bulk operations
     const ids = Array.isArray(studentIds) ? studentIds : [studentIds];
-    
-    ids.forEach(id => {
-      const student = mockStudents.find(s => s.id === id);
-      if (student) {
-        student.seashells = (student.seashells || 0) + parseInt(points);
-        if (!student.seashellHistory) student.seashellHistory = [];
-        student.seashellHistory.unshift({
-          id: `pz_${Date.now()}_${id}`,
-          reason: reason,
-          points: parseInt(points),
-          date: new Date().toISOString(),
-          type: 'earned'
-        });
-      }
-    });
-    console.log(`[Database] Awarded ${points} points to ${ids.length} students for: ${reason}`);
-    return true;
+    try {
+      await api.post('/rewards/seashells/award', { studentIds: ids, reason, points: parseInt(points) });
+      return true;
+    } catch (error) {
+      console.error('Error awarding seashells, using mock:', error);
+      ids.forEach(id => {
+        const student = mockStudents.find(s => s.id === id);
+        if (student) {
+          student.seashells = (student.seashells || 0) + parseInt(points);
+          if (!student.seashellHistory) student.seashellHistory = [];
+          student.seashellHistory.unshift({
+            id: `pz_${Date.now()}_${id}`, reason, points: parseInt(points),
+            date: new Date().toISOString(), type: 'earned',
+          });
+        }
+      });
+      return true;
+    }
   },
 
   redeemSeashells: async (studentId, prizeName, cost) => {
-    const student = mockStudents.find(s => s.id === studentId);
-    if (!student) return { success: false, error: 'Student not found' };
-    
-    // Check if enough points
-    if ((student.seashells || 0) < parseInt(cost)) {
-      return { success: false, error: 'Insufficient points' };
+    try {
+      const response = await api.post('/rewards/seashells/redeem', { studentId, reason: `Redeemed: ${prizeName}`, points: parseInt(cost) });
+      return response.data; // { success, newBalance }
+    } catch (error) {
+      console.error('Error redeeming seashells, using mock:', error);
+      const student = mockStudents.find(s => s.id === studentId);
+      if (!student) return { success: false, error: 'Student not found' };
+      if ((student.seashells || 0) < parseInt(cost)) {
+        return { success: false, error: 'Insufficient points' };
+      }
+      student.seashells -= parseInt(cost);
+      if (!student.seashellHistory) student.seashellHistory = [];
+      student.seashellHistory.unshift({
+        id: `rz_${Date.now()}`, reason: `Redeemed: ${prizeName}`, points: -parseInt(cost),
+        date: new Date().toISOString(), type: 'redeemed',
+      });
+      return { success: true, newBalance: student.seashells };
     }
-
-    student.seashells -= parseInt(cost);
-    if (!student.seashellHistory) student.seashellHistory = [];
-    student.seashellHistory.unshift({
-      id: `rz_${Date.now()}`,
-      reason: `Redeemed: ${prizeName}`,
-      points: -parseInt(cost),
-      date: new Date().toISOString(),
-      type: 'redeemed'
-    });
-    
-    console.log(`[Database] Student ${student.name} redeemed ${prizeName} for ${cost} points. Remaining: ${student.seashells}`);
-    return { success: true, newBalance: student.seashells };
   },
 
   // --- Conversations ---
@@ -729,38 +626,24 @@ export const database = {
 
   // --- Class Sessions ---
   fetchSessionHistory: async (groupId) => {
-    try {
-      // In the frontend it's called groupId, in the backend it's classId
-      const response = await api.get(`/sessions?classId=${groupId}`);
-      // The backend returns an array of sessions, but we need notes and materials inside them
-      // We also need to sort them by date descending as the mock does
-      
-      const realSessions = response.data.sessions.map(s => {
-        // Since listSessions doesn't include notes in the backend by default,
-        // we'd ideally fetch /sessions/:id for details, but for now we map what we have
-        return {
-          sessionId: s.id,
-          groupId: s.classId,
-          date: s.date,
-          // If notes are not returned in listSessions, they might be empty string
-          notes: s.notes ? s.notes[0]?.notes : '',
-          materials: s.materials || [],
-          visibility: s.notes ? s.notes[0]?.visibility : 'all'
-        };
-      });
-      
-      if (realSessions.length > 0) {
-        return realSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
-      }
-      
-      // Fallback to mock if empty
-      const history = mockSessionHistory.filter(h => h.groupId === String(groupId));
-      return history.sort((a, b) => new Date(b.date) - new Date(a.date));
-    } catch (error) {
-      console.error("Error fetching real sessions, falling back to mock:", error);
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(groupId)) {
       const history = mockSessionHistory.filter(h => h.groupId === String(groupId));
       return history.sort((a, b) => new Date(b.date) - new Date(a.date));
     }
+    const response = await api.get(`/sessions?classId=${groupId}`);
+    const realSessions = response.data.sessions.map(s => ({
+      sessionId: s.id,
+      groupId: s.classId,
+      date: s.date,
+      notes: s.notes?.[0]?.notes || '',
+      recordingUrl: s.notes?.[0]?.recordingUrl || '',
+      // Normalize DB field names (fileUrl/fileType) to match locally-uploaded
+      // files (url/type) so the preview modal works for either source.
+      materials: (s.materials || []).map(m => ({ name: m.name, url: m.fileUrl, type: m.fileType })),
+      visibility: s.notes?.[0]?.visibility || 'all',
+    }));
+    return realSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
   },
 
   saveClassNotes: async (sessionId, notes, files, visibility = 'all', recordingUrl = '') => {
@@ -785,6 +668,20 @@ export const database = {
       };
       mockSessionHistory.unshift(newEntry);
       return true;
+    }
+  },
+
+  // Marks the session COMPLETED server-side. Payroll only counts sessions in this
+  // status (plus real attendance), so scheduling a class must never pay a teacher —
+  // only actually finishing it does.
+  completeSession: async (sessionId) => {
+    try {
+      await api.put(`/sessions/${sessionId}`, { status: 'COMPLETED' });
+      console.log(`[Database] Marked session ${sessionId} as COMPLETED`);
+      return true;
+    } catch (error) {
+      console.error("Error completing session:", error);
+      return false;
     }
   },
 

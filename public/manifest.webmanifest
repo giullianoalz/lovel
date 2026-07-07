@@ -1,0 +1,19 @@
+{
+  "name": "Love Learning Academy",
+  "short_name": "Love Learning",
+  "description": "Academy Management System — classes, attendance, billing, and family communication.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#863bff",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "405x321",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

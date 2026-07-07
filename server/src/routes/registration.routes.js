@@ -15,7 +15,9 @@ import {
   getClassRoster,
   revokeHold,
   sweepHolds,
-  remindHolds
+  remindHolds,
+  getBillingSummary,
+  resendBillingEmail
 } from '../controllers/registration.controller.js';
 
 const router = Router();
@@ -34,6 +36,9 @@ router.post('/promote/:classId', authenticate, requireRole('ADMIN'), promoteFrom
 router.delete('/holds/:id', authenticate, requireRole('ADMIN'), revokeHold);
 router.post('/classes/:id/holds/sweep', authenticate, requireRole('ADMIN'), sweepHolds);
 router.post('/classes/:id/holds/remind', authenticate, requireRole('ADMIN'), remindHolds);
+
+router.get('/billing-summary', authenticate, requireRole('ADMIN'), getBillingSummary);
+router.post('/requests/:id/resend-email', authenticate, requireRole('ADMIN'), resendBillingEmail);
 
 // --- PARENT/USER ROUTES ---
 // Consolidated parent registration view (open term, children eligibility, pods)

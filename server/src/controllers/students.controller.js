@@ -127,6 +127,12 @@ export const getStudent = async (req, res, next) => {
       },
     });
 
+    // Teachers get academic/behavioral data only — parent contact info and family
+    // billing stay out of their view so all communication routes through the app.
+    if (req.user.role === 'TEACHER') {
+      delete student.familyMembers;
+    }
+
     res.json({ student });
   } catch (error) {
     next(error);

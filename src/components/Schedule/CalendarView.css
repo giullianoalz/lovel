@@ -346,6 +346,34 @@
 }
 
 /* View Toggle */
+/* PTO / Spaces panels */
+.cal-panel {
+  padding: 16px; margin-bottom: 16px;
+  background: rgba(255,255,255,0.8); backdrop-filter: blur(12px);
+  border: 1px solid rgba(0,0,0,0.06); border-radius: 14px;
+}
+.cal-panel h3 { margin: 0 0 12px; font-size: 16px; }
+.cal-panel-form {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;
+}
+.cal-panel-form select, .cal-panel-form input {
+  padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px;
+}
+.cal-panel-submit {
+  padding: 7px 16px; background: var(--primary, #166534); color: white;
+  border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.cal-panel-submit:disabled { opacity: 0.5; }
+.cal-panel-list { display: flex; flex-direction: column; gap: 6px; }
+.cal-panel-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: #f8fafc; border-radius: 8px; font-size: 13px;
+}
+.cal-status { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px; text-transform: uppercase; }
+.cal-status.pending { background: #fef3c7; color: #92400e; }
+.cal-status.approved { background: #dcfce7; color: #166534; }
+.cal-status.rejected { background: #fee2e2; color: #991b1b; }
+
 .view-toggle {
   display: flex;
   background: #f3f4f6;

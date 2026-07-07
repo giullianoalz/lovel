@@ -1,0 +1,4 @@
+studentName,studentEmail,age,allergies,status,parentName,parentEmail,parentPhone,familyName,tags
+Liam Killian,,9,Peanuts,Active,Sarah Killian,sarah.killian@example.com,(555) 123-4567,Killian Family,"Fall 2026, EMA"
+Emma Killian,,7,,Active,Sarah Killian,sarah.killian@example.com,(555) 123-4567,Killian Family,"Fall 2026, EMA"
+Jasper Theis,jasper@example.com,12,Lactose,Active,Mark Theis,mark.theis@example.com,(555) 987-6543,Theis Family,IXL

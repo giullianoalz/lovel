@@ -1,14 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, AlertCircle, Cookie, MoreHorizontal, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, UserPlus, AlertCircle, Cookie, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud } from 'lucide-react';
 import { database } from '../../lib/database';
+import { useAuth } from '../../context/AuthContext';
 import StudentProfileModal from './StudentProfileModal';
 import TeacherProfileModal from './TeacherProfileModal';
 import SnackCabinetModal from './SnackCabinetModal';
 import AddStudentModal from './AddStudentModal';
+import ImportStudentsModal from './ImportStudentsModal';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './StudentsList.css';
 
 const StudentsList = () => {
+  const navigate = useNavigate();
+  const { role } = useAuth();
   const [activeTab, setActiveTab] = useState('students');
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -19,6 +24,7 @@ const StudentsList = () => {
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [isSnackManagerOpen, setIsSnackManagerOpen] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
   const [families, setFamilies] = useState([]);
 
@@ -32,7 +38,7 @@ const StudentsList = () => {
         if (updatedStudent) setSelectedStudent(updatedStudent);
       }
     } catch (error) {
-      setLoadError(error.userMessage || 'No se pudo cargar la lista de estudiantes.');
+      setLoadError(error.userMessage || 'Could not load the student list.');
     } finally {
       setLoading(false);
     }
@@ -99,14 +105,26 @@ const StudentsList = () => {
                 <ShoppingBag size={18} />
                 <span className="desk-only">Snack Cabinet</span>
               </button>
-              <button 
-                className="action-btn primary" 
-                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                onClick={() => setShowAddModal(true)}
-              >
-                <UserPlus size={18} />
-                <span className="desk-only">Add New Student</span>
-              </button>
+              {role === 'ADMIN' && (
+                <>
+                  <button
+                    className="action-btn outline"
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
+                    onClick={() => setShowImportModal(true)}
+                  >
+                    <UploadCloud size={18} />
+                    <span className="desk-only">Import CSV</span>
+                  </button>
+                  <button
+                    className="action-btn primary"
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                    onClick={() => setShowAddModal(true)}
+                  >
+                    <UserPlus size={18} />
+                    <span className="desk-only">Add New Student</span>
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -122,14 +140,16 @@ const StudentsList = () => {
           <span>Students</span>
           <span className="tab-count">{students.length}</span>
         </button>
-        <button 
-          className={`dir-tab ${activeTab === 'teachers' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('teachers'); setSearchQuery(''); setStatusFilter('All'); }}
-        >
-          <Briefcase size={18} />
-          <span>Teachers & Payroll</span>
-          <span className="tab-count">{teachers.length}</span>
-        </button>
+        {role === 'ADMIN' && (
+          <button
+            className={`dir-tab ${activeTab === 'teachers' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('teachers'); setSearchQuery(''); setStatusFilter('All'); }}
+          >
+            <Briefcase size={18} />
+            <span>Teachers & Payroll</span>
+            <span className="tab-count">{teachers.length}</span>
+          </button>
+        )}
       </div>
 
       <div className="search-filter-row">
@@ -161,6 +181,11 @@ const StudentsList = () => {
           {loadError && <ErrorBanner message={loadError} onRetry={loadData} />}
           {loading ? (
             <div className="loading-state">Loading academy records...</div>
+          ) : filteredStudents.length === 0 ? (
+            <div className="empty-state">
+              <Search size={32} />
+              <p>No students match your search or filters.</p>
+            </div>
           ) : (
             <div className="students-grid">
               {filteredStudents.map(student => (
@@ -175,7 +200,6 @@ const StudentsList = () => {
                         </span>
                       </div>
                     </div>
-                    <button className="icon-btn"><MoreHorizontal size={20} /></button>
                   </div>
 
                   <div className="card-details">
@@ -185,10 +209,10 @@ const StudentsList = () => {
                         {student.allergies === 'None' ? (
                           'No reported allergies'
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <>
                             <AlertCircle size={14} />
                             {student.allergies}
-                          </div>
+                          </>
                         )}
                       </span>
                     </div>
@@ -207,8 +231,24 @@ const StudentsList = () => {
                   </div>
 
                   <div className="card-actions">
-                    <button className="icon-btn" title="Send Email"><Mail size={18} /></button>
-                    <button className="icon-btn" title="Internal Chat"><MessageSquare size={18} /></button>
+                    {role !== 'TEACHER' && student.parentEmail && student.parentEmail !== 'N/A' && (
+                      <a
+                        className="icon-btn"
+                        href={`mailto:${student.parentEmail}`}
+                        title={`Email ${student.parentName || 'parent'}`}
+                        aria-label={`Send email to ${student.parentName || 'parent'}`}
+                      >
+                        <Mail size={18} />
+                      </a>
+                    )}
+                    <button
+                      className="icon-btn"
+                      title="Internal Chat"
+                      aria-label={`Open chat about ${student.name}`}
+                      onClick={() => navigate('/chat')}
+                    >
+                      <MessageSquare size={18} />
+                    </button>
                     <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>
                   </div>
                 </div>
@@ -233,7 +273,6 @@ const StudentsList = () => {
                     </span>
                   </div>
                 </div>
-                <button className="icon-btn"><MoreHorizontal size={20} /></button>
               </div>
 
               <div className="card-details">
@@ -257,7 +296,16 @@ const StudentsList = () => {
               </div>
 
               <div className="card-actions">
-                <button className="icon-btn" title="Send Email"><Mail size={18} /></button>
+                {teacher.email && (
+                  <a
+                    className="icon-btn"
+                    href={`mailto:${teacher.email}`}
+                    title={`Email ${teacher.name}`}
+                    aria-label={`Send email to ${teacher.name}`}
+                  >
+                    <Mail size={18} />
+                  </a>
+                )}
                 <button className="action-btn" onClick={() => setSelectedTeacher(teacher)}>
                   <DollarSign size={14} /> View Payroll
                 </button>
@@ -294,6 +342,13 @@ const StudentsList = () => {
           onClose={() => setShowAddModal(false)}
           onSave={handleAddStudent}
           families={families}
+        />
+      )}
+
+      {showImportModal && (
+        <ImportStudentsModal
+          onClose={() => setShowImportModal(false)}
+          onImported={loadData}
         />
       )}
     </div>

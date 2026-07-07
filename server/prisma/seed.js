@@ -31,11 +31,11 @@ async function main() {
   // 2. USERS
   // =============================================
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@academy.com' },
+    where: { email: 'lovelearningfl@gmail.com' },
     update: {},
     create: {
       firebaseUid: 'firebase_admin_001',
-      email: 'admin@academy.com',
+      email: 'lovelearningfl@gmail.com',
       fullName: 'Academy Administrator',
       role: 'ADMIN',
       phone: '(555) 000-0001',
@@ -214,26 +214,30 @@ async function main() {
   // =============================================
   // 5. CLASSES
   // =============================================
-  const classMath = await prisma.class.create({
-    data: {
-      name: 'Math Foundations - Group A',
-      subject: 'Mathematics',
-      teacherId: teacher1.id,
-      type: 'IN_PERSON',
-      maxStudents: 8,
-    },
-  });
+  // findFirst + create (not upsert) because Class has no unique constraint on
+  // (name, teacherId) — re-running this seed must not spawn duplicate classes.
+  const classMath = await prisma.class.findFirst({ where: { name: 'Math Foundations - Group A', teacherId: teacher1.id } })
+    ?? await prisma.class.create({
+      data: {
+        name: 'Math Foundations - Group A',
+        subject: 'Mathematics',
+        teacherId: teacher1.id,
+        type: 'IN_PERSON',
+        maxStudents: 8,
+      },
+    });
 
-  const classEnglish = await prisma.class.create({
-    data: {
-      name: 'Advanced English',
-      subject: 'English',
-      teacherId: teacher2.id,
-      type: 'VIRTUAL',
-      meetingUrl: 'https://zoom.us/j/123456789',
-      maxStudents: 10,
-    },
-  });
+  const classEnglish = await prisma.class.findFirst({ where: { name: 'Advanced English', teacherId: teacher2.id } })
+    ?? await prisma.class.create({
+      data: {
+        name: 'Advanced English',
+        subject: 'English',
+        teacherId: teacher2.id,
+        type: 'VIRTUAL',
+        meetingUrl: 'https://zoom.us/j/123456789',
+        maxStudents: 10,
+      },
+    });
 
   console.log('✅ Classes created (2)');
 
@@ -332,6 +336,23 @@ async function main() {
   }
 
   console.log('✅ Notification preferences created for all users');
+
+  // =============================================
+  // 9. SHARED SPACES
+  // =============================================
+  await prisma.sharedSpace.createMany({
+    data: [
+      { name: 'Compass Cove (8th grade room)' },
+      { name: 'Seagrass Spotlight (front room)' },
+      { name: 'Circuit Reef (Computer Cart)' },
+      { name: 'Seashell Lounge (curtain room)' },
+      { name: 'Movement Room' },
+      { name: 'Quiet Room' },
+    ],
+    skipDuplicates: true,
+  });
+
+  console.log('✅ Shared spaces created (6)');
 
   console.log('\n🎉 Seed completed successfully!\n');
 }

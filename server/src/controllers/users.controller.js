@@ -71,7 +71,7 @@ export const getUser = async (req, res, next) => {
  */
 export const updateUser = async (req, res, next) => {
   try {
-    const { fullName, phone, avatarUrl, age, allergies, quietHoursStart, quietHoursEnd, autoResponderMessage } = req.body;
+    const { fullName, phone, avatarUrl, age, allergies, quietHoursStart, quietHoursEnd, autoResponderMessage, fcmToken } = req.body;
 
     const user = await prisma.user.update({
       where: { id: req.params.id },
@@ -84,6 +84,7 @@ export const updateUser = async (req, res, next) => {
         ...(quietHoursStart !== undefined && { quietHoursStart }),
         ...(quietHoursEnd !== undefined && { quietHoursEnd }),
         ...(autoResponderMessage !== undefined && { autoResponderMessage }),
+        ...(fcmToken !== undefined && { fcmToken }),
       },
 
       include: {
@@ -160,6 +161,9 @@ export const getTeacherPayroll = async (req, res, next) => {
               where: {
                 date: { gte: startDate, lte: endDate },
                 status: 'COMPLETED',
+                // Only pay for sessions where a student actually showed up —
+                // scheduling a class must not generate earnings on its own.
+                attendance: { some: { status: 'PRESENT' } },
               },
               select: {
                 id: true,
@@ -174,30 +178,18 @@ export const getTeacherPayroll = async (req, res, next) => {
         },
         timeOffRequests: {
           where: {
-            date: {
-              gte: new Date(targetYear, 0, 1),
-              lte: new Date(targetYear, 11, 31)
-            },
             status: 'APPROVED'
           }
         }
       },
     });
 
-    // Separate classes by type for payroll calculation
-    const inPersonClasses = teacher.taughtClasses.filter(c => c.type === 'IN_PERSON' || c.type === 'HYBRID');
-    const onlineClasses = teacher.taughtClasses.filter(c => c.type === 'VIRTUAL');
+    const allSessions = teacher.taughtClasses.flatMap(c => c.sessions);
 
-    // Count completed sessions
-    const inPersonSessions = inPersonClasses.flatMap(c => c.sessions);
-    const onlineSessions = onlineClasses.flatMap(c => c.sessions);
-    const allSessions = [...inPersonSessions, ...onlineSessions];
-
-    // Calculate earnings
     const baseSalary = parseFloat(teacher.baseSalary || 0);
     const perSessionRate = parseFloat(teacher.perSessionRate || 0);
-    const tutoringEarnings = onlineSessions.length * perSessionRate;
-    const totalEarnings = baseSalary + tutoringEarnings;
+    const sessionEarnings = allSessions.length * perSessionRate;
+    const totalEarnings = baseSalary + sessionEarnings;
 
     // Calculate time off
     const usedSickDays = teacher.timeOffRequests ? teacher.timeOffRequests.filter(r => r.type === 'SICK').length : 0;
@@ -217,10 +209,8 @@ export const getTeacherPayroll = async (req, res, next) => {
         year: targetYear,
         baseSalary,
         perSessionRate,
-        inPersonSessionCount: inPersonSessions.length,
-        onlineSessionCount: onlineSessions.length,
         totalSessionCount: allSessions.length,
-        tutoringEarnings,
+        sessionEarnings,
         totalEarnings,
         usedSickDays,
         totalSickDays: 8,

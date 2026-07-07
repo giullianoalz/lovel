@@ -7,13 +7,17 @@ import {
   sendMessage,
   blockContact,
   createGroupThread,
-  resolveThread
+  resolveThread,
+  getMyChildrensTeachers
 } from '../controllers/chat.controller.js';
 
 const router = Router();
 
 // GET /api/chat — List all threads for current user
 router.get('/', authenticate, getThreads);
+
+// GET /api/chat/my-teachers — list the current parent's children's teachers
+router.get('/my-teachers', authenticate, getMyChildrensTeachers);
 
 // POST /api/chat — Create a new thread
 router.post('/', authenticate, createThread);

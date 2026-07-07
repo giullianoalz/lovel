@@ -369,7 +369,7 @@
 
 .family-billing-layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 280px 1fr;
   gap: 32px;
   align-items: flex-start;
 }
@@ -526,7 +526,7 @@
 }
 
 .tab-pane {
-  padding: 32px;
+  padding: 24px;
   overflow-x: auto;
 }
 
@@ -556,7 +556,7 @@
 .ledger-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 800px;
+  min-width: 700px;
 }
 
 .ledger-table th {
@@ -569,7 +569,6 @@
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-light);
   background: #f8fafc;
-  white-space: nowrap;
 }
 
 .ledger-table td {

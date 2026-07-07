@@ -1,4 +1,21 @@
 import prisma from '../config/database.js';
+import { generateAssistantReply } from '../services/ai.service.js';
+import { findContactInfo } from '../utils/contentFilter.js';
+
+/** Returns true if `now` (HH:MM, local) falls within a quiet-hours window that may wrap midnight. */
+function isWithinQuietHours(start, end, now = new Date()) {
+  if (!start || !end) return false;
+  const toMinutes = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const cur = now.getHours() * 60 + now.getMinutes();
+  const s = toMinutes(start);
+  const e = toMinutes(end);
+  if (s === e) return false;
+  if (s < e) return cur >= s && cur < e;
+  return cur >= s || cur < e; // window wraps past midnight
+}
 
 // GET /api/chat
 export const getThreads = async (req, res, next) => {
@@ -72,6 +89,48 @@ export const getThreads = async (req, res, next) => {
   }
 };
 
+// GET /api/chat/my-teachers — list the teachers of the current parent's children (for "Message Teacher")
+export const getMyChildrensTeachers = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const familyMembers = await prisma.familyMember.findMany({
+      where: { userId },
+      include: { family: { include: { members: { select: { userId: true, user: { select: { id: true, role: true } } } } } } },
+    });
+
+    const studentIds = familyMembers.flatMap(fm =>
+      fm.family.members.filter(m => m.user.role === 'STUDENT').map(m => m.userId)
+    );
+
+    if (studentIds.length === 0) return res.json({ teachers: [] });
+
+    const enrollments = await prisma.classEnrollment.findMany({
+      where: { studentId: { in: studentIds }, status: 'active' },
+      include: {
+        class: {
+          include: { teacher: { select: { id: true, fullName: true } } },
+        },
+        student: { select: { id: true, fullName: true } },
+      },
+    });
+
+    const seen = new Map();
+    for (const e of enrollments) {
+      if (!e.class.teacher) continue;
+      const key = e.class.teacher.id;
+      if (!seen.has(key)) {
+        seen.set(key, { id: e.class.teacher.id, fullName: e.class.teacher.fullName, students: new Set() });
+      }
+      seen.get(key).students.add(e.student.fullName);
+    }
+
+    res.json({ teachers: Array.from(seen.values()).map(t => ({ ...t, students: Array.from(t.students) })) });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/chat
 export const createThread = async (req, res, next) => {
   try {
@@ -80,6 +139,25 @@ export const createThread = async (req, res, next) => {
 
     // Validate participantIds includes current user
     const allParticipants = Array.from(new Set([userId, ...(participantIds || [])]));
+
+    // For direct 1:1 threads, reuse an existing thread between the same two users
+    // instead of creating a duplicate every time "Message Teacher" is clicked.
+    if (!isBot && allParticipants.length === 2) {
+      const [a, b] = allParticipants;
+      const existing = await prisma.chatThread.findFirst({
+        where: {
+          isBot: false,
+          AND: [
+            { participants: { some: { userId: a } } },
+            { participants: { some: { userId: b } } },
+          ],
+        },
+        include: { participants: { include: { user: true } } },
+      });
+      if (existing && existing.participants.length === 2) {
+        return res.status(200).json({ thread: existing });
+      }
+    }
 
     const thread = await prisma.chatThread.create({
       data: {
@@ -138,6 +216,16 @@ export const createGroupThread = async (req, res, next) => {
 
     participantIds.push(userId);
     const uniqueParticipants = Array.from(new Set(participantIds));
+
+    // Reuse the existing group thread instead of spawning a new one every time
+    // someone clicks "Message Management" / "Ocean Navigators".
+    if (name) {
+      const existing = await prisma.chatThread.findFirst({
+        where: { name, participants: { some: { userId } } },
+        include: { participants: { include: { user: true } } },
+      });
+      if (existing) return res.status(200).json({ thread: existing });
+    }
 
     const thread = await prisma.chatThread.create({
       data: {
@@ -219,6 +307,20 @@ export const sendMessage = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden', message: 'You have blocked this contact' });
     }
 
+    // All contact between students, parents, teachers and staff must stay inside
+    // the app — reject messages that share an email address or phone number.
+    if (!participant.thread.isBot) {
+      const contactCheck = findContactInfo(text);
+      if (contactCheck.blocked) {
+        return res.status(400).json({
+          error: 'contact_info_blocked',
+          message: contactCheck.reason === 'email'
+            ? 'For everyone\'s safety, email addresses can\'t be shared in chat. Please keep all communication inside the app.'
+            : 'For everyone\'s safety, phone numbers can\'t be shared in chat. Please keep all communication inside the app.',
+        });
+      }
+    }
+
     const newMessage = await prisma.chatMessage.create({
       data: {
         threadId,
@@ -240,15 +342,146 @@ export const sendMessage = async (req, res, next) => {
     };
 
     // Broadcast to other participants via Socket.IO
-    if (req.app.get('io')) {
-      const io = req.app.get('io');
+    const io = req.app.get('io');
+    if (io) {
       io.to(threadId).emit('receive_message', {
         threadId,
         message: formattedMessage
       });
     }
 
+    // Respond immediately with the user's message so the UI never waits on the AI.
     res.status(201).json({ message: formattedMessage });
+
+    // Quiet Hours: if any other participant (a teacher) has quiet hours active right
+    // now, send their auto-response once per thread per day and flag the manager if
+    // the teacher hasn't replied within 1 business day.
+    if (!participant.thread.isBot && req.user.role !== 'TEACHER') {
+      (async () => {
+        try {
+          const otherParticipants = await prisma.chatParticipant.findMany({
+            where: { threadId, userId: { not: userId } },
+            include: { user: true },
+          });
+          const quietTeacher = otherParticipants.find(p =>
+            p.user.role === 'TEACHER' &&
+            isWithinQuietHours(p.user.quietHoursStart, p.user.quietHoursEnd)
+          );
+          if (!quietTeacher) return;
+
+          const today = new Date().toISOString().slice(0, 10);
+          const dedupKey = `quiet-hours-autoreply:${threadId}:${quietTeacher.userId}:${today}`;
+
+          const alreadySentToday = await prisma.chatMessage.findFirst({
+            where: {
+              threadId,
+              senderId: null,
+              sentAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+              text: { contains: quietTeacher.user.autoResponderMessage || 'quiet hours' },
+            },
+          });
+          if (alreadySentToday) return;
+
+          const autoText = quietTeacher.user.autoResponderMessage ||
+            `${quietTeacher.user.fullName} has quiet hours enabled and will respond within 1 business day.`;
+
+          const autoMessage = await prisma.chatMessage.create({
+            data: { threadId, senderId: null, text: autoText },
+          });
+
+          if (io) {
+            io.to(threadId).emit('receive_message', {
+              threadId,
+              message: {
+                id: autoMessage.id,
+                senderId: null,
+                sender: 'Auto-response',
+                text: autoMessage.text,
+                time: autoMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                type: 'received',
+              },
+            });
+          }
+
+          // Schedule a manager follow-up notification if the teacher hasn't replied
+          // within 1 business day (created now, surfaced by a periodic job).
+          const managers = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true } });
+          await prisma.notification.createMany({
+            data: managers.map(m => ({
+              userId: m.id,
+              type: 'quiet_hours_followup',
+              title: 'Quiet Hours Follow-up Needed',
+              message: `${quietTeacher.user.fullName} received a message during quiet hours and hasn't replied yet. Follow up if no response within 1 business day.`,
+              channel: 'in_app',
+              referenceType: 'chat_thread',
+              referenceId: threadId,
+              dedupKey,
+            })),
+            skipDuplicates: true,
+          });
+        } catch (qhError) {
+          console.error('Quiet hours auto-response failed:', qhError.message);
+        }
+      })();
+    }
+
+    // If this is the AI Assistant thread, generate the bot reply asynchronously
+    // (can be slow on a local model) and deliver it over Socket.IO when ready.
+    if (participant.thread.isBot) {
+      (async () => {
+        // Signal "typing…" to the room while we generate.
+        if (io) io.to(threadId).emit('assistant_typing', { threadId });
+        try {
+          const recent = await prisma.chatMessage.findMany({
+            where: { threadId },
+            orderBy: { sentAt: 'asc' },
+            take: 20,
+          });
+          const history = recent.map(m => ({
+            role: m.senderId === null ? 'assistant' : 'user',
+            text: m.text,
+          }));
+
+          const replyText = await generateAssistantReply(history, {
+            role: req.user.role,
+            name: req.user.fullName,
+          });
+
+          const botMessage = await prisma.chatMessage.create({
+            data: { threadId, senderId: null, text: replyText },
+          });
+
+          if (io) {
+            io.to(threadId).emit('receive_message', {
+              threadId,
+              message: {
+                id: botMessage.id,
+                senderId: null,
+                sender: 'Academy Assistant',
+                text: botMessage.text,
+                time: botMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                type: 'received',
+              },
+            });
+          }
+        } catch (aiError) {
+          console.error('AI assistant reply failed:', aiError.message);
+          if (io) {
+            io.to(threadId).emit('receive_message', {
+              threadId,
+              message: {
+                id: `err_${Date.now()}`,
+                senderId: null,
+                sender: 'Academy Assistant',
+                text: "Sorry, I had trouble responding just now. Please try again or contact the Love Learning team.",
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                type: 'received',
+              },
+            });
+          }
+        }
+      })();
+    }
   } catch (error) {
     next(error);
   }

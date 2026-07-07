@@ -22,52 +22,52 @@ const PAYMENT_METHODS = [
     icon: <GraduationCap size={18} />,
     badge: 'Beca',
     accent: '#047857',
-    detail: 'Solicita el pago desde tu portal de Step Up usando el número de factura (ej. LC-4391). Nosotros aprobamos el cargo y el pago se procesa con tu beca.',
+    detail: 'Request payment from your Step Up portal using the invoice number (e.g. LC-4391). We approve the charge and payment is processed with your scholarship.',
     copy: null,
   },
   {
     id: 'zelle',
     name: 'Zelle',
     icon: <Landmark size={18} />,
-    badge: 'Sin cargo',
+    badge: 'No fee',
     accent: '#7c3aed',
-    detail: 'Envía a:',
+    detail: 'Send to:',
     copy: 'lovelearningfl@gmail.com',
   },
   {
     id: 'venmo',
     name: 'Venmo',
     icon: <Smartphone size={18} />,
-    badge: 'Sin cargo',
+    badge: 'No fee',
     accent: '#0369a1',
-    detail: 'Usuario:',
+    detail: 'Username:',
     copy: '@LoveLearningFL',
   },
   {
     id: 'paypal',
     name: 'PayPal',
     icon: <Smartphone size={18} />,
-    badge: 'Sin cargo',
+    badge: 'No fee',
     accent: '#1d4ed8',
-    detail: 'Envía a:',
+    detail: 'Send to:',
     copy: 'lovelearningfl@gmail.com',
   },
   {
     id: 'card',
-    name: 'Tarjeta de crédito',
+    name: 'Credit Card',
     icon: <CreditCard size={18} />,
-    badge: '+4% cargo',
+    badge: 'No extra fee',
     accent: '#b45309',
-    detail: 'Usa el botón "Pagar" en cada factura para pagar con tarjeta de forma segura. Se aplica un cargo de procesamiento del 4%.',
+    detail: 'Use the "Pay" button on each invoice to pay securely by card. You are charged the exact invoice amount.',
     copy: null,
   },
 ];
 
 const TABS = [
-  { id: 'children',  label: 'Mis Hijos',      icon: <Users size={16} /> },
-  { id: 'register',  label: 'Inscripción',    icon: <ClipboardList size={16} /> },
-  { id: 'billing',   label: 'Cuenta & Pagos',  icon: <CreditCard size={16} /> },
-  { id: 'announcements', label: 'Anuncios',    icon: <Bell size={16} /> },
+  { id: 'children',  label: 'My Children',      icon: <Users size={16} /> },
+  { id: 'register',  label: 'Registration',    icon: <ClipboardList size={16} /> },
+  { id: 'billing',   label: 'Account & Payments',  icon: <CreditCard size={16} /> },
+  { id: 'announcements', label: 'Announcements',    icon: <Bell size={16} /> },
 ];
 
 const fmt = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -86,18 +86,52 @@ const countdown = (target, from = new Date()) => {
 };
 
 const REQUEST_STATUS_META = {
-  enrolled_first: { label: 'Inscrito en tu primera opción', cls: 'ok', icon: <CheckCircle size={15} /> },
-  enrolled: { label: 'Inscrito', cls: 'ok', icon: <CheckCircle size={15} /> },
-  waitlisted_first_enrolled_second: { label: 'En lista de espera (1ª) · Inscrito en 2ª opción', cls: 'partial', icon: <Hourglass size={15} /> },
-  waitlisted_both: { label: 'En lista de espera', cls: 'wait', icon: <Hourglass size={15} /> },
-  pending: { label: 'Solicitud en proceso', cls: 'wait', icon: <Hourglass size={15} /> },
+  enrolled_first: { label: 'Enrolled in your first choice', cls: 'ok', icon: <CheckCircle size={15} /> },
+  enrolled: { label: 'Enrolled', cls: 'ok', icon: <CheckCircle size={15} /> },
+  waitlisted_first_enrolled_second: { label: 'Waitlisted (1st) · Enrolled in 2nd choice', cls: 'partial', icon: <Hourglass size={15} /> },
+  waitlisted_both: { label: 'Waitlisted', cls: 'wait', icon: <Hourglass size={15} /> },
+  pending: { label: 'Request in progress', cls: 'wait', icon: <Hourglass size={15} /> },
 };
 
 /* ────────── Registration: per-child card ────────── */
-const RegistrationChildCard = ({ child, classes, onClaim, onSubmit, submitting }) => {
+const IXL_OPTIONS = [
+  { value: 'NONE', label: 'None' },
+  { value: 'CORE', label: 'IXL Core ($5)' },
+  { value: 'CORE_SPANISH', label: 'IXL Core + Spanish ($10)' },
+];
+
+const RegistrationChildCard = ({ child, classes, electives, onClaim, onSubmit, submitting }) => {
   const [first, setFirst] = useState('');
   const [second, setSecond] = useState('');
+  const [electiveIds, setElectiveIds] = useState([]);
+  const [ixlPlan, setIxlPlan] = useState('NONE');
   const busy = submitting === child.id;
+
+  const toggleElective = (id) =>
+    setElectiveIds(prev => prev.includes(id) ? prev.filter(e => e !== id) : [...prev, id]);
+
+  const electivesPicker = electives.length > 0 && (
+    <div className="reg-field">
+      <label>Electives <span className="reg-optional">(optional, $130 each)</span></label>
+      <div className="reg-elective-list">
+        {electives.map(e => (
+          <label key={e.id} className="reg-elective-option">
+            <input type="checkbox" checked={electiveIds.includes(e.id)} onChange={() => toggleElective(e.id)} />
+            {e.name} — ${e.price}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+
+  const ixlPicker = (
+    <div className="reg-field">
+      <label>IXL Plan</label>
+      <select value={ixlPlan} onChange={e => setIxlPlan(e.target.value)}>
+        {IXL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
 
   // Already has a processed request → show outcome (read-only).
   if (child.isRegistered) {
@@ -130,7 +164,7 @@ const RegistrationChildCard = ({ child, classes, onClaim, onSubmit, submitting }
         </div>
         <div className="reg-status-banner locked">
           <Lock size={15} />
-          <span>Tu ventana de inscripción aún no abre.</span>
+          <span>Your registration window is not open yet.</span>
         </div>
       </div>
     );
@@ -141,7 +175,7 @@ const RegistrationChildCard = ({ child, classes, onClaim, onSubmit, submitting }
       <div className="reg-child-head">
         <div className="reg-child-avatar">{child.name?.[0]}</div>
         <div><h4>{child.name}</h4></div>
-        {child.hasPriority && <span className="reg-priority-tag"><Star size={12} /> Cupo garantizado</span>}
+        {child.hasPriority && <span className="reg-priority-tag"><Star size={12} /> Guaranteed spot</span>}
       </div>
 
       {/* Guaranteed-spot one-click claim */}
@@ -151,11 +185,13 @@ const RegistrationChildCard = ({ child, classes, onClaim, onSubmit, submitting }
             <Star size={16} />
             <div>
               <strong>{child.priorityClassName}</strong>
-              <span>Tu lugar está reservado. Recláma­lo con un clic.</span>
+              <span>Your spot is reserved. Choose your extras below, then claim it.</span>
             </div>
           </div>
-          <button className="reg-claim-btn" disabled={busy} onClick={() => onClaim(child.id, child.priorityClassId)}>
-            {busy ? 'Procesando…' : 'Reclamar mi cupo'}
+          {electivesPicker}
+          {ixlPicker}
+          <button className="reg-claim-btn" disabled={busy} onClick={() => onClaim(child.id, child.priorityClassId, electiveIds, ixlPlan)}>
+            {busy ? 'Processing...' : 'Claim my spot'}
           </button>
         </div>
       )}
@@ -163,33 +199,35 @@ const RegistrationChildCard = ({ child, classes, onClaim, onSubmit, submitting }
       {/* First / second choice selection */}
       <div className="reg-choices">
         <div className="reg-field">
-          <label>Primera opción</label>
+          <label>First choice</label>
           <select value={first} onChange={e => setFirst(e.target.value)}>
-            <option value="">Elige un pod…</option>
+            <option value="">Choose a pod...</option>
             {classes.map(c => (
               <option key={c.id} value={c.id} disabled={c.available <= 0}>
-                {c.name} — {c.available > 0 ? `${c.available} cupos` : 'Lleno (lista de espera)'}
+                {c.name} — {c.available > 0 ? `${c.available} spots` : 'Full (waitlist)'}
               </option>
             ))}
           </select>
         </div>
         <div className="reg-field">
-          <label>Segunda opción <span className="reg-optional">(opcional)</span></label>
+          <label>Second choice <span className="reg-optional">(optional)</span></label>
           <select value={second} onChange={e => setSecond(e.target.value)}>
-            <option value="">Sin segunda opción</option>
+            <option value="">No second choice</option>
             {classes.filter(c => c.id !== first).map(c => (
               <option key={c.id} value={c.id} disabled={c.available <= 0}>
-                {c.name} — {c.available > 0 ? `${c.available} cupos` : 'Lleno (lista de espera)'}
+                {c.name} — {c.available > 0 ? `${c.available} spots` : 'Full (waitlist)'}
               </option>
             ))}
           </select>
         </div>
+        {electivesPicker}
+        {ixlPicker}
         <button
           className="reg-submit-btn"
           disabled={!first || busy}
-          onClick={() => onSubmit(child.id, first, second || null)}
+          onClick={() => onSubmit(child.id, first, second || null, electiveIds, ixlPlan)}
         >
-          {busy ? 'Procesando…' : 'Enviar inscripción'}
+          {busy ? 'Processing...' : 'Submit registration'}
         </button>
       </div>
     </div>
@@ -232,51 +270,51 @@ const PickupModal = ({ children, onClose, onCreated }) => {
           <>
             <div className="modal-header">
               <div className="modal-icon"><QrCode size={22} /></div>
-              <div><h2>Autorizar Recogida</h2><p>Genera un QR para una persona de confianza.</p></div>
+              <div><h2>Authorize Pickup</h2><p>Generate a QR code for a trusted person.</p></div>
             </div>
             <form onSubmit={handleSubmit} className="pickup-form">
               {children.length > 1 && (
                 <div className="form-group">
-                  <label>Estudiante</label>
+                  <label>Student</label>
                   <select value={form.studentId} onChange={e => setForm(f => ({ ...f, studentId: e.target.value }))}>
-                    <option value="">Todos los hijos</option>
+                    <option value="">All children</option>
                     {children.map(c => <option key={c.id} value={c.id}>{c.fullName}</option>)}
                   </select>
                 </div>
               )}
               <div className="form-group">
-                <label>Nombre de la persona *</label>
-                <input type="text" placeholder="Nombre completo" value={form.pickupPerson}
+                <label>Person's name *</label>
+                <input type="text" placeholder="Full name" value={form.pickupPerson}
                   onChange={e => setForm(f => ({ ...f, pickupPerson: e.target.value }))} required />
               </div>
               <div className="form-group">
-                <label>Relación</label>
+                <label>Relationship</label>
                 <select value={form.relationship} onChange={e => setForm(f => ({ ...f, relationship: e.target.value }))}>
                   {RELATIONSHIPS.map(r => <option key={r}>{r}</option>)}
                 </select>
               </div>
               <div className="form-group">
-                <label>Válido hasta *</label>
+                <label>Valid until *</label>
                 <input type="date" min={today} value={form.validDate}
                   onChange={e => setForm(f => ({ ...f, validDate: e.target.value }))} required />
               </div>
               <button type="submit" className="pp-primary-btn" disabled={submitting}>
-                {submitting ? 'Generando…' : <><QrCode size={16} /> Generar QR</>}
+                {submitting ? 'Generating...' : <><QrCode size={16} /> Generate QR</>}
               </button>
             </form>
           </>
         ) : (
           <div className="qr-result">
-            <div className="qr-success-badge"><ShieldCheck size={20} /> Autorización creada</div>
+            <div className="qr-success-badge"><ShieldCheck size={20} /> Authorization created</div>
             <h3>{created.pickupPerson}</h3>
-            <p className="qr-valid-date">Válido hasta: <strong>{fmt(created.validDate)}</strong></p>
+            <p className="qr-valid-date">Valid until: <strong>{fmt(created.validDate)}</strong></p>
             <div className="qr-wrapper">
               <QRCodeSVG value={qrPayload} size={200} bgColor="#ffffff" fgColor="#1e293b" level="M" includeMargin />
             </div>
-            <p className="qr-instructions">Muestra este QR en recepción para verificar la autorización.</p>
+            <p className="qr-instructions">Show this QR code at the front desk to verify the authorization.</p>
             <div className="qr-actions">
-              <button className="qr-new-btn" onClick={() => setCreated(null)}>Crear otro</button>
-              <button className="qr-done-btn" onClick={onClose}>Listo</button>
+              <button className="qr-new-btn" onClick={() => setCreated(null)}>Create another</button>
+              <button className="qr-done-btn" onClick={onClose}>Done</button>
             </div>
           </div>
         )}
@@ -313,7 +351,7 @@ const InvoiceRow = ({ inv, onPay, paying }) => {
           <div className="pp-inv-amounts">
             <span className="pp-inv-total">${inv.total.toFixed(2)}</span>
             {inv.amountDue > 0 && (
-              <span className="pp-inv-due">Saldo: ${inv.amountDue.toFixed(2)}</span>
+              <span className="pp-inv-due">Balance: ${inv.amountDue.toFixed(2)}</span>
             )}
           </div>
           {canPay && (
@@ -322,7 +360,7 @@ const InvoiceRow = ({ inv, onPay, paying }) => {
               onClick={e => { e.stopPropagation(); onPay(inv.id); }}
               disabled={paying === inv.id}
             >
-              {paying === inv.id ? 'Procesando…' : <><CreditCard size={14} /> Pagar</>}
+              {paying === inv.id ? 'Processing...' : <><CreditCard size={14} /> Pay</>}
             </button>
           )}
           <button className="pp-inv-toggle">
@@ -341,7 +379,7 @@ const InvoiceRow = ({ inv, onPay, paying }) => {
           {inv.lines.length > 0 && (
             <table className="pp-inv-lines">
               <thead>
-                <tr><th>Descripción</th><th>Cant.</th><th>Monto</th></tr>
+                <tr><th>Description</th><th>Qty.</th><th>Amount</th></tr>
               </thead>
               <tbody>
                 {inv.lines.map((l, i) => (
@@ -400,14 +438,14 @@ const ParentPortal = () => {
       setData(portalRes.data);
       setPickupAuths(pickupRes.data);
     } catch (err) {
-      setError(err.userMessage || 'No se pudo cargar el portal familiar.');
+      setError(err.userMessage || 'Could not load the family portal.');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadBilling = async () => {
-    if (billing) return;
+  const loadBilling = async (force = false) => {
+    if (billing && !force) return;
     setBillingLoading(true);
     try {
       const res = await api.get('/portal/parent/billing');
@@ -421,13 +459,26 @@ const ParentPortal = () => {
 
   useEffect(() => { load(); }, []);
 
+  // Coming back from a Stripe Checkout redirect — jump to Billing and pull the
+  // freshly-webhooked invoice status instead of showing stale/cached data.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get('payment');
+    if (!payment) return;
+    setTab('billing');
+    loadBilling(true);
+    if (payment === 'success') setPayError(null);
+    if (payment === 'cancelled') setPayError('Payment was cancelled.');
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
+
   const loadRegistration = async () => {
     setRegLoading(true); setRegError(null);
     try {
       const res = await api.get('/registration/parent');
       setRegistration(res.data);
     } catch (err) {
-      setRegError(err.userMessage || 'No se pudo cargar la inscripción.');
+      setRegError(err.userMessage || 'Could not load registration.');
     } finally {
       setRegLoading(false);
     }
@@ -438,7 +489,7 @@ const ParentPortal = () => {
     if (tab === 'register') loadRegistration();
   }, [tab]);
 
-  const handleRegSubmit = async (studentId, firstChoiceClassId, secondChoiceClassId) => {
+  const handleRegSubmit = async (studentId, firstChoiceClassId, secondChoiceClassId, electiveIds = [], ixlPlan = 'NONE') => {
     if (!registration?.term) return;
     setRegSubmitting(studentId); setRegError(null);
     try {
@@ -447,17 +498,19 @@ const ParentPortal = () => {
         studentId,
         firstChoiceClassId,
         secondChoiceClassId,
+        electiveIds,
+        ixlPlan,
       });
       await loadRegistration();
     } catch (err) {
-      setRegError(err.response?.data?.message || 'No se pudo procesar la inscripción.');
+      setRegError(err.response?.data?.message || 'Could not process the registration.');
     } finally {
       setRegSubmitting(null);
     }
   };
 
-  const handleRegClaim = (studentId, priorityClassId) =>
-    handleRegSubmit(studentId, priorityClassId, null);
+  const handleRegClaim = (studentId, priorityClassId, electiveIds = [], ixlPlan = 'NONE') =>
+    handleRegSubmit(studentId, priorityClassId, null, electiveIds, ixlPlan);
 
   const handlePickupCreated = (auth) => setPickupAuths(prev => [auth, ...prev]);
 
@@ -474,13 +527,13 @@ const ParentPortal = () => {
       const res = await api.post(`/portal/parent/billing/pay/${invoiceId}`);
       window.open(res.data.url, '_blank');
     } catch (err) {
-      setPayError(err.response?.data?.error || 'No se pudo procesar el pago. Contacta a la academia.');
+      setPayError(err.response?.data?.error || 'Could not process the payment. Contact the academy.');
     } finally {
       setPaying(null);
     }
   };
 
-  if (loading) return <div className="pp-loading"><span className="pp-spinner" />Cargando portal familiar…</div>;
+  if (loading) return <div className="pp-loading"><span className="pp-spinner" />Loading family portal...</div>;
   if (error)   return <div className="pp-loading"><ErrorBanner message={error} onRetry={load} /></div>;
   if (!data)   return null;
 
@@ -496,17 +549,17 @@ const ParentPortal = () => {
         <div className="pp-hero-content">
           <div className="pp-hero-icon"><Heart size={28} /></div>
           <div className="pp-hero-text">
-            <h1>Portal Familiar</h1>
-            <p>Sigue el progreso de tus hijos y gestiona tu cuenta</p>
+            <h1>Family Portal</h1>
+            <p>Follow your children's progress and manage your account</p>
           </div>
         </div>
         <div className="pp-hero-actions">
           <button className="pp-hero-btn" onClick={() => setShowPickupModal(true)}>
-            <QrCode size={15} /> Autorizar Recogida
+            <QrCode size={15} /> Authorize Pickup
             {activeAuths.length > 0 && <span className="pp-auth-badge">{activeAuths.length}</span>}
           </button>
           <button className="pp-hero-btn" onClick={() => navigate('/chat')}>
-            <MessageSquare size={15} /> Chat con Maestros
+            <MessageSquare size={15} /> Chat with Teachers
           </button>
         </div>
       </div>
@@ -515,7 +568,7 @@ const ParentPortal = () => {
       {activeAuths.length > 0 && (
         <div className="pp-pickup-strip">
           <ShieldCheck size={14} />
-          <span>Autorizaciones activas:</span>
+          <span>Active authorizations:</span>
           {activeAuths.map(auth => (
             <div key={auth.id} className="pp-pickup-chip">
               <QrCode size={12} />
@@ -580,13 +633,13 @@ const ParentPortal = () => {
                     <div className="pp-cstat pos">
                       <ThumbsUp size={20} />
                       <span className="pp-cstat-num">{child.behaviorSummary?.positives || 0}</span>
-                      <span className="pp-cstat-lbl">Positivos</span>
+                      <span className="pp-cstat-lbl">Positive</span>
                     </div>
                     {(child.behaviorSummary?.warnings || 0) > 0 && (
                       <div className="pp-cstat warn">
                         <AlertTriangle size={20} />
                         <span className="pp-cstat-num">{child.behaviorSummary.warnings}</span>
-                        <span className="pp-cstat-lbl">Avisos</span>
+                        <span className="pp-cstat-lbl">Warnings</span>
                       </div>
                     )}
                   </div>
@@ -595,22 +648,22 @@ const ParentPortal = () => {
                 {(child.allergies || child.medicalNotes) && (
                   <div className="pp-health-banner">
                     <AlertTriangle size={15} />
-                    {child.allergies && <span><strong>Alergias:</strong> {child.allergies}</span>}
-                    {child.medicalNotes && <span><strong>Médico:</strong> {child.medicalNotes}</span>}
+                    {child.allergies && <span><strong>Allergies:</strong> {child.allergies}</span>}
+                    {child.medicalNotes && <span><strong>Medical:</strong> {child.medicalNotes}</span>}
                   </div>
                 )}
 
                 <div className="pp-child-grid">
                   {/* Classes */}
                   <div className="pp-child-section">
-                    <h3><Calendar size={17} /> Clases & Horario</h3>
-                    {!child.enrollments?.length ? <p className="pp-empty">Sin clases activas.</p> : (
+                    <h3><Calendar size={17} /> Classes & Schedule</h3>
+                    {!child.enrollments?.length ? <p className="pp-empty">No active classes.</p> : (
                       <div className="pp-child-classes">
                         {child.enrollments.map((e, i) => (
                           <div key={i} className="pp-class-item">
                             <div>
                               <h4>{e.className}</h4>
-                              <span>con {e.teacherName}</span>
+                              <span>with {e.teacherName}</span>
                             </div>
                             {e.upcomingSessions?.[0] && (
                               <div className="pp-next-badge">
@@ -626,8 +679,8 @@ const ParentPortal = () => {
 
                   {/* Rewards */}
                   <div className="pp-child-section">
-                    <h3><Gift size={17} /> Premios Recientes</h3>
-                    {!child.seashellHistory?.length ? <p className="pp-empty">Sin premios aún.</p> : (
+                    <h3><Gift size={17} /> Recent Rewards</h3>
+                    {!child.seashellHistory?.length ? <p className="pp-empty">No rewards yet.</p> : (
                       <div className="pp-reward-list">
                         {child.seashellHistory.slice(0, 6).map((p, i) => (
                           <div key={i} className="pp-reward-item">
@@ -643,8 +696,8 @@ const ParentPortal = () => {
 
                   {/* Materials */}
                   <div className="pp-child-section">
-                    <h3><BookOpen size={17} /> Materiales</h3>
-                    {!child.materials?.length ? <p className="pp-empty">Sin materiales.</p> : (
+                    <h3><BookOpen size={17} /> Materials</h3>
+                    {!child.materials?.length ? <p className="pp-empty">No materials yet.</p> : (
                       <div className="pp-materials">
                         {child.materials.slice(0, 5).map((m, i) => (
                           <a key={i} href={m.fileUrl} target="_blank" rel="noopener noreferrer" className="pp-material-link">
@@ -657,12 +710,12 @@ const ParentPortal = () => {
 
                   {/* Pickup Authorizations */}
                   <div className="pp-child-section">
-                    <h3><QrCode size={17} /> Autorizaciones de Recogida</h3>
+                    <h3><QrCode size={17} /> Pickup Authorizations</h3>
                     {pickupAuths.length === 0 ? (
                       <div className="pp-pickup-empty">
-                        <p className="pp-empty">Sin autorizaciones.</p>
+                        <p className="pp-empty">No authorizations.</p>
                         <button className="pp-secondary-btn" onClick={() => setShowPickupModal(true)}>
-                          <Plus size={13} /> Autorizar
+                          <Plus size={13} /> Authorize
                         </button>
                       </div>
                     ) : (
@@ -689,7 +742,7 @@ const ParentPortal = () => {
                           );
                         })}
                         <button className="pp-secondary-btn pp-mt" onClick={() => setShowPickupModal(true)}>
-                          <Plus size={13} /> Nueva Autorización
+                          <Plus size={13} /> New Authorization
                         </button>
                       </div>
                     )}
@@ -699,8 +752,8 @@ const ParentPortal = () => {
             ) : (
               <div className="pp-no-children">
                 <Users size={40} />
-                <h3>Sin estudiantes</h3>
-                <p>Tu cuenta no tiene estudiantes vinculados.</p>
+                <h3>No students</h3>
+                <p>Your account has no linked students.</p>
               </div>
             )}
           </>
@@ -710,18 +763,18 @@ const ParentPortal = () => {
         {tab === 'register' && (
           <div className="reg-tab">
             {regLoading ? (
-              <div className="pp-loading-inner"><span className="pp-spinner" />Cargando inscripción…</div>
+              <div className="pp-loading-inner"><span className="pp-spinner" />Loading registration...</div>
             ) : regError && !registration ? (
               <div className="pp-billing-error">
                 <AlertCircle size={32} />
                 <p>{regError}</p>
-                <button className="pp-secondary-btn" onClick={loadRegistration}>Reintentar</button>
+                <button className="pp-secondary-btn" onClick={loadRegistration}>Retry</button>
               </div>
             ) : !registration?.term ? (
               <div className="pp-billing-empty">
                 <ClipboardList size={32} />
-                <p>No hay inscripción abierta en este momento.</p>
-                <span style={{ fontSize: 13, color: '#94a3b8' }}>Te avisaremos cuando abra el próximo término.</span>
+                <p>No open registration at this time.</p>
+                <span style={{ fontSize: 13, color: '#94a3b8' }}>We will notify you when the next term opens.</span>
               </div>
             ) : (
               <>
@@ -730,16 +783,16 @@ const ParentPortal = () => {
                   const nowRef = t.now;
                   let phase;
                   if (new Date(nowRef) < new Date(t.window1OpensAt)) {
-                    phase = { label: 'Abre en', value: countdown(t.window1OpensAt, nowRef), cls: 'soon' };
+                    phase = { label: 'Opens in', value: countdown(t.window1OpensAt, nowRef), cls: 'soon' };
                   } else if (new Date(nowRef) <= new Date(t.registrationCloses)) {
-                    phase = { label: 'Cierra en', value: countdown(t.registrationCloses, nowRef), cls: 'open' };
+                    phase = { label: 'Closes in', value: countdown(t.registrationCloses, nowRef), cls: 'open' };
                   } else {
-                    phase = { label: 'Cerrada', value: null, cls: 'closed' };
+                    phase = { label: 'Closed', value: null, cls: 'closed' };
                   }
                   return (
                     <div className={`reg-term-header ${phase.cls}`}>
                       <div>
-                        <span className="reg-term-eyebrow">Inscripción</span>
+                        <span className="reg-term-eyebrow">Registration</span>
                         <h2>{t.name}</h2>
                       </div>
                       {phase.value && (
@@ -771,6 +824,7 @@ const ParentPortal = () => {
                         key={child.id}
                         child={child}
                         classes={registration.classes}
+                        electives={registration.electives || []}
                         onClaim={handleRegClaim}
                         onSubmit={handleRegSubmit}
                         submitting={regSubmitting}
@@ -787,21 +841,21 @@ const ParentPortal = () => {
         {tab === 'billing' && (
           <div className="pp-billing">
             {billingLoading ? (
-              <div className="pp-loading-inner"><span className="pp-spinner" />Cargando cuenta…</div>
+              <div className="pp-loading-inner"><span className="pp-spinner" />Loading account...</div>
             ) : !billing ? (
               <div className="pp-billing-error">
                 <AlertCircle size={32} />
-                <p>No se pudo cargar la información de cuenta.</p>
-                <button className="pp-secondary-btn" onClick={loadBilling}>Reintentar</button>
+                <p>Could not load account information.</p>
+                <button className="pp-secondary-btn" onClick={loadBilling}>Retry</button>
               </div>
             ) : (
               <>
                 {/* Balance summary */}
                 <div className={`pp-balance-card ${billing.balance > 0 ? 'owing' : 'clear'}`}>
                   <div className="pp-balance-left">
-                    <span className="pp-balance-label">Saldo de Cuenta</span>
+                    <span className="pp-balance-label">Account Balance</span>
                     <span className="pp-balance-amount">
-                      {billing.balance > 0 ? `$${billing.balance.toFixed(2)}` : 'Al corriente ✓'}
+                      {billing.balance > 0 ? `$${billing.balance.toFixed(2)}` : 'Paid up ✓'}
                     </span>
                     {billing.familyName && <span className="pp-family-name">{billing.familyName}</span>}
                   </div>
@@ -822,7 +876,7 @@ const ParentPortal = () => {
                 {/* How to pay */}
                 <section className="pp-howto-pay">
                   <button className="pp-howto-toggle" onClick={() => setShowHowToPay(o => !o)}>
-                    <span><CreditCard size={16} /> Cómo Pagar</span>
+                    <span><CreditCard size={16} /> How to Pay</span>
                     {showHowToPay ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </button>
                   {showHowToPay && (
@@ -849,11 +903,11 @@ const ParentPortal = () => {
 
                 {/* Invoices */}
                 <section className="pp-billing-section">
-                  <h3><Receipt size={18} /> Facturas</h3>
+                  <h3><Receipt size={18} /> Invoices</h3>
                   {billing.invoices.length === 0 ? (
                     <div className="pp-billing-empty">
                       <CheckCircle size={32} />
-                      <p>No hay facturas en tu cuenta.</p>
+                      <p>No invoices on your account.</p>
                     </div>
                   ) : (
                     <div className="pp-invoices-list">
@@ -866,9 +920,9 @@ const ParentPortal = () => {
 
                 {/* Transaction History */}
                 <section className="pp-billing-section">
-                  <h3><CreditCard size={18} /> Historial de Movimientos</h3>
+                  <h3><CreditCard size={18} /> Transaction History</h3>
                   {billing.transactions.length === 0 ? (
-                    <p className="pp-empty">Sin movimientos registrados.</p>
+                    <p className="pp-empty">No transactions recorded yet.</p>
                   ) : (
                     <div className="pp-tx-list">
                       {billing.transactions.map(t => {

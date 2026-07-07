@@ -1,6 +1,8 @@
 import prisma from '../config/database.js';
 import { sleep } from '../utils/helpers.js';
 import { invalidate } from '../middleware/cache.js';
+import { calculateRegistrationBilling } from '../services/registrationPricing.service.js';
+import { sendRegistrationBillingEmail } from '../services/email.service.js';
 
 /**
  * POST /api/registration/terms
@@ -124,7 +126,7 @@ export const getRegistrationStatus = async (req, res, next) => {
  */
 export const submitRegistrationRequest = async (req, res, next) => {
   try {
-    const { termId, studentId, firstChoiceClassId, secondChoiceClassId } = req.body;
+    const { termId, studentId, firstChoiceClassId, secondChoiceClassId, electiveIds = [], ixlPlan = 'NONE' } = req.body;
 
     const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
 
@@ -161,6 +163,22 @@ export const submitRegistrationRequest = async (req, res, next) => {
         include: { _count: { select: { enrollments: { where: { status: 'active' } } } } }
       });
 
+      // Pricing: replicates the Apps Script trigger (base rate + electives + IXL -> 15% deposit)
+      const electives = electiveIds.length
+        ? await tx.elective.findMany({ where: { id: { in: electiveIds } } })
+        : [];
+      const billing = calculateRegistrationBilling({ term, groupType: firstClass.groupType, electives, ixlPlan });
+      const billingData = {
+        ixlPlan,
+        baseRate: billing.baseRate,
+        electivesTotal: billing.electivesTotal,
+        ixlTotal: billing.ixlTotal,
+        totalQuarterly: billing.totalQuarterly,
+        depositAmount: billing.depositAmount,
+        depositDueDate: billing.depositDueDate,
+        electiveChoices: electiveIds.length ? { create: electiveIds.map(electiveId => ({ electiveId })) } : undefined,
+      };
+
       // 2. Try First Choice
       if (firstClass._count.enrollments < firstClass.maxStudents) {
         // SUCCESS: Enroll in first choice
@@ -169,7 +187,7 @@ export const submitRegistrationRequest = async (req, res, next) => {
         });
 
         const request = await tx.registrationRequest.create({
-          data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'enrolled_first' }
+          data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'enrolled_first', ...billingData }
         });
 
         // If they had a priority hold, mark it as claimed
@@ -178,7 +196,7 @@ export const submitRegistrationRequest = async (req, res, next) => {
           data: { status: 'claimed' }
         });
 
-        return { status: 'enrolled_first', class: firstClass.name };
+        return { status: 'enrolled_first', class: firstClass.name, requestId: request.id, className: firstClass.name, electives };
       }
 
       // 3. First Choice is FULL -> Add to Waitlist
@@ -199,11 +217,11 @@ export const submitRegistrationRequest = async (req, res, next) => {
             data: { classId: secondChoiceClassId, studentId, status: 'active' }
           });
 
-          await tx.registrationRequest.create({
-            data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_first_enrolled_second' }
+          const request = await tx.registrationRequest.create({
+            data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_first_enrolled_second', ...billingData }
           });
 
-          return { status: 'waitlisted_first_enrolled_second', first: firstClass.name, second: secondClass.name };
+          return { status: 'waitlisted_first_enrolled_second', first: firstClass.name, second: secondClass.name, requestId: request.id, className: secondClass.name, electives };
         }
 
         // Second choice also full
@@ -212,12 +230,45 @@ export const submitRegistrationRequest = async (req, res, next) => {
         });
       }
 
-      await tx.registrationRequest.create({
-        data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_both' }
+      const request = await tx.registrationRequest.create({
+        data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_both', ...billingData }
       });
 
-      return { status: 'waitlisted_both', first: firstClass.name };
+      return { status: 'waitlisted_both', first: firstClass.name, requestId: request.id, className: firstClass.name, electives };
     });
+
+    // 2. Fire the billing confirmation email (outside the transaction — a failed send
+    // must never roll back an enrollment that already succeeded).
+    if (result.requestId) {
+      const [student, familyMember] = await Promise.all([
+        prisma.user.findUnique({ where: { id: studentId }, select: { fullName: true, email: true } }),
+        prisma.familyMember.findFirst({
+          where: { userId: studentId },
+          select: { family: { select: { members: { where: { isInvoiceRecipient: true }, select: { user: { select: { email: true } } } } } } },
+        }),
+      ]);
+      const recipientEmail = familyMember?.family?.members?.[0]?.user?.email || student?.email;
+
+      const requestRow = await prisma.registrationRequest.findUnique({ where: { id: result.requestId } });
+      const emailResult = recipientEmail
+        ? await sendRegistrationBillingEmail({
+            to: recipientEmail,
+            studentName: student?.fullName || 'Estudiante',
+            className: result.className,
+            electiveNames: result.electives.map(e => e.name),
+            request: requestRow,
+            term,
+          })
+        : { ok: false, error: 'Sin correo de destinatario' };
+
+      await prisma.registrationRequest.update({
+        where: { id: result.requestId },
+        data: {
+          emailStatus: emailResult.ok ? 'SENT' : 'FAILED',
+          emailSentAt: emailResult.ok ? new Date() : null,
+        },
+      });
+    }
 
     res.json({ message: 'Registration request processed.', result });
   } catch (error) {
@@ -255,7 +306,7 @@ export const getParentRegistration = async (req, res, next) => {
       orderBy: { window1OpensAt: 'asc' },
     });
 
-    if (!term) return res.json({ term: null, students: [], classes: [] });
+    if (!term) return res.json({ term: null, students: [], classes: [], electives: [] });
 
     const classesRaw = await prisma.class.findMany({
       where: { termId: term.id },
@@ -272,7 +323,11 @@ export const getParentRegistration = async (req, res, next) => {
       available: Math.max(0, c.maxStudents - c._count.enrollments),
       teacherName: c.teacher?.fullName || null,
       meetingUrl: c.meetingUrl || '',
+      groupType: c.groupType,
     }));
+
+    const electivesRaw = await prisma.elective.findMany({ where: { termId: term.id } });
+    const electives = electivesRaw.map(e => ({ id: e.id, name: e.name, price: Number(e.price) }));
 
     const [holds, requests, enrollments] = await Promise.all([
       prisma.priorityHold.findMany({ where: { termId: term.id, studentId: { in: studentIds }, status: 'pending' } }),
@@ -326,6 +381,7 @@ export const getParentRegistration = async (req, res, next) => {
       },
       students: studentStatus,
       classes,
+      electives,
     });
   } catch (error) {
     next(error);
@@ -564,6 +620,99 @@ export const sweepHolds = async (req, res, next) => {
 export const remindHolds = async (req, res, next) => {
   try {
     res.json({ message: 'Reminders queued' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/registration/billing-summary?termId=
+ * Admin view of the calculated billing + email status per registration request,
+ * replacing the Google Sheet columns AC/AD/AE.
+ */
+export const getBillingSummary = async (req, res, next) => {
+  try {
+    const { termId } = req.query;
+    const requests = await prisma.registrationRequest.findMany({
+      where: termId ? { termId } : {},
+      orderBy: { submittedAt: 'desc' },
+      include: {
+        student: { select: { fullName: true, email: true } },
+        firstChoice: { select: { name: true, groupType: true } },
+        electiveChoices: { include: { elective: { select: { name: true } } } },
+      },
+    });
+
+    res.json({
+      requests: requests.map(r => ({
+        id: r.id,
+        studentName: r.student.fullName,
+        studentEmail: r.student.email,
+        className: r.firstChoice.name,
+        groupType: r.firstChoice.groupType,
+        status: r.status,
+        ixlPlan: r.ixlPlan,
+        electiveNames: r.electiveChoices.map(c => c.elective.name),
+        baseRate: Number(r.baseRate),
+        electivesTotal: Number(r.electivesTotal),
+        ixlTotal: Number(r.ixlTotal),
+        totalQuarterly: Number(r.totalQuarterly),
+        depositAmount: Number(r.depositAmount),
+        depositDueDate: r.depositDueDate,
+        emailStatus: r.emailStatus,
+        emailSentAt: r.emailSentAt,
+        submittedAt: r.submittedAt,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/registration/requests/:id/resend-email
+ * Manually retries the billing confirmation email for one request.
+ */
+export const resendBillingEmail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const request = await prisma.registrationRequest.findUniqueOrThrow({
+      where: { id },
+      include: {
+        student: { select: { fullName: true, email: true } },
+        firstChoice: { select: { name: true } },
+        term: true,
+        electiveChoices: { include: { elective: { select: { name: true } } } },
+      },
+    });
+
+    const familyMember = await prisma.familyMember.findFirst({
+      where: { userId: request.studentId },
+      select: { family: { select: { members: { where: { isInvoiceRecipient: true }, select: { user: { select: { email: true } } } } } } },
+    });
+    const recipientEmail = familyMember?.family?.members?.[0]?.user?.email || request.student.email;
+
+    const emailResult = await sendRegistrationBillingEmail({
+      to: recipientEmail,
+      studentName: request.student.fullName,
+      className: request.firstChoice.name,
+      electiveNames: request.electiveChoices.map(c => c.elective.name),
+      request,
+      term: request.term,
+    });
+
+    await prisma.registrationRequest.update({
+      where: { id },
+      data: {
+        emailStatus: emailResult.ok ? 'SENT' : 'FAILED',
+        emailSentAt: emailResult.ok ? new Date() : null,
+      },
+    });
+
+    if (!emailResult.ok) {
+      return res.status(502).json({ message: `No se pudo enviar el correo: ${emailResult.error}` });
+    }
+    res.json({ message: 'Correo reenviado.' });
   } catch (error) {
     next(error);
   }

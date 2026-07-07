@@ -5,9 +5,11 @@ import { useNavigate, Link } from 'react-router-dom';
 import mammoth from 'mammoth';
 import * as xlsx from 'xlsx';
 import api from '../../lib/api';
+import { useToast } from '../Layout/ToastProvider';
 import './ClassSession.css';
 
 const ClassSession = () => {
+  const toast = useToast();
   const [dailySessions, setDailySessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
 
@@ -223,7 +225,7 @@ const ClassSession = () => {
     setSessionHistory(updatedHistory);
     
     setSavingNotes(false);
-    alert(`Session materials and notes published successfully!`);
+    toast.success('Session notes and materials published!');
     setClassNotes('');
     if (editorRef.current) editorRef.current.innerHTML = '';
     setAttachedFiles([]);
@@ -265,10 +267,10 @@ const ClassSession = () => {
   const handleAlertTrigger = async (student, type) => {
     try {
       await api.post('/alerts', { studentId: student.id, alertType: type, reason: `${type} requested from Class Session` });
-      alert(`${type} alert sent to Front Desk for ${student.name}.`);
+      toast.success(`Alert "${type}" sent to front desk for ${student.name}.`);
     } catch (error) {
       console.error('Error triggering alert:', error);
-      alert('Failed to trigger alert. Make sure the backend is running.');
+      toast.error('Could not send the alert. Make sure the server is running.');
     }
   };
 
@@ -283,7 +285,8 @@ const ClassSession = () => {
     try {
       await database.saveAttendance(sessionId, attendance);
       await database.saveClassNotes(sessionId, classNotes, attachedFiles);
-      
+      await database.completeSession(sessionId);
+
       setDailySessions(prev => 
         prev.map(s => s.id === sessionId ? { ...s, status: 'completed' } : s)
       );
@@ -302,7 +305,7 @@ const ClassSession = () => {
       }
     } catch (error) {
       console.error('Error completing session:', error);
-      alert('There was an error saving the session. Please try again.');
+      toast.error('There was an error saving the session. Please try again.');
     } finally {
       setCompleteLoading(false);
     }

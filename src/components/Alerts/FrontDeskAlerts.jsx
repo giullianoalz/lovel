@@ -5,7 +5,10 @@ import io from 'socket.io-client';
 import api from '../../lib/api';
 import './FrontDeskAlerts.css';
 
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const configuredApiUrl = import.meta.env.VITE_API_URL;
+const SOCKET_URL = (!configuredApiUrl || configuredApiUrl === 'http://localhost:4000/api')
+  ? `http://${window.location.hostname}:4000`
+  : configuredApiUrl.replace(/\/api\/?$/, '');
 
 const ALERT_TYPES = {
   'Student out': { icon: LogOut, color: '#eab308' }, // Yellow
@@ -81,12 +84,21 @@ const FrontDeskAlerts = () => {
     return `${hrs}h ${diffMins % 60}m ago`;
   };
 
-  const getUrgency = (createdAt) => {
+  const URGENCY_RANK = { low: 0, medium: 1, high: 2, critical: 3 };
+  // Medical alerts are urgent the instant they're raised — they should never
+  // display as "low" just because they were reported seconds ago.
+  const URGENCY_FLOOR_BY_TYPE = { 'Medic': 'critical', 'Class support': 'medium' };
+
+  const getUrgency = (createdAt, alertType) => {
     const diffMins = Math.floor((new Date() - new Date(createdAt)) / 60000);
-    if (diffMins >= 15) return 'critical';
-    if (diffMins >= 10) return 'high';
-    if (diffMins >= 5) return 'medium';
-    return 'low';
+    let timeUrgency = 'low';
+    if (diffMins >= 15) timeUrgency = 'critical';
+    else if (diffMins >= 10) timeUrgency = 'high';
+    else if (diffMins >= 5) timeUrgency = 'medium';
+
+    const floor = URGENCY_FLOOR_BY_TYPE[alertType];
+    if (floor && URGENCY_RANK[floor] > URGENCY_RANK[timeUrgency]) return floor;
+    return timeUrgency;
   };
 
   return (
@@ -132,7 +144,7 @@ const FrontDeskAlerts = () => {
           ) : (
             <div className="active-alerts-grid">
               {alerts.map(alert => {
-                const urgency = getUrgency(alert.createdAt);
+                const urgency = getUrgency(alert.createdAt, alert.alertType);
                 const TypeIcon = ALERT_TYPES[alert.alertType]?.icon || Bell;
                 const typeColor = ALERT_TYPES[alert.alertType]?.color || '#888';
 

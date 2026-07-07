@@ -5,12 +5,17 @@ import {
   listSessions,
   getSession,
   createSession,
+  bulkScheduleSessions,
   updateSession,
   updateAttendance,
   addSessionNote,
+  supervisionSessions,
 } from '../controllers/sessions.controller.js';
 
 const router = Router();
+
+// GET /api/sessions/supervision — Admin supervision view
+router.get('/supervision', authenticate, requireRole('ADMIN'), supervisionSessions);
 
 // GET /api/sessions — List sessions for calendar (All auth users)
 router.get('/', authenticate, listSessions);
@@ -20,6 +25,9 @@ router.get('/:id', authenticate, getSession);
 
 // POST /api/sessions — Create a session (Admin/Teacher)
 router.post('/', authenticate, requireRole('ADMIN', 'TEACHER'), createSession);
+
+// POST /api/sessions/bulk — Generate recurring sessions for a class (Admin/Teacher)
+router.post('/bulk', authenticate, requireRole('ADMIN', 'TEACHER'), bulkScheduleSessions);
 
 // PUT /api/sessions/:id — Update session status/time (Admin/Teacher)
 router.put('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), updateSession);

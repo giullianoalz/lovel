@@ -360,6 +360,41 @@
 .prize-btn:hover {
   background: rgba(0, 0, 0, 0.3) !important;
 }
+/* Report buttons in header */
+.profile-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.profile-header-actions { display: flex; gap: 8px; }
+.report-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: 1px solid; transition: all 0.15s;
+}
+.medical-report-btn { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.medical-report-btn:hover { background: #fee2e2; }
+.behavior-report-btn { background: #fefce8; color: #ca8a04; border-color: #fde68a; }
+.behavior-report-btn:hover { background: #fef9c3; }
+
+/* Inline report form */
+.inline-report-form {
+  margin: 0 0 16px; padding: 16px;
+  background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;
+}
+.report-form-header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+}
+.report-form-header h3 { margin: 0; font-size: 15px; }
+.report-fields { display: flex; flex-direction: column; gap: 8px; }
+.report-fields input, .report-fields select, .report-fields textarea {
+  padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px;
+}
+.report-fields textarea { min-height: 60px; resize: vertical; }
+
+.seashell-tiers {
+  display: flex; gap: 12px; margin-top: 10px;
+  padding: 8px 12px; background: rgba(0,0,0,0.15); border-radius: 10px;
+}
+.tier-item {
+  font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.95);
+}
 
 .punch-cost.earned {
   color: #16a34a;

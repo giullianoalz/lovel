@@ -51,6 +51,49 @@
   width: 100%;
   font-size: 14px;
 }
+.chat-filter-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px 0; gap: 8px;
+}
+.chat-filter-tabs { display: flex; gap: 4px; background: #f3f4f6; padding: 3px; border-radius: 8px; }
+.chat-filter-btn {
+  padding: 4px 12px; border: none; background: transparent;
+  font-size: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; color: #64748b;
+}
+.chat-filter-btn.active { background: white; color: var(--primary, #166534); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.chat-new-msg-btn {
+  padding: 4px 12px; background: var(--primary, #166534); color: white;
+  border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.chat-new-msg-menu {
+  position: absolute; right: 0; top: 100%; margin-top: 4px;
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1); z-index: 100; min-width: 180px;
+  padding: 4px 0; display: flex; flex-direction: column;
+}
+.chat-new-msg-menu button {
+  padding: 10px 14px; border: none; background: none;
+  text-align: left; font-size: 13px; cursor: pointer; color: var(--text-main);
+}
+.chat-new-msg-menu button:hover { background: #f1f5f9; }
+
+.teacher-picker-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.teacher-picker-modal {
+  background: white; border-radius: 16px; padding: 20px;
+  width: 90%; max-width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+}
+.teacher-picker-modal h3 { margin: 0 0 14px; font-size: 16px; }
+.teacher-picker-list { display: flex; flex-direction: column; gap: 6px; }
+.teacher-picker-item {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px;
+  background: white; cursor: pointer; text-align: left; transition: all 0.15s;
+}
+.teacher-picker-item:hover { border-color: var(--primary, #166534); background: #f0fdf4; }
+.teacher-picker-item span { font-size: 12px; }
 
 .threads-list {
   flex: 1;
@@ -222,6 +265,7 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 16px;
   background: #f8fafc;
 }
@@ -317,6 +361,28 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.chat-send-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 24px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+  border-top: 1px solid #fecaca;
+}
+
+.chat-send-error button {
+  background: none;
+  border: none;
+  color: #b91c1c;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
 }
 
 .icon-btn {

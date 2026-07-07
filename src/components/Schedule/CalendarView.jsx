@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus } from 'lucide-react';
 import { database } from '../../lib/database';
+import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import './CalendarView.css';
 
@@ -93,7 +94,7 @@ const AVAILABLE_CATEGORIES = [
 ];
 
 const MultiDatePicker = ({ selectedDates, onChange }) => {
-  const [currentMonth, setCurrentMonth] = useState(new Date(2026, 3, 1)); // start at mock current month
+  const [currentMonth, setCurrentMonth] = useState(new Date());
   
   const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
   const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
@@ -176,9 +177,9 @@ const MultiDatePicker = ({ selectedDates, onChange }) => {
 
 const CalendarView = () => {
   const { role } = useAuth();
-  const canAddEvents = role === 'ADMIN' || role === 'TEACHER';
+  const canAddEvents = role === 'ADMIN';
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 3, 20)); // Fake current date
+  const [currentDate, setCurrentDate] = useState(new Date());
   const [localEvents, setLocalEvents] = useState(MOCK_EVENTS);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -203,6 +204,76 @@ const CalendarView = () => {
   // Add Event States
   const [isAddEventDropdownOpen, setIsAddEventDropdownOpen] = useState(false);
   const [activeModal, setActiveModal] = useState(null); // 'quick', 'full'
+
+  /* ── PTO & Shared Spaces ── */
+  const [calPanel, setCalPanel] = useState(null); // 'pto' | 'spaces' | null
+  const [ptoRequests, setPtoRequests] = useState([]);
+  const [ptoForm, setPtoForm] = useState({ type: 'PTO', startDate: '', endDate: '', reason: '' });
+  const [ptoSubmitting, setPtoSubmitting] = useState(false);
+  const [ptoCancellingId, setPtoCancellingId] = useState(null);
+  const [sharedSpaces, setSharedSpaces] = useState([]);
+  const [spaceReservations, setSpaceReservations] = useState([]);
+  const [spaceForm, setSpaceForm] = useState({ spaceId: '', date: '', startTime: '09:00', endTime: '10:00', purpose: '' });
+  const [spaceSubmitting, setSpaceSubmitting] = useState(false);
+
+  const loadPto = () => {
+    api.get('/calendar?showPTO=true').then(r => setPtoRequests(r.data.ptoRequests || [])).catch(() => {});
+  };
+
+  useEffect(() => {
+    if (calPanel === 'pto') {
+      loadPto();
+    } else if (calPanel === 'spaces') {
+      api.get('/calendar/spaces').then(r => setSharedSpaces(r.data.spaces || [])).catch(() => {});
+      api.get('/calendar?showSharedSpaces=true').then(r => setSpaceReservations(r.data.spaceReservations || [])).catch(() => {});
+    }
+  }, [calPanel]);
+
+  const handlePtoSubmit = async () => {
+    setPtoSubmitting(true);
+    try {
+      await api.post('/calendar/pto', ptoForm);
+      setPtoForm({ type: 'PTO', startDate: '', endDate: '', reason: '' });
+      loadPto();
+    } catch { /* silent */ }
+    setPtoSubmitting(false);
+  };
+
+  const handlePtoCancel = async (id) => {
+    setPtoCancellingId(id);
+    try {
+      await api.delete(`/calendar/pto/${id}`);
+      loadPto();
+    } catch { /* silent */ }
+    setPtoCancellingId(null);
+  };
+
+  /* Group consecutive same-day requests sharing a groupId into one card */
+  const ptoGroups = (() => {
+    const map = new Map();
+    ptoRequests.forEach(r => {
+      const key = r.groupId || r.id;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return Array.from(map.values()).map(rows => {
+      const sorted = [...rows].sort((a, b) => new Date(a.date) - new Date(b.date));
+      return { rows: sorted, first: sorted[0], last: sorted[sorted.length - 1] };
+    }).sort((a, b) => new Date(b.first.date) - new Date(a.first.date));
+  })();
+
+  const handleSpaceReserve = async () => {
+    setSpaceSubmitting(true);
+    try {
+      const res = await api.post('/calendar/spaces/reserve', spaceForm);
+      setSpaceReservations(prev => [...prev, res.data.reservation]);
+      setSpaceForm(p => ({ ...p, purpose: '' }));
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Error reserving space';
+      alert(msg);
+    }
+    setSpaceSubmitting(false);
+  };
   const [allStudents, setAllStudents] = useState([]);
   const [isAttendeeDropdownOpen, setIsAttendeeDropdownOpen] = useState(false);
   const [attendeeDropdownMode, setAttendeeDropdownMode] = useState('search'); // 'search' or 'quick'
@@ -210,7 +281,7 @@ const CalendarView = () => {
   const attendeeSectionRef = useRef(null);
   const addEventRef = useRef(null);
   
-  const [miniCalDate, setMiniCalDate] = useState(new Date(2026, 3, 1));
+  const [miniCalDate, setMiniCalDate] = useState(new Date());
   const handleMiniCalPrev = () => setMiniCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const handleMiniCalNext = () => setMiniCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
@@ -301,7 +372,7 @@ const CalendarView = () => {
       weeks = 52; // Generate 1 year worth
     }
     
-    let start = new Date(2026, 3, 20); // using mock current date
+    let start = new Date();
     let generated = [];
     
     classDays.forEach(dayStr => {
@@ -1179,13 +1250,103 @@ const CalendarView = () => {
           </div>
 
           <div className="view-toggle">
-            {/* Day view only shows normally on mobile but we leave it accessible */}
             <button className={`view-btn ${view === 'day' ? 'active' : ''}`} onClick={() => setView('day')}>Day</button>
             <button className={`view-btn ${view === 'week' ? 'active' : ''}`} onClick={() => setView('week')}>Week</button>
             <button className={`view-btn ${view === 'month' ? 'active' : ''}`} onClick={() => setView('month')}>Month</button>
           </div>
+          {role === 'TEACHER' && (
+            <div className="view-toggle" style={{marginLeft: 8}}>
+              <button className={`view-btn ${calPanel === 'pto' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'pto' ? null : 'pto')}>PTO</button>
+              <button className={`view-btn ${calPanel === 'spaces' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'spaces' ? null : 'spaces')}>Spaces</button>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* PTO Panel */}
+      {calPanel === 'pto' && (
+        <div className="cal-panel">
+          <h3>Time Off Requests</h3>
+          <div className="cal-panel-form">
+            <select value={ptoForm.type} onChange={e => setPtoForm(p => ({...p, type: e.target.value}))}>
+              <option value="PTO">PTO</option>
+              <option value="SICK">Sick Day</option>
+            </select>
+            <input
+              type="date"
+              title="Start date"
+              value={ptoForm.startDate}
+              onChange={e => setPtoForm(p => ({...p, startDate: e.target.value, endDate: p.endDate && p.endDate < e.target.value ? e.target.value : p.endDate}))}
+            />
+            <span style={{ alignSelf: 'center', color: 'var(--text-muted)', fontSize: 13 }}>to</span>
+            <input
+              type="date"
+              title="End date"
+              min={ptoForm.startDate || undefined}
+              value={ptoForm.endDate}
+              onChange={e => setPtoForm(p => ({...p, endDate: e.target.value}))}
+            />
+            <input type="text" placeholder="Reason (optional)" value={ptoForm.reason} onChange={e => setPtoForm(p => ({...p, reason: e.target.value}))} />
+            <button className="cal-panel-submit" onClick={handlePtoSubmit} disabled={ptoSubmitting || !ptoForm.startDate || !ptoForm.endDate}>
+              {ptoSubmitting ? 'Submitting...' : 'Request'}
+            </button>
+          </div>
+          <div className="cal-panel-list">
+            {ptoGroups.length > 0 ? ptoGroups.map(({ rows, first, last }) => {
+              const sameDay = first.date === last.date;
+              const label = sameDay
+                ? formatDateUS(first.date)
+                : `${formatDateUS(first.date)} – ${formatDateUS(last.date)} (${rows.length} days)`;
+              const allPending = rows.every(r => r.status === 'PENDING');
+              return (
+                <div key={first.groupId || first.id} className={`cal-panel-item ${first.status?.toLowerCase()}`}>
+                  <span>{first.type}: {label}{first.reason ? ` — ${first.reason}` : ''}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className={`cal-status ${first.status?.toLowerCase()}`}>{first.status}</span>
+                    {allPending && (
+                      <button
+                        onClick={() => handlePtoCancel(first.id)}
+                        disabled={ptoCancellingId === first.id}
+                        style={{ background: 'none', border: '1px solid var(--border-light)', borderRadius: 6, padding: '2px 8px', fontSize: 11, cursor: 'pointer', color: 'var(--text-muted)' }}
+                      >
+                        {ptoCancellingId === first.id ? 'Cancelling...' : 'Cancel'}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              );
+            }) : <p className="text-muted" style={{fontSize: 13}}>No time off requests.</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Shared Spaces Panel */}
+      {calPanel === 'spaces' && (
+        <div className="cal-panel">
+          <h3>Reserve a Shared Space</h3>
+          <div className="cal-panel-form">
+            <select value={spaceForm.spaceId} onChange={e => setSpaceForm(p => ({...p, spaceId: e.target.value}))}>
+              <option value="">Select space...</option>
+              {sharedSpaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <input type="date" value={spaceForm.date} onChange={e => setSpaceForm(p => ({...p, date: e.target.value}))} />
+            <input type="time" value={spaceForm.startTime} onChange={e => setSpaceForm(p => ({...p, startTime: e.target.value}))} />
+            <input type="time" value={spaceForm.endTime} onChange={e => setSpaceForm(p => ({...p, endTime: e.target.value}))} />
+            <input type="text" placeholder="Purpose" value={spaceForm.purpose} onChange={e => setSpaceForm(p => ({...p, purpose: e.target.value}))} />
+            <button className="cal-panel-submit" onClick={handleSpaceReserve} disabled={spaceSubmitting || !spaceForm.spaceId || !spaceForm.date}>
+              {spaceSubmitting ? 'Reserving...' : 'Reserve'}
+            </button>
+          </div>
+          <div className="cal-panel-list">
+            {spaceReservations.length > 0 ? spaceReservations.map(r => (
+              <div key={r.id} className="cal-panel-item">
+                <span><strong>{r.space?.name}</strong> — {r.reservedBy?.fullName || 'You'}</span>
+                <span className="text-muted" style={{fontSize: 12}}>{new Date(r.startTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} – {new Date(r.endTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
+              </div>
+            )) : <p className="text-muted" style={{fontSize: 13}}>No reservations yet.</p>}
+          </div>
+        </div>
+      )}
 
       <div className="calendar-glass-box">
         {view === 'week' && (
@@ -1725,31 +1886,18 @@ const CalendarView = () => {
                 <>
                   <div className="drawer-section">
                     <div className="form-group">
-                      <label>Category</label>
-                      <div className="custom-dropdown" onClick={(e) => {
-                        e.stopPropagation();
-                        const el = document.getElementById('category-dropdown-menu');
-                        el.style.display = el.style.display === 'block' ? 'none' : 'block';
-                      }}>
-                        <div className="custom-dropdown-selected form-control">
-                          {newEventForm.category || 'Select category'}
-                        </div>
-                        <div id="category-dropdown-menu" className="custom-dropdown-menu">
-                          {['Online Tutoring', 'In Person Tutoring'].map(cat => (
-                            <div 
-                              key={cat}
-                              className="custom-dropdown-item"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setNewEventForm({...newEventForm, category: cat});
-                                document.getElementById('category-dropdown-menu').style.display = 'none';
-                              }}
-                            >
-                              {cat}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <label htmlFor="event-category-select">Category</label>
+                      <select
+                        id="event-category-select"
+                        className="form-control"
+                        value={newEventForm.category || ''}
+                        onChange={(e) => setNewEventForm({ ...newEventForm, category: e.target.value })}
+                      >
+                        <option value="">Select category</option>
+                        {['Online Tutoring', 'In Person Tutoring'].map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
                     </div>
 
                     <h3><CalendarCheck size={18} /> Recurrence</h3>

@@ -647,6 +647,11 @@
   border-radius: 9px; font-size: 13px; background: white; color: var(--text-main);
   box-sizing: border-box;
 }
+.reg-elective-list { display: flex; flex-direction: column; gap: 6px; }
+.reg-elective-option {
+  display: flex; align-items: center; gap: 8px; font-size: 13px;
+  font-weight: 400; color: var(--text-main); cursor: pointer;
+}
 .reg-submit-btn {
   margin-top: 4px; background: var(--primary); color: white; border: none;
   border-radius: 10px; padding: 11px; font-weight: 700; font-size: 14px;

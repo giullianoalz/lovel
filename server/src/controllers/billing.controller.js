@@ -179,3 +179,156 @@ export const createInvoice = async (req, res, next) => {
     next(error);
   }
 };
+
+/* ──────────────────────────── EMA STEP UP ──────────────────────────── */
+
+// Compute the next sequential LC-#### number (numeric, not lexicographic).
+const nextLcNumber = async (tx) => {
+  const invoices = await tx.invoice.findMany({
+    where: { invoiceNumber: { startsWith: 'LC-' } },
+    select: { invoiceNumber: true },
+  });
+  let max = 4390;
+  for (const inv of invoices) {
+    const n = parseInt(inv.invoiceNumber.replace('LC-', ''), 10);
+    if (!isNaN(n) && n > max) max = n;
+  }
+  return max + 1;
+};
+
+// POST /api/billing/ema/generate
+// Body: { groups: [{ studentName, studentId, total, poNumbers: [], lines: [{description, amount}] }] }
+// Assigns one sequential LC-#### invoice per student group and records invoices.
+export const generateEmaBatch = async (req, res, next) => {
+  try {
+    const { groups } = req.body;
+    if (!Array.isArray(groups) || groups.length === 0) {
+      return res.status(400).json({ message: 'groups array is required.' });
+    }
+
+    const results = await prisma.$transaction(async (tx) => {
+      let nextNum = await nextLcNumber(tx);
+      const out = [];
+
+      for (const g of groups) {
+        const invoiceNumber = `LC-${nextNum++}`;
+
+        // Match student by name to attach the family.
+        const student = g.studentName
+          ? await tx.user.findFirst({
+              where: { role: 'STUDENT', fullName: { equals: g.studentName, mode: 'insensitive' } },
+              select: { id: true, familyMembers: { select: { familyId: true }, take: 1 } },
+            })
+          : null;
+        const familyId = student?.familyMembers?.[0]?.familyId || null;
+        const total = Number(g.total) || 0;
+
+        const invoice = await tx.invoice.create({
+          data: {
+            invoiceNumber,
+            familyId,
+            studentId: student?.id || null,
+            source: 'EMA',
+            poNumbers: g.poNumbers || [],
+            subtotal: total,
+            totalAmount: total,
+            status: 'SENT',
+            dateRange: 'EMA Step Up Batch',
+            lines: (g.lines && g.lines.length > 0)
+              ? { create: g.lines.map(l => ({ description: l.description || 'EMA session', amount: Number(l.amount) || 0 })) }
+              : undefined,
+          },
+        });
+
+        out.push({
+          ...g,
+          invoiceNumber: invoice.invoiceNumber,
+          familyId,
+          matched: !!student,
+        });
+      }
+      return out;
+    });
+
+    res.json({ groups: results });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/billing/ema/reconcile
+// Body: { lines: [{ poNumber, studentName, amount }] }
+// Matches each remittance line to the invoice covering that PO #, records a
+// scholarship payment, and marks invoices PAID/PARTIAL.
+export const reconcileEmaRemittance = async (req, res, next) => {
+  try {
+    const { lines } = req.body;
+    if (!Array.isArray(lines) || lines.length === 0) {
+      return res.status(400).json({ message: 'lines array is required.' });
+    }
+
+    const report = await prisma.$transaction(async (tx) => {
+      const r = { matched: [], unmatched: [], totalMatched: 0, invoicesPaid: [] };
+      const touched = new Map();
+
+      for (const line of lines) {
+        const amount = Number(line.amount) || 0;
+        const invoice = await tx.invoice.findFirst({
+          where: {
+            OR: [
+              line.poNumber ? { poNumbers: { has: line.poNumber } } : undefined,
+              line.poNumber ? { invoiceNumber: line.poNumber } : undefined,
+            ].filter(Boolean),
+          },
+        });
+
+        if (!invoice) { r.unmatched.push(line); continue; }
+
+        const newPaid = Number(invoice.amountPaid) + amount;
+        await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid: newPaid } });
+
+        await tx.payment.create({
+          data: {
+            familyId: invoice.familyId,
+            invoiceId: invoice.id,
+            amount,
+            netAmount: amount,
+            method: 'SCHOLARSHIP_EMA',
+            status: 'COMPLETED',
+            externalReference: line.poNumber || invoice.invoiceNumber,
+            notes: `EMA Step Up remittance — ${line.poNumber || invoice.invoiceNumber}`,
+          },
+        });
+
+        if (invoice.familyId) {
+          await tx.transaction.create({
+            data: {
+              studentId: invoice.studentId || null,
+              familyId: invoice.familyId,
+              amount,
+              type: 'PAYMENT',
+              description: `EMA Step Up — ${line.poNumber || invoice.invoiceNumber}`,
+              invoiceId: invoice.id,
+            },
+          });
+        }
+
+        r.matched.push({ ...line, invoiceNumber: invoice.invoiceNumber, familyId: invoice.familyId });
+        r.totalMatched += amount;
+        touched.set(invoice.id, { total: Number(invoice.totalAmount), paid: newPaid, number: invoice.invoiceNumber });
+      }
+
+      for (const [id, info] of touched) {
+        const status = info.paid >= info.total ? 'PAID' : 'PARTIAL';
+        await tx.invoice.update({ where: { id }, data: { status } });
+        if (status === 'PAID') r.invoicesPaid.push(info.number);
+      }
+
+      return r;
+    });
+
+    res.json(report);
+  } catch (error) {
+    next(error);
+  }
+};

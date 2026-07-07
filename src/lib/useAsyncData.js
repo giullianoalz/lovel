@@ -21,7 +21,7 @@ export function useAsyncData(fetchFn, deps = []) {
       if (mountedRef.current) setData(result);
     } catch (err) {
       if (mountedRef.current) {
-        setError(err.userMessage || err.message || 'Error inesperado. Inténtalo de nuevo.');
+        setError(err.userMessage || err.message || 'Unexpected error. Please try again.');
       }
     } finally {
       if (mountedRef.current) setLoading(false);

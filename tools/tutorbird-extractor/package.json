@@ -1,0 +1,14 @@
+{
+  "name": "tutorbird-extractor",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Extrae estudiantes/familias de TutorBird a un CSV importable (Playwright + Ollama local).",
+  "scripts": {
+    "explore": "node explore.mjs",
+    "extract": "node extract.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

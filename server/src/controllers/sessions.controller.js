@@ -25,6 +25,8 @@ export const listSessions = async (req, res, next) => {
         class: {
           select: { name: true, subject: true, type: true, meetingUrl: true },
         },
+        notes: { orderBy: { createdAt: 'desc' } },
+        materials: true,
       },
     });
 
@@ -111,6 +113,78 @@ export const createSession = async (req, res, next) => {
 };
 
 /**
+ * POST /api/sessions/bulk
+ * Generate recurring sessions for a class across a date range on chosen weekdays.
+ * This is the only real way to put a class on the schedule — without it, teachers
+ * have nothing to complete and payroll/attendance never has real data to work with.
+ */
+export const bulkScheduleSessions = async (req, res, next) => {
+  try {
+    const { classId, startDate, endDate, weekdays, startTime, endTime } = req.body;
+
+    if (!classId || !startDate || !endDate || !Array.isArray(weekdays) || weekdays.length === 0 || !startTime || !endTime) {
+      return res.status(400).json({ error: 'Validation Error', message: 'classId, startDate, endDate, weekdays[], startTime, and endTime are required.' });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (end < start) {
+      return res.status(400).json({ error: 'Validation Error', message: 'endDate must be on or after startDate.' });
+    }
+
+    const weekdaySet = new Set(weekdays.map(Number));
+    const dates = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      if (weekdaySet.has(d.getDay())) dates.push(new Date(d));
+    }
+
+    if (dates.length === 0) {
+      return res.status(400).json({ error: 'Validation Error', message: 'No dates in range match the selected weekdays.' });
+    }
+
+    // Skip dates that already have a session for this class (re-running must not duplicate).
+    const existing = await prisma.session.findMany({
+      where: { classId, date: { gte: start, lte: end } },
+      select: { date: true },
+    });
+    const existingDates = new Set(existing.map((s) => s.date.toISOString().slice(0, 10)));
+    const newDates = dates.filter((d) => !existingDates.has(d.toISOString().slice(0, 10)));
+
+    if (newDates.length === 0) {
+      return res.json({ message: 'All matching dates already have a session scheduled.', created: 0 });
+    }
+
+    const startObj = new Date(`1970-01-01T${startTime}:00Z`);
+    const endObj = new Date(`1970-01-01T${endTime}:00Z`);
+
+    const enrollments = await prisma.classEnrollment.findMany({
+      where: { classId, status: 'active' },
+      select: { studentId: true },
+    });
+
+    const createdSessions = await prisma.$transaction(
+      newDates.map((date) =>
+        prisma.session.create({
+          data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED' },
+        })
+      )
+    );
+
+    if (enrollments.length > 0) {
+      await prisma.attendance.createMany({
+        data: createdSessions.flatMap((session) =>
+          enrollments.map((e) => ({ sessionId: session.id, studentId: e.studentId, status: 'PRESENT' }))
+        ),
+      });
+    }
+
+    res.status(201).json({ message: `${createdSessions.length} sessions scheduled.`, created: createdSessions.length });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * PUT /api/sessions/:id
  * Update session status (e.g. mark as COMPLETED) or time
  */
@@ -180,6 +254,61 @@ export const updateAttendance = async (req, res, next) => {
  * POST /api/sessions/:id/notes
  * Add a note/report to a session
  */
+/**
+ * GET /api/sessions/supervision
+ * Admin-only: all sessions with notes & materials, grouped by class
+ */
+export const supervisionSessions = async (req, res, next) => {
+  try {
+    const { classId, teacherId, from, to } = req.query;
+
+    const where = {};
+    if (classId) where.classId = classId;
+    if (teacherId) where.class = { teacherId };
+    if (from || to) {
+      where.date = {};
+      if (from) where.date.gte = new Date(from);
+      if (to) where.date.lte = new Date(to);
+    }
+
+    const sessions = await prisma.session.findMany({
+      where,
+      orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
+      include: {
+        class: {
+          select: { id: true, name: true, subject: true, type: true },
+        },
+        notes: true,
+        materials: true,
+        attendance: {
+          include: {
+            student: { select: { id: true, fullName: true } },
+          },
+        },
+      },
+    });
+
+    const classes = await prisma.class.findMany({
+      where: teacherId ? { teacherId } : undefined,
+      orderBy: { name: 'asc' },
+      include: {
+        teacher: { select: { id: true, fullName: true } },
+        _count: { select: { enrollments: { where: { status: 'active' } } } },
+      },
+    });
+
+    const teachers = await prisma.user.findMany({
+      where: { role: 'TEACHER' },
+      select: { id: true, fullName: true },
+      orderBy: { fullName: 'asc' },
+    });
+
+    res.json({ sessions, classes, teachers });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const addSessionNote = async (req, res, next) => {
   try {
     const { notes, visibility = 'all' } = req.body;

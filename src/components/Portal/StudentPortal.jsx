@@ -8,10 +8,10 @@ import ErrorBanner from '../Layout/ErrorBanner';
 import './StudentPortal.css';
 
 const TABS = [
-  { id: 'home',      label: 'Inicio',     icon: <Star size={16} /> },
-  { id: 'classes',   label: 'Mis Clases', icon: <Calendar size={16} /> },
-  { id: 'rewards',   label: 'Premios',    icon: <Gift size={16} /> },
-  { id: 'materials', label: 'Materiales', icon: <BookOpen size={16} /> },
+  { id: 'home',      label: 'Home',       icon: <Star size={16} /> },
+  { id: 'classes',   label: 'My Classes', icon: <Calendar size={16} /> },
+  { id: 'rewards',   label: 'Rewards',    icon: <Gift size={16} /> },
+  { id: 'materials', label: 'Materials',  icon: <BookOpen size={16} /> },
 ];
 
 const fmt = (iso) =>
@@ -30,7 +30,7 @@ const StudentPortal = () => {
       const res = await api.get('/portal/student');
       setData(res.data);
     } catch (err) {
-      setError(err.userMessage || 'No se pudo cargar el portal.');
+      setError(err.userMessage || 'Could not load the portal.');
     } finally {
       setLoading(false);
     }
@@ -38,12 +38,12 @@ const StudentPortal = () => {
 
   useEffect(() => { load(); }, []);
 
-  if (loading) return <div className="sp-loading"><span className="sp-spinner" />Cargando tu portal...</div>;
+  if (loading) return <div className="sp-loading"><span className="sp-spinner" />Loading your portal...</div>;
   if (error)   return <div className="sp-loading"><ErrorBanner message={error} onRetry={load} /></div>;
   if (!data)   return null;
 
   const { student, enrollments, prizeHistory: seashellHistory, behaviorSummary, materials, announcements } = data;
-  const firstName = student.fullName?.split(' ')[0] || 'Estudiante';
+  const firstName = student.fullName?.split(' ')[0] || 'Student';
   const initials  = student.fullName?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?';
 
   const earned   = seashellHistory.filter(p => p.type === 'EARNED').reduce((a, p) => a + p.points, 0);
@@ -57,8 +57,8 @@ const StudentPortal = () => {
         <div className="sp-hero-content">
           <div className="sp-avatar">{initials}</div>
           <div className="sp-hero-text">
-            <h1>Hola, {firstName}! 👋</h1>
-            <p>Sigue acumulando seashells y destaca en clases</p>
+            <h1>Hi, {firstName}! 👋</h1>
+            <p>Keep earning seashells and shine in class</p>
           </div>
         </div>
 
@@ -77,13 +77,13 @@ const StudentPortal = () => {
           <div className="sp-stat-pill pos">
             <ThumbsUp size={18} />
             <span className="sp-stat-num">{behaviorSummary.positives}</span>
-            <span className="sp-stat-lbl">Positivos</span>
+            <span className="sp-stat-lbl">Positive</span>
           </div>
           {behaviorSummary.warnings > 0 && (
             <div className="sp-stat-pill warn">
               <AlertTriangle size={18} />
               <span className="sp-stat-num">{behaviorSummary.warnings}</span>
-              <span className="sp-stat-lbl">Avisos</span>
+              <span className="sp-stat-lbl">Warnings</span>
             </div>
           )}
         </div>
@@ -112,12 +112,12 @@ const StudentPortal = () => {
               <div className="sp-progress-header">
                 <Shell size={22} color="#0ea5e9" />
                 <div>
-                  <h3>Mis Seashells</h3>
-                  <p>{student.seashells || 0} puntos totales</p>
+                  <h3>My Seashells</h3>
+                  <p>{student.seashells || 0} total points</p>
                 </div>
                 <div className="sp-progress-nums">
-                  <span className="sp-earned">+{earned} ganadas</span>
-                  {redeemed > 0 && <span className="sp-redeemed">−{redeemed} canjeadas</span>}
+                  <span className="sp-earned">+{earned} earned</span>
+                  {redeemed > 0 && <span className="sp-redeemed">−{redeemed} redeemed</span>}
                 </div>
               </div>
               <div className="sp-progress-bar-wrap">
@@ -128,7 +128,7 @@ const StudentPortal = () => {
               </div>
               <div className="sp-progress-hint">
                 <TrendingUp size={13} />
-                {Math.max(100 - ((student.seashells || 0) % 100), 0)} seashells para el próximo nivel
+                {Math.max(100 - ((student.seashells || 0) % 100), 0)} seashells to next level
               </div>
             </div>
 
@@ -136,7 +136,7 @@ const StudentPortal = () => {
             <div className="sp-quick-grid">
               {/* Next class */}
               <div className="sp-quick-card">
-                <h4><Calendar size={16} /> Próxima Clase</h4>
+                <h4><Calendar size={16} /> Next Class</h4>
                 {enrollments.length > 0 ? (() => {
                   const next = enrollments
                     .flatMap(e => (e.upcomingSessions || []).map(s => ({ ...s, className: e.className, teacherName: e.teacherName })))
@@ -144,20 +144,20 @@ const StudentPortal = () => {
                   return next ? (
                     <div className="sp-next-class">
                       <span className="sp-next-name">{next.className}</span>
-                      <span className="sp-next-teacher">con {next.teacherName}</span>
+                      <span className="sp-next-teacher">with {next.teacherName}</span>
                       <div className="sp-next-date">
                         <Clock size={13} />
                         {fmt(next.date)}
                         {next.startTime && ` · ${next.startTime}`}
                       </div>
                     </div>
-                  ) : <p className="sp-empty">Sin sesiones próximas</p>;
-                })() : <p className="sp-empty">Sin clases activas</p>}
+                  ) : <p className="sp-empty">No upcoming sessions</p>;
+                })() : <p className="sp-empty">No active classes</p>}
               </div>
 
               {/* Latest reward */}
               <div className="sp-quick-card">
-                <h4><Gift size={16} /> Último Premio</h4>
+                <h4><Gift size={16} /> Latest Reward</h4>
                 {seashellHistory.length > 0 ? (
                   <div className="sp-latest-reward">
                     <div className="sp-reward-icon">🏆</div>
@@ -167,14 +167,14 @@ const StudentPortal = () => {
                       <span className="sp-reward-date">{fmt(seashellHistory[0].createdAt)}</span>
                     </div>
                   </div>
-                ) : <p className="sp-empty">¡Aún sin premios — sigue así!</p>}
+                ) : <p className="sp-empty">No rewards yet — keep it up!</p>}
               </div>
             </div>
 
             {/* Announcements */}
             {announcements.length > 0 && (
               <div className="sp-announcements">
-                <h3><Bell size={18} /> Anuncios</h3>
+                <h3><Bell size={18} /> Announcements</h3>
                 <div className="sp-ann-list">
                   {announcements.slice(0, 4).map((a, i) => (
                     <div key={i} className="sp-ann-item">
@@ -194,14 +194,14 @@ const StudentPortal = () => {
           </div>
         )}
 
-        {/* ────────── CLASES ────────── */}
+        {/* ────────── CLASSES ────────── */}
         {tab === 'classes' && (
           <div className="sp-section">
-            <h2><Calendar size={20} /> Mis Clases</h2>
+            <h2><Calendar size={20} /> My Classes</h2>
             {enrollments.length === 0 ? (
               <div className="sp-empty-state">
                 <Calendar size={40} />
-                <p>No tienes clases activas por ahora.</p>
+                <p>You don't have any active classes right now.</p>
               </div>
             ) : (
               <div className="sp-classes-list">
@@ -211,12 +211,12 @@ const StudentPortal = () => {
                       <div className="sp-class-dot" />
                       <div>
                         <h3>{e.className}</h3>
-                        <span>con {e.teacherName}</span>
+                        <span>with {e.teacherName}</span>
                       </div>
                     </div>
                     {e.upcomingSessions?.length > 0 && (
                       <div className="sp-sessions-list">
-                        <p className="sp-sessions-title">Próximas sesiones</p>
+                        <p className="sp-sessions-title">Upcoming sessions</p>
                         {e.upcomingSessions.slice(0, 5).map((s, j) => (
                           <div key={j} className="sp-session-row">
                             <Clock size={13} />
@@ -233,7 +233,7 @@ const StudentPortal = () => {
           </div>
         )}
 
-        {/* ────────── PREMIOS ────────── */}
+        {/* ────────── REWARDS ────────── */}
         {tab === 'rewards' && (
           <div className="sp-section">
             <div className="sp-rewards-header">
@@ -241,15 +241,15 @@ const StudentPortal = () => {
                 <Shell size={28} color="#0ea5e9" />
                 <div>
                   <span className="sp-balance-num">{student.seashells || 0}</span>
-                  <span className="sp-balance-lbl">Seashells disponibles</span>
+                  <span className="sp-balance-lbl">Available seashells</span>
                 </div>
               </div>
             </div>
-            <h2><Gift size={20} /> Historial de Premios</h2>
+            <h2><Gift size={20} /> Rewards History</h2>
             {seashellHistory.length === 0 ? (
               <div className="sp-empty-state">
                 <Gift size={40} />
-                <p>¡Aún no tienes premios! Sigue participando en clase.</p>
+                <p>No rewards yet! Keep participating in class.</p>
               </div>
             ) : (
               <div className="sp-reward-list">
@@ -269,14 +269,14 @@ const StudentPortal = () => {
           </div>
         )}
 
-        {/* ────────── MATERIALES ────────── */}
+        {/* ────────── MATERIALS ────────── */}
         {tab === 'materials' && (
           <div className="sp-section">
-            <h2><BookOpen size={20} /> Mis Materiales</h2>
+            <h2><BookOpen size={20} /> My Materials</h2>
             {materials.length === 0 ? (
               <div className="sp-empty-state">
                 <FileText size={40} />
-                <p>No hay materiales asignados todavía.</p>
+                <p>No materials assigned yet.</p>
               </div>
             ) : (
               <div className="sp-materials-list">
@@ -291,10 +291,10 @@ const StudentPortal = () => {
                       </div>
                     </div>
                     <div className="sp-mat-actions">
-                      <a href={m.fileUrl} target="_blank" rel="noopener noreferrer" className="sp-mat-btn" title="Ver">
+                      <a href={m.fileUrl} target="_blank" rel="noopener noreferrer" className="sp-mat-btn" title="View">
                         <Eye size={16} />
                       </a>
-                      <a href={m.fileUrl} download className="sp-mat-btn" title="Descargar">
+                      <a href={m.fileUrl} download className="sp-mat-btn" title="Download">
                         <Download size={16} />
                       </a>
                     </div>

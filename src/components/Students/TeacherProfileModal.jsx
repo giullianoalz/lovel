@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, MapPin, Video } from 'lucide-react';
 import { database } from '../../lib/database';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './TeacherProfileModal.css';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -8,16 +9,19 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 const TeacherProfileModal = ({ teacher, onClose }) => {
   const [payrollData, setPayrollData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
 
   const loadPayroll = async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await database.fetchTeacherPayroll(teacher.id, currentMonth, currentYear);
       setPayrollData(data);
     } catch (err) {
       console.error('Error loading payroll:', err);
+      setError(err.userMessage || 'Could not load payroll for this teacher.');
     } finally {
       setLoading(false);
     }
@@ -83,6 +87,8 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
 
             {loading ? (
               <div className="payroll-loading">Calculating payroll...</div>
+            ) : error ? (
+              <ErrorBanner message={error} onRetry={loadPayroll} />
             ) : payroll ? (
               <>
                 {/* Total Earnings Card */}
@@ -103,25 +109,29 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                 <div className="payroll-breakdown">
                   <h4><Briefcase size={16} /> Earnings Breakdown</h4>
                   
-                  <div className="breakdown-item">
-                    <div className="breakdown-label">
-                      <MapPin size={14} />
-                      <span>In-Person Salary (Fixed)</span>
+                  {payroll.baseSalary > 0 && (
+                    <div className="breakdown-item">
+                      <div className="breakdown-label">
+                        <MapPin size={14} />
+                        <span>Base Salary (Fixed)</span>
+                      </div>
+                      <div className="breakdown-value">
+                        ${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
                     </div>
-                    <div className="breakdown-value">
-                      ${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </div>
-                  </div>
+                  )}
 
-                  <div className="breakdown-item">
-                    <div className="breakdown-label">
-                      <Video size={14} />
-                      <span>Online Tutoring ({payroll.onlineSessionCount} sessions × ${payroll.perSessionRate})</span>
+                  {payroll.perSessionRate > 0 && (
+                    <div className="breakdown-item">
+                      <div className="breakdown-label">
+                        <Calendar size={14} />
+                        <span>Sessions ({payroll.totalSessionCount} × ${payroll.perSessionRate})</span>
+                      </div>
+                      <div className="breakdown-value accent">
+                        ${(payroll.sessionEarnings || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      </div>
                     </div>
-                    <div className="breakdown-value accent">
-                      ${payroll.tutoringEarnings.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </div>
-                  </div>
+                  )}
 
                   <div className="breakdown-divider" />
 
@@ -146,6 +156,19 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                   <div className="rate-row">
                     <span>Per Tutoring Session</span>
                     <strong>${payroll.perSessionRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                  </div>
+                </div>
+
+                {/* Leave Balances */}
+                <div className="rate-info-card" style={{marginTop: 16}}>
+                  <h4>Leave Balances</h4>
+                  <div className="rate-row">
+                    <span>PTO Days Remaining</span>
+                    <strong>{(payroll.totalPTODays || 12) - (payroll.usedPTODays || 0)} / {payroll.totalPTODays || 12}</strong>
+                  </div>
+                  <div className="rate-row">
+                    <span>Sick Days Remaining</span>
+                    <strong>{(payroll.totalSickDays || 8) - (payroll.usedSickDays || 0)} / {payroll.totalSickDays || 8}</strong>
                   </div>
                 </div>
               </>

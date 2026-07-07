@@ -13,12 +13,14 @@ import {
 } from 'lucide-react';
 import { database } from '../../lib/database';
 import { useNavigate } from 'react-router-dom';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './Dashboard.css';
 
 const Dashboard = () => {
   const [role, setRole] = useState('student'); // 'student' or 'parent'
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
   // Helper: check if a session time string is currently live
@@ -29,20 +31,37 @@ const Dashboard = () => {
     return timeStr.toLowerCase().startsWith('today');
   };
 
-  useEffect(() => {
-    const loadDashboard = async () => {
-      setLoading(true);
+  const loadDashboard = async () => {
+    setLoading(true);
+    setError(null);
+    try {
       const studentData = await database.fetchStudentData('stu_123');
       setData(studentData);
+    } catch (err) {
+      console.error('Error loading dashboard:', err);
+      setError(err.userMessage || 'Could not load your dashboard. Please try again.');
+    } finally {
       setLoading(false);
-    };
+    }
+  };
+
+  useEffect(() => {
     loadDashboard();
   }, []);
+
+  if (error) {
+    return (
+      <div className="dashboard-container">
+        <ErrorBanner message={error} onRetry={loadDashboard} />
+      </div>
+    );
+  }
 
   if (loading || !data) {
     return (
       <div className="dashboard-container">
         <div className="glass-card" style={{ textAlign: 'center', padding: '100px' }}>
+          <div className="dashboard-spinner"></div>
           <p>Loading your academy experience...</p>
         </div>
       </div>

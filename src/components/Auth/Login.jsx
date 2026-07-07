@@ -24,17 +24,17 @@ const Login = () => {
   const handleLogin = async (e) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('Por favor, ingresa correo y contraseña.');
+      setError('Please enter your email and password.');
       return;
     }
     setError('');
     setLoading(true);
     try {
       await loginWithEmail(email, password);
-      navigate('/dashboard');
+      navigate('/'); // SmartRoot routes each role to its portal
     } catch (err) {
       console.error(err);
-      setError('Credenciales inválidas. Por favor intenta de nuevo.');
+      setError('Invalid credentials. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -45,10 +45,10 @@ const Login = () => {
     setLoading(true);
     try {
       await loginAsSeededUser(seededEmail);
-      navigate('/dashboard');
+      navigate('/'); // SmartRoot routes each role to its portal
     } catch (err) {
       console.error(err);
-      setError('Error al conectar con la base de datos de desarrollo.');
+      setError('Error connecting to the development database.');
     } finally {
       setLoading(false);
     }
@@ -58,7 +58,7 @@ const Login = () => {
     {
       name: 'Admin',
       role: 'ADMIN',
-      email: 'admin@academy.com',
+      email: 'lovelearningfl@gmail.com',
       icon: <ShieldCheck size={20} />,
       color: '#dc2626',
       bg: '#fef2f2'
@@ -72,6 +72,14 @@ const Login = () => {
       bg: '#eff6ff'
     },
     {
+      name: 'Prof. Sarah Jenkins',
+      role: 'TEACHER',
+      email: 'sarah.jenkins@academy.com',
+      icon: <GraduationCap size={20} />,
+      color: '#1d4ed8',
+      bg: '#eff6ff'
+    },
+    {
       name: 'Elena Garcia',
       role: 'PARENT',
       email: 'elena.garcia@example.com',
@@ -80,9 +88,41 @@ const Login = () => {
       bg: '#f5f3ff'
     },
     {
+      name: 'Michael Doe',
+      role: 'PARENT',
+      email: 'michael.doe@example.com',
+      icon: <Users size={20} />,
+      color: '#7c3aed',
+      bg: '#f5f3ff'
+    },
+    {
+      name: 'Carlos Ramirez',
+      role: 'PARENT',
+      email: 'carlos.ramirez@example.com',
+      icon: <Users size={20} />,
+      color: '#7c3aed',
+      bg: '#f5f3ff'
+    },
+    {
       name: 'Maria Garcia',
       role: 'STUDENT',
       email: 'maria.garcia@student.academy.com',
+      icon: <User size={20} />,
+      color: '#15803d',
+      bg: '#f0fdf4'
+    },
+    {
+      name: 'John Doe',
+      role: 'STUDENT',
+      email: 'john.doe@student.academy.com',
+      icon: <User size={20} />,
+      color: '#15803d',
+      bg: '#f0fdf4'
+    },
+    {
+      name: 'Sofia Ramirez',
+      role: 'STUDENT',
+      email: 'sofia.ramirez@student.academy.com',
       icon: <User size={20} />,
       color: '#15803d',
       bg: '#f0fdf4'
@@ -98,13 +138,13 @@ const Login = () => {
       
       <div className="login-card glass">
         <div className="login-header">
-          <img 
-            src="https://static.wixstatic.com/media/eb9967_0719931637634500ba7ba4e8b4b9193b~mv2.png/v1/fill/w_372,h_260,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/67389084_2346556398731120_57365730817873.png" 
-            alt="Lovelearning Logo" 
+          <img
+            src="/logo.png"
+            alt="Love Learning Explorers Logo"
             className="login-logo"
           />
           <h2>Academy Management System</h2>
-          <p>Ingresa a tu portal de aprendizaje</p>
+          <p>Sign in to your learning portal</p>
         </div>
 
         {error && (
@@ -116,13 +156,13 @@ const Login = () => {
 
         <form onSubmit={handleLogin} className="login-form">
           <div className="input-group">
-            <label htmlFor="email">Correo Electrónico</label>
+            <label htmlFor="email">Email</label>
             <div className="input-field">
               <Mail size={18} className="input-icon" />
               <input 
                 id="email"
                 type="email" 
-                placeholder="ejemplo@lovelearning.com" 
+                placeholder="example@lovelearning.com" 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
@@ -132,7 +172,7 @@ const Login = () => {
           </div>
 
           <div className="input-group">
-            <label htmlFor="password">Contraseña</label>
+            <label htmlFor="password">Password</label>
             <div className="input-field">
               <Lock size={18} className="input-icon" />
               <input 
@@ -148,37 +188,41 @@ const Login = () => {
           </div>
 
           <button type="submit" className="login-submit-btn" disabled={loading}>
-            {loading ? 'Accediendo...' : 'Iniciar Sesión'}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
 
-        <div className="login-divider">
-          <span>O ACCEDE COMO USUARIO DE PRUEBA</span>
-        </div>
+        {import.meta.env.DEV && (
+          <>
+            <div className="login-divider">
+              <span>OR SIGN IN AS A TEST USER</span>
+            </div>
 
-        <div className="dev-bypass-section">
-          <p className="dev-bypass-subtitle">Selecciona uno de los perfiles sembrados en Neon PostgreSQL:</p>
-          <div className="dev-bypass-grid">
-            {seededUsers.map((u, i) => (
-              <button 
-                key={i}
-                type="button"
-                className="dev-bypass-btn"
-                style={{ '--accent-color': u.color, '--bg-color': u.bg }}
-                onClick={() => handleDevBypass(u.email)}
-                disabled={loading}
-              >
-                <div className="dev-bypass-icon" style={{ color: u.color, backgroundColor: u.bg }}>
-                  {u.icon}
-                </div>
-                <div className="dev-bypass-text">
-                  <span className="dev-bypass-name">{u.name}</span>
-                  <span className="dev-bypass-role">{u.role}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
+            <div className="dev-bypass-section">
+              <p className="dev-bypass-subtitle">Select one of the seeded profiles in Neon PostgreSQL:</p>
+              <div className="dev-bypass-grid">
+                {seededUsers.map((u, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    className="dev-bypass-btn"
+                    style={{ '--accent-color': u.color, '--bg-color': u.bg }}
+                    onClick={() => handleDevBypass(u.email)}
+                    disabled={loading}
+                  >
+                    <div className="dev-bypass-icon" style={{ color: u.color, backgroundColor: u.bg }}>
+                      {u.icon}
+                    </div>
+                    <div className="dev-bypass-text">
+                      <span className="dev-bypass-name">{u.name}</span>
+                      <span className="dev-bypass-role">{u.role}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

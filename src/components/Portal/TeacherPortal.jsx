@@ -15,32 +15,8 @@ import api from '../../lib/api';
 import StudentProfileModal from '../Students/StudentProfileModal';
 import NotifDrawer from '../Notifications/NotifDrawer';
 import { useNotifications } from '../../hooks/useNotifications';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './TeacherPortal.css';
-
-/* ── Demo fallbacks ─────────────────────────────────────────── */
-const getDemoSchedule = () => [
-  {
-    sessionId: 'demo-1', classId: 'cls-1',
-    className: 'Ocean Explorers — Morning', startTime: '09:00', endTime: '11:30',
-    roster: [
-      { id: 's1', name: 'Luna García',    age: 7, allergies: true,  accommodation: false, noPhoto: false, upcomingBirthday: true,  seashells: 120, attendance: 'PENDING' },
-      { id: 's2', name: 'Max Johnson',    age: 8, allergies: false, accommodation: true,  noPhoto: false, upcomingBirthday: false, seashells: 85,  attendance: 'PENDING' },
-      { id: 's3', name: 'Sofia Rodriguez',age: 6, allergies: true,  accommodation: false, noPhoto: true,  upcomingBirthday: false, seashells: 200, attendance: 'PENDING' },
-      { id: 's4', name: 'Ethan Williams', age: 7, allergies: false, accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 40,  attendance: 'PENDING' },
-      { id: 's5', name: 'Isabella Chen',  age: 8, allergies: false, accommodation: true,  noPhoto: false, upcomingBirthday: true,  seashells: 310, attendance: 'PENDING' },
-    ],
-  },
-  {
-    sessionId: 'demo-2', classId: 'cls-2',
-    className: 'Wave Riders — Afternoon', startTime: '13:00', endTime: '15:30',
-    roster: [
-      { id: 's6', name: 'Mia Thompson', age: 9, allergies: false, accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 75,  attendance: 'PENDING' },
-      { id: 's7', name: 'Noah Davis',   age: 8, allergies: true,  accommodation: false, noPhoto: false, upcomingBirthday: false, seashells: 140, attendance: 'PENDING' },
-      { id: 's8', name: 'Ava Martinez', age: 7, allergies: false, accommodation: true,  noPhoto: true,  upcomingBirthday: false, seashells: 90,  attendance: 'PENDING' },
-    ],
-  },
-];
-
 
 /* ── Helpers ────────────────────────────────────────────────── */
 const fmtTime = (t) =>
@@ -60,13 +36,16 @@ const TeacherPortal = () => {
   const [notifTab, setNotifTab] = useState('inbox');
   const bellRef = useRef(null);
   const [loading, setLoading] = useState(true);
+  const [scheduleError, setScheduleError] = useState(null);
   const [toast, setToast] = useState(null);
 
   /* ── Portal data ── */
   const [schedule, setSchedule] = useState([]);
-  const [selectedClassIdx, setSelectedClassIdx] = useState(0);
+  const [selectedClassIdx, setSelectedClassIdx] = useState(null);
+  const [myClasses, setMyClasses] = useState([]); // all of the teacher's classes, not just today's schedule
 
   /* ── Emergency ── */
+  const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [emergencyModal, setEmergencyModal] = useState(null);
   const [emergencySending, setEmergencySending] = useState(false);
   const [selectedStudentOut, setSelectedStudentOut] = useState(null);
@@ -91,6 +70,7 @@ const TeacherPortal = () => {
   /* ── History ── */
   const [sessionHistory, setSessionHistory] = useState([]);
   const [historyFilter, setHistoryFilter] = useState('30days');
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [expandedNotes, setExpandedNotes] = useState({});
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -113,6 +93,16 @@ const TeacherPortal = () => {
   /* ── Allergy popover ── */
   const [visibleAllergy, setVisibleAllergy] = useState(null);
 
+  /* ── Announcements ── */
+  const [announcements, setAnnouncements] = useState([]);
+
+  /* ── Lesson Plans ── */
+  const [lessonPlans, setLessonPlans] = useState([]);
+  const [lpForm, setLpForm] = useState({ classId: '', weekOf: '', type: 'DISCOVERY_COVE', mainActivity: '', safetyNotes: '', skillConnection: '', differentiation: '', supplyItems: [] });
+  const [lpShowForm, setLpShowForm] = useState(false);
+  const [lpSubmitting, setLpSubmitting] = useState(false);
+  const [lpSupplyInput, setLpSupplyInput] = useState({ itemName: '', quantity: 1, dayNeeded: '' });
+
   /* ── Forms ── */
   const [behaviorForm, setBehaviorForm] = useState({ studentId: '', place: '', ruleBroken: '', type: 'WARNING', category: '', description: '', severity: 'MINOR' });
   const [medicalForm, setMedicalForm] = useState({ studentId: '', time: '', place: '', description: '', actionsTaken: '', sentHome: false });
@@ -130,25 +120,35 @@ const TeacherPortal = () => {
   ═══════════════════════════════════════════════════════════ */
   const loadPortalData = useCallback(async () => {
     setLoading(true);
+    setScheduleError(null);
     try {
       const portalRes = await api.get('/portal/teacher');
-      const sc = portalRes.data.schedule || [];
-      setSchedule(sc.length > 0 ? sc : getDemoSchedule());
-    } catch {
-      setSchedule(getDemoSchedule());
+      setSchedule(portalRes.data.schedule || []);
+    } catch (err) {
+      setScheduleError(err.userMessage || 'Could not load your schedule.');
     } finally {
       setLoading(false);
     }
+    api.get('/announcements').then(r => setAnnouncements(r.data.announcements || [])).catch(() => {});
+    api.get('/lesson-plans').then(r => setLessonPlans(r.data.lessonPlans || [])).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    api.get('/classes', { params: { teacherId: user.id } })
+      .then(r => setMyClasses(r.data.classes || []))
+      .catch(() => {});
+  }, [user?.id]);
 
   useEffect(() => { loadPortalData(); }, [loadPortalData]);
 
   /* Load history whenever selected class changes */
   useEffect(() => {
+    if (selectedClassIdx === null) return;
     const cls = schedule[selectedClassIdx];
     if (!cls) return;
     setLoadingHistory(true);
-    database.fetchSessionHistory(cls.sessionId)
+    database.fetchSessionHistory(cls.classId)
       .then((h) => setSessionHistory(h || []))
       .catch(() => setSessionHistory([]))
       .finally(() => setLoadingHistory(false));
@@ -213,6 +213,33 @@ const TeacherPortal = () => {
   ═══════════════════════════════════════════════════════════ */
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
 
+  const handleMarkRead = async (annId) => {
+    try {
+      await api.post(`/announcements/${annId}/read`);
+      setAnnouncements(prev => prev.map(a => a.id === annId ? { ...a, isRead: true } : a));
+    } catch { /* silent */ }
+  };
+  const handleSubmitLessonPlan = async () => {
+    setLpSubmitting(true);
+    try {
+      const res = await api.post('/lesson-plans', lpForm);
+      setLessonPlans(prev => [res.data.lessonPlan, ...prev]);
+      setLpShowForm(false);
+      setLpForm({ classId: '', weekOf: '', type: 'DISCOVERY_COVE', mainActivity: '', safetyNotes: '', skillConnection: '', differentiation: '', supplyItems: [] });
+      showToast('Lesson plan submitted!');
+    } catch { showToast('Error submitting lesson plan'); }
+    setLpSubmitting(false);
+  };
+
+  const addSupplyItem = () => {
+    if (!lpSupplyInput.itemName) return;
+    setLpForm(p => ({ ...p, supplyItems: [...p.supplyItems, { ...lpSupplyInput }] }));
+    setLpSupplyInput({ itemName: '', quantity: 1, dayNeeded: '' });
+  };
+
+  const unreadAnnouncements = announcements.filter(a => !a.isRead);
+  const pinnedAnnouncements = announcements.filter(a => a.isPinned);
+
   const currentClass = schedule[selectedClassIdx];
   const roster = currentClass?.roster || [];
   const allStudents = schedule.flatMap((c) => c.roster);
@@ -250,6 +277,7 @@ const TeacherPortal = () => {
       if (classNotes || attachedFiles.length > 0) {
         await database.saveClassNotes(currentClass.sessionId, classNotes, attachedFiles, noteVisibility.join(','), recordingUrl);
       }
+      await database.completeSession(currentClass.sessionId);
       showToast('✅ Session completed and saved!');
       setClassNotes('');
       if (editorRef.current) editorRef.current.innerHTML = '';
@@ -268,7 +296,7 @@ const TeacherPortal = () => {
     if (!classNotes && attachedFiles.length === 0) return;
     setSavingNotes(true);
     await database.saveClassNotes(currentClass?.sessionId || 'session', classNotes, attachedFiles, noteVisibility.join(','), recordingUrl);
-    const updated = await database.fetchSessionHistory(currentClass?.sessionId || 'session');
+    const updated = await database.fetchSessionHistory(currentClass?.classId || 'session');
     setSessionHistory(updated || []);
     setSavingNotes(false);
     showToast('✅ Materials published!');
@@ -354,6 +382,14 @@ const TeacherPortal = () => {
   /* ═══════════════════════════════════════════════════════════
      LOADING
   ═══════════════════════════════════════════════════════════ */
+  if (scheduleError) {
+    return (
+      <div className="teacher-portal">
+        <ErrorBanner message={scheduleError} onRetry={loadPortalData} />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="teacher-portal">
@@ -368,10 +404,9 @@ const TeacherPortal = () => {
   }
 
   const tabs = [
-    { key: 'session',  label: 'Session',      icon: <Users size={16} />,        badge: roster.length },
+    { key: 'session',  label: 'Session',      icon: <Users size={16} />,        badge: schedule.length },
     { key: 'behavior', label: 'Behavior',      icon: <AlertTriangle size={16} /> },
     { key: 'medical',  label: 'Medical',       icon: <Stethoscope size={16} /> },
-    { key: 'calendar', label: 'Calendar',      icon: <Calendar size={16} /> },
     { key: 'lesson',   label: 'Lesson Plans',  icon: <BookOpen size={16} /> },
   ];
 
@@ -381,15 +416,22 @@ const TeacherPortal = () => {
   return (
     <div className="teacher-portal">
 
-      {/* ── EMERGENCY STRIP ─────────────────────────────────── */}
-      <div className="emergency-strip">
-        <span className="emergency-strip-label"><ShieldAlert size={14} /> EMERGENCY</span>
-        {emergencyButtons.map((btn) => (
-          <button key={btn.type} className={`emergency-btn ${btn.cssClass}`}
-            onClick={() => { setEmergencyModal(btn); setSelectedStudentOut(null); }}>
-            {btn.icon} {btn.label}
-          </button>
-        ))}
+      {/* ── EMERGENCY STRIP (collapsible) ────────────────────── */}
+      <div className={`emergency-strip ${emergencyOpen ? 'open' : 'collapsed'}`}>
+        <button className="emergency-strip-toggle" onClick={() => setEmergencyOpen((o) => !o)}>
+          <span className="emergency-strip-label"><ShieldAlert size={14} /> EMERGENCY</span>
+          <ChevronDown size={16} className={`emergency-strip-chevron ${emergencyOpen ? 'rotated' : ''}`} />
+        </button>
+        {emergencyOpen && (
+          <div className="emergency-strip-buttons">
+            {emergencyButtons.map((btn) => (
+              <button key={btn.type} className={`emergency-btn ${btn.cssClass}`}
+                onClick={() => { setEmergencyModal(btn); setSelectedStudentOut(null); }}>
+                {btn.icon} {btn.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── EMERGENCY MODAL ──────────────────────────────────── */}
@@ -434,18 +476,38 @@ const TeacherPortal = () => {
         </div>
       )}
 
+      {/* ── ANNOUNCEMENTS STRIP ──────────────────────────────── */}
+      <div className={`announcements-strip ${unreadAnnouncements.length === 0 && pinnedAnnouncements.length === 0 ? 'collapsed' : ''}`}>
+        {unreadAnnouncements.length === 0 && pinnedAnnouncements.length === 0 ? (
+          <span className="ann-empty"><CheckCircle2 size={14} /> No new announcements at this time</span>
+        ) : (
+          <>
+            {[...unreadAnnouncements, ...pinnedAnnouncements.filter(p => !unreadAnnouncements.find(u => u.id === p.id))].map(ann => (
+              <div key={ann.id} className={`ann-card ${ann.isPinned ? 'pinned' : ''}`}>
+                <div className="ann-card-body">
+                  <strong>{ann.title}</strong>
+                  <span className="ann-body-text">{ann.body}</span>
+                  {ann.author && <span className="ann-author">— {ann.author.fullName}</span>}
+                </div>
+                {!ann.isRead && (
+                  <button className="ann-read-btn" onClick={() => handleMarkRead(ann.id)}>
+                    <Check size={14} /> Read
+                  </button>
+                )}
+                {ann.isPinned && <span className="ann-pinned-badge">Pinned</span>}
+              </div>
+            ))}
+          </>
+        )}
+        <button className="ann-view-feed-link" onClick={() => navigate('/feed')}>View Academy Feed →</button>
+      </div>
+
       {/* ── TOP BAR: title + notification bell ───────────────── */}
       <div className="tp-topbar">
         <div className="tp-topbar-left">
           <h1 className="tp-page-title">Teacher Portal</h1>
-          <span className="tp-greeting">Welcome back, {user?.fullName?.split(' ')[0]} 👋</span>
+          <span className="tp-greeting">Welcome back, {role === 'ADMIN' ? 'Team' : user?.fullName?.split(' ')[0]} 👋</span>
         </div>
-        <button ref={bellRef} className="tp-bell-btn" onClick={() => setNotifOpen(p => !p)}>
-          <Bell size={20} />
-          {notif.unreadCount > 0 && (
-            <span className="tp-bell-badge">{notif.unreadCount > 9 ? '9+' : notif.unreadCount}</span>
-          )}
-        </button>
       </div>
 
       {/* ── TODAY'S CLASSES STRIP ───────────────────────────── */}
@@ -473,12 +535,14 @@ const TeacherPortal = () => {
               </button>
             );
           })}
-          <button className="today-strip-action" onClick={() => navigate('/chat')}>
-            <MessageSquare size={14} /> Chat
-          </button>
-          <button className="today-strip-action" onClick={() => navigate('/calendar')}>
-            <CalendarIcon size={14} /> Calendar
-          </button>
+          <div className="today-strip-actions">
+            <button className="today-strip-action" onClick={() => navigate('/chat')}>
+              <MessageSquare size={14} /> Chat
+            </button>
+            <button className="today-strip-action" onClick={() => navigate('/calendar')}>
+              <CalendarIcon size={14} /> Calendar
+            </button>
+          </div>
         </div>
       )}
 
@@ -488,7 +552,7 @@ const TeacherPortal = () => {
           <button key={tab.key} className={`tp-tab ${activeTab === tab.key ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.key)}>
             {tab.icon} {tab.label}
-            {tab.badge && <span className="tp-tab-badge">{tab.badge}</span>}
+            {tab.badge !== undefined && <span className="tp-tab-badge">{tab.badge}</span>}
           </button>
         ))}
       </div>
@@ -501,27 +565,53 @@ const TeacherPortal = () => {
         ════════════════════════════════════════════ */}
         {activeTab === 'session' && (
           <>
-            {/* Class selector + Complete Session */}
-            <div className="session-header-bar">
-              <div className="roster-class-selector">
-                {schedule.map((cls, idx) => (
-                  <button key={cls.classId} className={`roster-class-pill ${idx === selectedClassIdx ? 'active' : ''}`}
-                    onClick={() => { setSelectedClassIdx(idx); setSelectedForPrize({}); }}>
-                    {cls.className}
-                  </button>
-                ))}
+            {schedule.length === 0 && (
+              <div className="no-announcements">
+                <Users size={20} style={{ marginBottom: 6, opacity: 0.4 }} /><br />
+                No classes scheduled for today.
               </div>
-              {currentClass && (
-                <div className="session-header-right">
-                  <span className="session-time-tag">
-                    <Clock size={13} /> {fmtTime(currentClass.startTime)} — {fmtTime(currentClass.endTime)}
-                  </span>
-                  <button className="complete-session-btn" onClick={handleCompleteSession} disabled={completeLoading}>
-                    {completeLoading ? 'Saving...' : '✓ Complete Session'}
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
+            {/* Class accordion — each class expands inline */}
+            <div className="class-accordion-list">
+              {schedule.map((cls, idx) => {
+                const isOpen = idx === selectedClassIdx;
+                const now = new Date();
+                const [sh, sm] = (cls.startTime || '0:0').split(':').map(Number);
+                const [eh, em] = (cls.endTime || '0:0').split(':').map(Number);
+                const start = new Date(); start.setHours(sh, sm, 0, 0);
+                const end = new Date(); end.setHours(eh, em, 0, 0);
+                const live = now >= start && now <= end;
+                const count = cls.roster?.length || 0;
+                return (
+                  <div key={cls.classId} className="class-acc-item">
+                    <button
+                      className={`class-acc-row ${isOpen ? 'open' : ''} ${live ? 'live' : ''}`}
+                      onClick={() => { setSelectedClassIdx(selectedClassIdx === idx ? null : idx); setSelectedForPrize({}); }}
+                    >
+                      <div className="class-acc-main">
+                        {live && <span className="live-dot" />}
+                        <span className="class-acc-name">{cls.className}</span>
+                        {live && <span className="live-badge-chip">LIVE</span>}
+                      </div>
+                      <div className="class-acc-meta">
+                        <span className="class-acc-time"><Clock size={12} /> {fmtTime(cls.startTime)} — {fmtTime(cls.endTime)}</span>
+                        <span className="class-acc-count">{count} student{count !== 1 ? 's' : ''}</span>
+                        <ChevronDown size={16} className="class-acc-chevron" />
+                      </div>
+                    </button>
+
+                    {/* ── Expanded session content (inline dropdown) ── */}
+                    {isOpen && (
+                      <div className="class-acc-body">
+              <div className="session-action-bar">
+                <button className="history-popup-btn" onClick={() => setHistoryModalOpen(true)}>
+                  <History size={14} /> Previous Sessions
+                  {filteredHistory.length > 0 && <span className="history-count-badge">{filteredHistory.length}</span>}
+                </button>
+                <button className="complete-session-btn" onClick={handleCompleteSession} disabled={completeLoading}>
+                  {completeLoading ? 'Saving...' : '✓ Complete Session'}
+                </button>
+              </div>
 
             {/* Prize bar */}
             <div className="prize-quick-bar">
@@ -543,9 +633,10 @@ const TeacherPortal = () => {
               </div>
             </div>
 
-            {/* Two-column layout: roster+history left, notes right */}
+            {/* Two-column layout: history+roster left, notes right */}
             <div className="session-two-col">
             <div className="session-col-left">
+
 
             {/* Roster table */}
             <div className="roster-table-wrap">
@@ -637,71 +728,6 @@ const TeacherPortal = () => {
               </table>
             </div>
 
-            {/* ── Class Continuity History ── */}
-            <div className="session-history-panel">
-              <div className="history-header">
-                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}>
-                  <History size={18} color="#64748b" /> Class Continuity
-                </h3>
-                <div className="custom-filter-wrapper" ref={filterRef}>
-                  <button className="history-filter-btn" onClick={() => setIsFilterOpen(!isFilterOpen)}>
-                    {historyFilter === '30days' ? 'Last 30 Days' : 'All Time'} <ChevronDown size={14} />
-                  </button>
-                  {isFilterOpen && (
-                    <div className="custom-filter-menu">
-                      <div className={`filter-option ${historyFilter === '30days' ? 'active' : ''}`}
-                        onClick={() => { setHistoryFilter('30days'); setIsFilterOpen(false); }}>Last 30 Days</div>
-                      <div className={`filter-option ${historyFilter === 'all' ? 'active' : ''}`}
-                        onClick={() => { setHistoryFilter('all'); setIsFilterOpen(false); }}>All Time</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="history-body">
-                {loadingHistory ? (
-                  <div className="history-loading">Loading past notes...</div>
-                ) : filteredHistory.length > 0 ? (
-                  <div className="history-timeline">
-                    {filteredHistory.map((hist) => (
-                      <div key={hist.sessionId} className="history-item">
-                        <div className="history-date">
-                          <strong>{new Date(hist.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong>
-                          <div className="visibility-badge">
-                            {(hist.visibility === 'teacher' || hist.visibility === 'me') && <EyeOff size={12} />}
-                            {hist.visibility?.includes('students_parents') && <Users size={12} />}
-                            {hist.visibility === 'all' && <Eye size={12} />}
-                          </div>
-                        </div>
-                        <div className="history-content">
-                          <div className="history-formatted-notes">
-                            {hist.notes?.length > 200 && !expandedNotes[hist.sessionId]
-                              ? <div dangerouslySetInnerHTML={{ __html: `${hist.notes.substring(0, 200)}...` }} />
-                              : <div dangerouslySetInnerHTML={{ __html: hist.notes }} />}
-                          </div>
-                          {hist.notes?.length > 200 && (
-                            <button className="read-more-btn"
-                              onClick={() => setExpandedNotes((p) => ({ ...p, [hist.sessionId]: !p[hist.sessionId] }))}>
-                              {expandedNotes[hist.sessionId] ? 'Show less' : 'Read more'}
-                            </button>
-                          )}
-                          {hist.materials?.length > 0 && (
-                            <div className="history-materials">
-                              {hist.materials.map((m, i) => (
-                                <button key={i} className="hist-mat-chip previewable" onClick={() => setPreviewFile(m)} title="Preview">
-                                  <Paperclip size={10} /> {m.name}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="history-empty">No previous session notes found for this class.</div>
-                )}
-              </div>
-            </div>
 
             </div>{/* end session-col-left */}
 
@@ -857,9 +883,26 @@ const TeacherPortal = () => {
                   </button>
                 </div>
               </div>
-            </div>{/* end session-resources-panel */}
-            </div>{/* end session-col-right */}
-            </div>{/* end session-two-col */}
+            </div>
+            </div>
+            </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Friday Marketing Hub */}
+            {new Date().getDay() === 5 && (
+              <div className="tp-glass-card" style={{marginTop: 16}}>
+                <div className="tp-section-header"><h2>📸 Friday Marketing Submissions</h2></div>
+                <p className="text-muted" style={{fontSize: 13, marginBottom: 10}}>It's Friday! Submit your weekly photos and nominations.</p>
+                <button className="tp-submit-btn" onClick={() => navigate('/marketing')} style={{margin: 0}}>
+                  Open Marketing Hub
+                </button>
+              </div>
+            )}
           </>
         )}
 
@@ -876,14 +919,6 @@ const TeacherPortal = () => {
                   <select value={behaviorForm.studentId} onChange={(e) => setBehaviorForm({ ...behaviorForm, studentId: e.target.value })} required>
                     <option value="">Select student…</option>
                     {allStudents.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div className="tp-form-group">
-                  <label>Type</label>
-                  <select value={behaviorForm.type} onChange={(e) => setBehaviorForm({ ...behaviorForm, type: e.target.value })}>
-                    <option value="WARNING">Warning</option>
-                    <option value="SLIP">Slip</option>
-                    <option value="POSITIVE">Positive</option>
                   </select>
                 </div>
                 <div className="tp-form-group">
@@ -976,33 +1011,6 @@ const TeacherPortal = () => {
           </div>
         )}
 
-        {/* ════════════════════════════════════════════
-            CALENDAR TAB
-        ════════════════════════════════════════════ */}
-        {activeTab === 'calendar' && (
-          <div className="tp-glass-card">
-            <div className="tp-section-header"><h2>📅 Today's Schedule</h2></div>
-            <div className="compact-list" style={{ gap: 14 }}>
-              {schedule.map((cls) => (
-                <div key={cls.classId} className="list-item" style={{ borderRadius: 14 }}>
-                  <div className="item-main">
-                    <div className="item-icon" style={{ background: '#dcfce7', color: '#16a34a' }}><Calendar size={18} /></div>
-                    <div className="item-text">
-                      <h4>{cls.className}</h4>
-                      <p>{cls.roster.length} students</p>
-                    </div>
-                  </div>
-                  <div className="item-side">
-                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--primary)' }}>
-                      {fmtTime(cls.startTime)} — {fmtTime(cls.endTime)}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {schedule.length === 0 && <div className="no-announcements">No classes scheduled for today 🌊</div>}
-            </div>
-          </div>
-        )}
 
         {/* ════════════════════════════════════════════
             LESSON PLANS TAB
@@ -1011,12 +1019,113 @@ const TeacherPortal = () => {
           <div className="tp-glass-card">
             <div className="tp-section-header">
               <h2>📚 Lesson Plans</h2>
-              <button className="tp-submit-btn" style={{ margin: 0, padding: '8px 18px', fontSize: 13 }}>+ New Plan</button>
+              <button className="tp-submit-btn" style={{ margin: 0, padding: '8px 18px', fontSize: 13 }} onClick={() => setLpShowForm(!lpShowForm)}>
+                {lpShowForm ? 'Cancel' : '+ New Plan'}
+              </button>
             </div>
-            <div className="no-announcements">
-              <BookOpen size={20} style={{ marginBottom: 6, opacity: 0.4 }} /><br />
-              Upload lesson plans coming soon!
-            </div>
+
+            {lpShowForm && (
+              <div className="lp-form">
+                <div className="behavior-form-grid">
+                  <div className="tp-form-group">
+                    <label>Class</label>
+                    <select value={lpForm.classId} onChange={e => setLpForm(p => ({...p, classId: e.target.value}))}>
+                      <option value="">Select class...</option>
+                      {myClasses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="tp-form-group">
+                    <label>Week of</label>
+                    <input type="date" value={lpForm.weekOf} onChange={e => setLpForm(p => ({...p, weekOf: e.target.value}))} required />
+                  </div>
+                  <div className="tp-form-group">
+                    <label>Type</label>
+                    <select value={lpForm.type} onChange={e => setLpForm(p => ({...p, type: e.target.value}))}>
+                      <option value="DISCOVERY_COVE">Discovery Cove</option>
+                      <option value="ELECTIVE">Elective</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="tp-form-group" style={{marginTop: 10}}>
+                  <label>Main Activity</label>
+                  <textarea placeholder="Describe the main activity..." value={lpForm.mainActivity} onChange={e => setLpForm(p => ({...p, mainActivity: e.target.value}))} required />
+                </div>
+                <div className="tp-form-group">
+                  <label>Safety Notes</label>
+                  <textarea placeholder="Safety notes (if needed)..." value={lpForm.safetyNotes} onChange={e => setLpForm(p => ({...p, safetyNotes: e.target.value}))} />
+                </div>
+                {lpForm.type === 'DISCOVERY_COVE' && (
+                  <>
+                    <div className="tp-form-group">
+                      <label>Skill / Real World Connection</label>
+                      <textarea placeholder="How does this connect to real-world skills?" value={lpForm.skillConnection} onChange={e => setLpForm(p => ({...p, skillConnection: e.target.value}))} />
+                    </div>
+                    <div className="tp-form-group">
+                      <label>Differentiation Strategies</label>
+                      <textarea placeholder="Strategies for different learning levels..." value={lpForm.differentiation} onChange={e => setLpForm(p => ({...p, differentiation: e.target.value}))} />
+                    </div>
+                  </>
+                )}
+
+                <div className="lp-supply-section">
+                  <label style={{fontWeight: 600, fontSize: 13}}>Supply List</label>
+                  <p className="text-muted" style={{fontSize: 12, margin: '2px 0 6px'}}>Items added here go straight to the office's shopping list.</p>
+                  <div style={{display: 'flex', gap: 8, marginTop: 6}}>
+                    <input type="text" placeholder="Item name" value={lpSupplyInput.itemName} onChange={e => setLpSupplyInput(p => ({...p, itemName: e.target.value}))} style={{flex: 1}} />
+                    <input type="number" placeholder="Qty" value={lpSupplyInput.quantity} onChange={e => setLpSupplyInput(p => ({...p, quantity: Number(e.target.value)}))} style={{width: 60}} />
+                    <select value={lpSupplyInput.dayNeeded} onChange={e => setLpSupplyInput(p => ({...p, dayNeeded: e.target.value}))} style={{width: 120}}>
+                      <option value="">Day</option>
+                      <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option>
+                    </select>
+                    <button type="button" className="tp-submit-btn" style={{margin: 0, padding: '6px 12px', fontSize: 12}} onClick={addSupplyItem}>Add</button>
+                  </div>
+                  {lpForm.supplyItems.length > 0 && (
+                    <div className="lp-supply-list">
+                      {lpForm.supplyItems.map((item, i) => (
+                        <span key={i} className="lp-supply-chip">
+                          {item.itemName} ×{item.quantity} {item.dayNeeded && `(${item.dayNeeded})`}
+                          <button onClick={() => setLpForm(p => ({...p, supplyItems: p.supplyItems.filter((_, j) => j !== i)}))} style={{background:'none',border:'none',cursor:'pointer',color:'#94a3b8',marginLeft:4}}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button className="tp-submit-btn" onClick={handleSubmitLessonPlan} disabled={lpSubmitting || !lpForm.mainActivity || !lpForm.weekOf} style={{marginTop: 14}}>
+                  {lpSubmitting ? 'Submitting...' : 'Submit Lesson Plan'}
+                </button>
+              </div>
+            )}
+
+            {lessonPlans.length > 0 ? (
+              <div className="lp-list">
+                {lessonPlans.map(lp => (
+                  <div key={lp.id} className={`lp-card ${lp.status.toLowerCase()}`}>
+                    <div className="lp-card-header">
+                      <div>
+                        <strong>{lp.class?.name || 'General'}</strong>
+                        <span className="text-muted" style={{fontSize: 12, marginLeft: 8}}>
+                          Week of {new Date(lp.weekOf).toLocaleDateString('en-US', { timeZone: 'UTC' })}
+                        </span>
+                      </div>
+                      <span className={`lp-status-badge ${lp.status.toLowerCase()}`}>{lp.status.replace('_', ' ')}</span>
+                    </div>
+                    <p className="lp-activity">{lp.mainActivity}</p>
+                    {lp.materials && <p className="text-muted" style={{fontSize: 12}}>Materials: {lp.materials}</p>}
+                    {lp.managerFeedback && (
+                      <div className="lp-feedback">
+                        <strong>Manager Feedback:</strong> {lp.managerFeedback}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : !lpShowForm && (
+              <div className="no-announcements">
+                <BookOpen size={20} style={{ marginBottom: 6, opacity: 0.4 }} /><br />
+                No lesson plans submitted yet.
+              </div>
+            )}
           </div>
         )}
 
@@ -1137,6 +1246,79 @@ const TeacherPortal = () => {
                   </div>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── HISTORY MODAL ─────────────────────────────────────── */}
+      {historyModalOpen && (
+        <div className="history-modal-overlay" onClick={() => setHistoryModalOpen(false)}>
+          <div className="history-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="history-modal-header">
+              <h2><History size={20} /> Previous Sessions — {currentClass?.className}</h2>
+              <div className="history-modal-actions">
+                <div className="custom-filter-wrapper" ref={filterRef}>
+                  <button className="history-filter-btn" onClick={() => setIsFilterOpen(!isFilterOpen)}>
+                    {historyFilter === '30days' ? 'Last 30 Days' : 'All Time'} <ChevronDown size={14} />
+                  </button>
+                  {isFilterOpen && (
+                    <div className="custom-filter-menu">
+                      <div className={`filter-option ${historyFilter === '30days' ? 'active' : ''}`}
+                        onClick={() => { setHistoryFilter('30days'); setIsFilterOpen(false); }}>Last 30 Days</div>
+                      <div className={`filter-option ${historyFilter === 'all' ? 'active' : ''}`}
+                        onClick={() => { setHistoryFilter('all'); setIsFilterOpen(false); }}>All Time</div>
+                    </div>
+                  )}
+                </div>
+                <button className="history-modal-close" onClick={() => setHistoryModalOpen(false)}>
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            <div className="history-modal-body">
+              {loadingHistory ? (
+                <div className="history-loading">Loading past notes...</div>
+              ) : filteredHistory.length > 0 ? (
+                <div className="history-timeline">
+                  {filteredHistory.map((hist) => (
+                    <div key={hist.sessionId} className="history-item">
+                      <div className="history-date">
+                        <strong>{new Date(hist.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })}</strong>
+                        <div className="visibility-badge">
+                          {(hist.visibility === 'teacher' || hist.visibility === 'me') && <><EyeOff size={12} /> Teacher only</>}
+                          {hist.visibility?.includes('students_parents') && <><Users size={12} /> Shared</>}
+                          {hist.visibility === 'all' && <><Eye size={12} /> All</>}
+                        </div>
+                      </div>
+                      <div className="history-content">
+                        <div className="history-formatted-notes">
+                          {hist.notes?.length > 200 && !expandedNotes[hist.sessionId]
+                            ? <div dangerouslySetInnerHTML={{ __html: `${hist.notes.substring(0, 200)}...` }} />
+                            : <div dangerouslySetInnerHTML={{ __html: hist.notes }} />}
+                        </div>
+                        {hist.notes?.length > 200 && (
+                          <button className="read-more-btn"
+                            onClick={() => setExpandedNotes((p) => ({ ...p, [hist.sessionId]: !p[hist.sessionId] }))}>
+                            {expandedNotes[hist.sessionId] ? 'Show less' : 'Read more'}
+                          </button>
+                        )}
+                        {hist.materials?.length > 0 && (
+                          <div className="history-materials">
+                            {hist.materials.map((m, i) => (
+                              <button key={i} className="hist-mat-chip previewable" onClick={() => setPreviewFile(m)} title="Preview">
+                                <Paperclip size={10} /> {m.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="history-empty">No previous session notes found for this class.</div>
+              )}
             </div>
           </div>
         </div>

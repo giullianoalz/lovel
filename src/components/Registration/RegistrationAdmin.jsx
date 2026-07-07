@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Clock, Copy, User, X, Mail, Trash2 } from 'lucide-react';
+import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
 import api from '../../lib/api';
 import './RegistrationAdmin.css';
 
@@ -9,6 +9,7 @@ const RegistrationAdmin = () => {
   const [selectedTermForRoster, setSelectedTermForRoster] = useState('');
   
   const [pods, setPods] = useState([]);
+  const [rosterSearchQuery, setRosterSearchQuery] = useState('');
   const [selectedPod, setSelectedPod] = useState(null);
   const [rosterDetails, setRosterDetails] = useState({ active: [], holds: [], waitlist: [] });
   
@@ -34,10 +35,22 @@ const RegistrationAdmin = () => {
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
   const [allStudents, setAllStudents] = useState([]);
+
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({ startDate: '', endDate: '', weekdays: [], startTime: '10:00', endTime: '11:00' });
+  const [scheduling, setScheduling] = useState(false);
+  const WEEKDAY_OPTIONS = [
+    { value: 0, label: 'Sun' }, { value: 1, label: 'Mon' }, { value: 2, label: 'Tue' },
+    { value: 3, label: 'Wed' }, { value: 4, label: 'Thu' }, { value: 5, label: 'Fri' }, { value: 6, label: 'Sat' },
+  ];
   
-  const [appAlert, setAppAlert] = useState({ 
-    isOpen: false, title: '', message: '', type: 'info', onConfirm: null 
+  const [appAlert, setAppAlert] = useState({
+    isOpen: false, title: '', message: '', type: 'info', onConfirm: null
   });
+
+  const [billingRequests, setBillingRequests] = useState([]);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [resendingId, setResendingId] = useState(null);
 
   const showAlert = (message, title = 'Notification', type = 'info', onConfirm = null) => {
     setAppAlert({ isOpen: true, title, message, type, onConfirm });
@@ -88,9 +101,38 @@ const RegistrationAdmin = () => {
     loadAllStudents();
   }, []);
 
+  const loadBillingSummary = async () => {
+    if (!selectedTermForRoster) return;
+    setBillingLoading(true);
+    try {
+      const res = await api.get(`/registration/billing-summary?termId=${selectedTermForRoster}`);
+      setBillingRequests(res.data.requests);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBillingLoading(false);
+    }
+  };
+
+  const handleResendEmail = async (requestId) => {
+    setResendingId(requestId);
+    try {
+      await api.post(`/registration/requests/${requestId}/resend-email`);
+      showAlert('Correo reenviado con éxito.', 'Éxito', 'info');
+      loadBillingSummary();
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Error al reenviar el correo', 'Error', 'warning');
+    } finally {
+      setResendingId(null);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'rosters') {
       loadClasses();
+    }
+    if (activeTab === 'billing') {
+      loadBillingSummary();
     }
   }, [activeTab, selectedTermForRoster]);
 
@@ -223,6 +265,28 @@ const RegistrationAdmin = () => {
     }
   };
 
+  const toggleScheduleWeekday = (value) => {
+    setScheduleForm(p => ({
+      ...p,
+      weekdays: p.weekdays.includes(value) ? p.weekdays.filter(w => w !== value) : [...p.weekdays, value],
+    }));
+  };
+
+  const handleScheduleSessions = async (e) => {
+    e.preventDefault();
+    setScheduling(true);
+    try {
+      const res = await api.post('/sessions/bulk', { classId: selectedPod, ...scheduleForm });
+      showAlert(res.data.message, 'Sessions Scheduled', 'info');
+      setShowScheduleModal(false);
+      setScheduleForm({ startDate: '', endDate: '', weekdays: [], startTime: '10:00', endTime: '11:00' });
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Error scheduling sessions', 'Error', 'warning');
+    } finally {
+      setScheduling(false);
+    }
+  };
+
   const handleOpenPodModal = (pod = null) => {
     if (pod) {
       setEditingPod(pod.id);
@@ -289,6 +353,9 @@ const RegistrationAdmin = () => {
         </button>
         <button className={`tab ${activeTab === 'rosters' ? 'active' : ''}`} onClick={() => setActiveTab('rosters')}>
           Live Rosters & Waitlists
+        </button>
+        <button className={`tab ${activeTab === 'billing' ? 'active' : ''}`} onClick={() => setActiveTab('billing')}>
+          Billing
         </button>
       </div>
 
@@ -357,7 +424,14 @@ const RegistrationAdmin = () => {
               <button className="btn-primary" style={{ marginRight: '12px' }} onClick={() => handleOpenPodModal()}>
                 <Plus size={14} /> New Class
               </button>
-              <input type="text" placeholder="Search class or student..." className="form-control" style={{ width: '250px' }} />
+              <input
+                type="text"
+                placeholder="Search by class name..."
+                className="form-control"
+                style={{ width: '250px' }}
+                value={rosterSearchQuery}
+                onChange={(e) => setRosterSearchQuery(e.target.value)}
+              />
             </div>
 
             <div className="rosters-table-container glass-card">
@@ -372,7 +446,10 @@ const RegistrationAdmin = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {pods.map(pod => {
+                  {rosterSearchQuery && pods.length > 0 && pods.filter(pod => pod.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).length === 0 && (
+                    <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>No classes match "{rosterSearchQuery}".</td></tr>
+                  )}
+                  {pods.filter(pod => pod.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).map(pod => {
                     const totalOccupied = pod.enrolled + pod.holds;
                     const isFull = totalOccupied >= pod.capacity;
                     const canPromoteWaitlist = !isFull && pod.waitlist > 0;
@@ -434,23 +511,28 @@ const RegistrationAdmin = () => {
         {activeTab === 'rosters' && selectedPod && (
           <div className="roster-detail-view">
             <div className="detail-header">
-              <button className="btn-text" onClick={() => setSelectedPod(null)} style={{ padding: 0, marginBottom: '16px' }}>← Back to All Rosters</button>
+              <button className="btn-text reg-back-btn" onClick={() => setSelectedPod(null)}>← Back to All Rosters</button>
               <div className="detail-title-row">
                 <div>
                   <h2>{pods.find(p => p.id === selectedPod)?.name}</h2>
                   <p className="text-muted">Term: {terms.find(t => t.id === selectedTermForRoster)?.name}</p>
                 </div>
-                <button className="btn-outline" onClick={() => handleOpenPodModal(pods.find(p => p.id === selectedPod))}>
-                  <Settings size={16} /> Class Settings
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn-primary" onClick={() => setShowScheduleModal(true)}>
+                    <Calendar size={16} /> Schedule Sessions
+                  </button>
+                  <button className="btn-outline" onClick={() => handleOpenPodModal(pods.find(p => p.id === selectedPod))}>
+                    <Settings size={16} /> Class Settings
+                  </button>
+                </div>
               </div>
             </div>
 
             <div className="roster-sections-grid">
               <div className="roster-card glass-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 style={{ margin: 0 }}>Active Roster ({rosterDetails.active?.length || 0})</h3>
-                  <button className="btn-outline" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => setShowAddStudentModal(true)}>
+                <div className="reg-roster-card-head">
+                  <h3>Active Roster ({rosterDetails.active?.length || 0})</h3>
+                  <button className="btn-outline reg-btn-sm" onClick={() => setShowAddStudentModal(true)}>
                     <Plus size={14} /> Add Student
                   </button>
                 </div>
@@ -468,15 +550,15 @@ const RegistrationAdmin = () => {
               </div>
 
               <div className="roster-card glass-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 style={{ margin: 0 }}>Unclaimed Priority Holds ({rosterDetails.holds?.length || 0})</h3>
+                <div className="reg-roster-card-head">
+                  <h3>Unclaimed Priority Holds ({rosterDetails.holds?.length || 0})</h3>
                 </div>
                 {(rosterDetails.holds?.length || 0) > 0 && (
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                    <button className="btn-outline" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => handleRemindAllHolds(selectedPod)}>
+                  <div className="reg-roster-actions">
+                    <button className="btn-outline reg-btn-sm" onClick={() => handleRemindAllHolds(selectedPod)}>
                       <Mail size={14} /> Remind All
                     </button>
-                    <button className="btn-outline" style={{ fontSize: '12px', padding: '4px 8px', color: '#dc2626', borderColor: 'rgba(220, 38, 38, 0.2)' }} onClick={() => handleSweepHolds(selectedPod)}>
+                    <button className="btn-outline reg-btn-sm reg-btn-danger" onClick={() => handleSweepHolds(selectedPod)}>
                       <Trash2 size={14} /> Sweep Expired
                     </button>
                   </div>
@@ -489,17 +571,17 @@ const RegistrationAdmin = () => {
                         <Clock size={16} className="text-warning" />
                         <span>{student.name}</span>
                       </div>
-                      <button className="btn-text" style={{ fontSize: '12px' }} onClick={() => handleRevokeHold(student.id)}>Revoke Hold</button>
+                      <button className="btn-text reg-btn-sm" onClick={() => handleRevokeHold(student.id)}>Revoke Hold</button>
                     </li>
                   ))}
                 </ul>
               </div>
 
               <div className="roster-card glass-card waitlist-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 style={{ margin: 0 }}>Waitlist Queue ({rosterDetails.waitlist?.length || 0})</h3>
+                <div className="reg-roster-card-head">
+                  <h3>Waitlist Queue ({rosterDetails.waitlist?.length || 0})</h3>
                   {(rosterDetails.waitlist?.length || 0) > 0 && (
-                    <button className="btn-outline" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={handleForcePromote}>
+                    <button className="btn-outline reg-btn-sm" onClick={handleForcePromote}>
                       Promote Next
                     </button>
                   )}
@@ -522,48 +604,114 @@ const RegistrationAdmin = () => {
             </div>
           </div>
         )}
+
+        {activeTab === 'billing' && (
+          <div className="billing-view">
+            <div className="filters-bar glass-card">
+              <select className="form-control" style={{ width: '200px' }} value={selectedTermForRoster} onChange={(e) => setSelectedTermForRoster(e.target.value)}>
+                {terms.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <div style={{ flex: 1 }}></div>
+              <button className="btn-outline" onClick={loadBillingSummary} disabled={billingLoading}>
+                <RefreshCw size={14} /> Refresh
+              </button>
+            </div>
+
+            <div className="rosters-table-container glass-card">
+              <table className="rosters-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Class / Group</th>
+                    <th>Electives</th>
+                    <th>IXL</th>
+                    <th>Total / Deposit</th>
+                    <th>Deposit Due</th>
+                    <th>Email Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {billingRequests.map(r => (
+                    <tr key={r.id}>
+                      <td className="font-semibold">{r.studentName}</td>
+                      <td>{r.className} <span className="text-xs text-muted">({r.groupType})</span></td>
+                      <td>{r.electiveNames.length ? r.electiveNames.join(', ') : '—'}</td>
+                      <td>{r.ixlPlan === 'NONE' ? '—' : r.ixlPlan}</td>
+                      <td>
+                        <div>${r.totalQuarterly.toFixed(2)}</div>
+                        <div className="text-xs text-muted">Deposit: ${r.depositAmount.toFixed(2)}</div>
+                      </td>
+                      <td>{r.depositDueDate ? formatDateForDisplay(r.depositDueDate) : '—'}</td>
+                      <td>
+                        {r.emailStatus === 'SENT' && <span className="badge active"><CheckCircle size={12} /> Sent</span>}
+                        {r.emailStatus === 'FAILED' && <span className="badge danger"><AlertCircle size={12} /> Failed</span>}
+                        {r.emailStatus === 'PENDING' && <span className="badge pending"><Clock size={12} /> Pending</span>}
+                      </td>
+                      <td>
+                        <button
+                          className="btn-text"
+                          disabled={resendingId === r.id}
+                          onClick={() => handleResendEmail(r.id)}
+                        >
+                          <Mail size={14} /> {resendingId === r.id ? 'Sending...' : 'Resend'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!billingLoading && billingRequests.length === 0 && (
+                    <tr>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No registration requests for this term yet.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Edit Term Modal */}
       {editTermModal && editTermForm && (
         <div className="modal-overlay">
-          <div className="modal-content glass-card" style={{ maxWidth: '500px' }}>
+          <div className="modal-content glass-card reg-modal-lg">
             <div className="registration-modal-header">
               <h2>Edit Term Configuration</h2>
-              <button className="icon-btn" onClick={() => setEditTermModal(false)}>
+              <button className="icon-btn" onClick={() => setEditTermModal(false)} aria-label="Close">
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleUpdateTerm} className="new-term-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+            <form onSubmit={handleUpdateTerm} className="new-term-form reg-form">
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>Term Name</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  required 
+                <label className="reg-form-label">Term Name</label>
+                <input
+                  type="text"
+                  className="form-control reg-input-full"
+                  required
                   value={editTermForm.name}
                   onChange={(e) => setEditTermForm({...editTermForm, name: e.target.value})}
-                  style={{ width: '100%' }}
                 />
               </div>
-              
-              <div style={{ padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>Window 1: Early (Same Day)</h4>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <input type="date" required className="form-control" value={editTermForm.earlySameDayStart} onChange={(e) => setEditTermForm({...editTermForm, earlySameDayStart: e.target.value})} style={{ flex: 1 }} />
-                  <input type="date" required className="form-control" value={editTermForm.earlySameDayEnd} onChange={(e) => setEditTermForm({...editTermForm, earlySameDayEnd: e.target.value})} style={{ flex: 1 }} />
+
+              <div className="reg-window-box">
+                <h4>Window 1: Early (Same Day)</h4>
+                <div className="reg-date-row">
+                  <input type="date" required className="form-control" value={editTermForm.earlySameDayStart} onChange={(e) => setEditTermForm({...editTermForm, earlySameDayStart: e.target.value})} />
+                  <input type="date" required className="form-control" value={editTermForm.earlySameDayEnd} onChange={(e) => setEditTermForm({...editTermForm, earlySameDayEnd: e.target.value})} />
                 </div>
               </div>
 
-              <div style={{ padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>Window 2: Public</h4>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <input type="date" required className="form-control" value={editTermForm.publicStart} onChange={(e) => setEditTermForm({...editTermForm, publicStart: e.target.value})} style={{ flex: 1 }} />
-                  <input type="date" required className="form-control" value={editTermForm.publicEnd} onChange={(e) => setEditTermForm({...editTermForm, publicEnd: e.target.value})} style={{ flex: 1 }} />
+              <div className="reg-window-box">
+                <h4>Window 2: Public</h4>
+                <div className="reg-date-row">
+                  <input type="date" required className="form-control" value={editTermForm.publicStart} onChange={(e) => setEditTermForm({...editTermForm, publicStart: e.target.value})} />
+                  <input type="date" required className="form-control" value={editTermForm.publicEnd} onChange={(e) => setEditTermForm({...editTermForm, publicEnd: e.target.value})} />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
+              <div className="reg-form-actions">
                 <button type="button" className="btn-text" onClick={() => setEditTermModal(false)}>Cancel</button>
                 <button type="submit" className="btn-primary">Save Changes</button>
               </div>
@@ -575,44 +723,43 @@ const RegistrationAdmin = () => {
       {/* New Term Modal */}
       {showNewTermModal && (
         <div className="modal-overlay">
-          <div className="modal-content glass-card" style={{ maxWidth: '500px' }}>
+          <div className="modal-content glass-card reg-modal-lg">
             <div className="registration-modal-header">
               <h2>Create New Term</h2>
-              <button className="icon-btn" onClick={() => setShowNewTermModal(false)}>
+              <button className="icon-btn" onClick={() => setShowNewTermModal(false)} aria-label="Close">
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleCreateTerm} className="new-term-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+            <form onSubmit={handleCreateTerm} className="new-term-form reg-form">
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>Term Name</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  required 
+                <label className="reg-form-label">Term Name</label>
+                <input
+                  type="text"
+                  className="form-control reg-input-full"
+                  required
                   placeholder="e.g. Fall 2026"
                   value={newTermForm.name}
                   onChange={(e) => setNewTermForm({...newTermForm, name: e.target.value})}
-                  style={{ width: '100%' }}
                 />
               </div>
-              
-              <div style={{ padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>Window 1: Early (Same Day)</h4>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <input type="date" required className="form-control" value={newTermForm.earlySameDayStart} onChange={(e) => setNewTermForm({...newTermForm, earlySameDayStart: e.target.value})} style={{ flex: 1 }} />
-                  <input type="date" required className="form-control" value={newTermForm.earlySameDayEnd} onChange={(e) => setNewTermForm({...newTermForm, earlySameDayEnd: e.target.value})} style={{ flex: 1 }} />
+
+              <div className="reg-window-box">
+                <h4>Window 1: Early (Same Day)</h4>
+                <div className="reg-date-row">
+                  <input type="date" required className="form-control" value={newTermForm.earlySameDayStart} onChange={(e) => setNewTermForm({...newTermForm, earlySameDayStart: e.target.value})} />
+                  <input type="date" required className="form-control" value={newTermForm.earlySameDayEnd} onChange={(e) => setNewTermForm({...newTermForm, earlySameDayEnd: e.target.value})} />
                 </div>
               </div>
 
-              <div style={{ padding: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                <h4 style={{ margin: '0 0 12px 0', fontSize: '14px' }}>Window 2: Public</h4>
-                <div style={{ display: 'flex', gap: '12px' }}>
-                  <input type="date" required className="form-control" value={newTermForm.publicStart} onChange={(e) => setNewTermForm({...newTermForm, publicStart: e.target.value})} style={{ flex: 1 }} />
-                  <input type="date" required className="form-control" value={newTermForm.publicEnd} onChange={(e) => setNewTermForm({...newTermForm, publicEnd: e.target.value})} style={{ flex: 1 }} />
+              <div className="reg-window-box">
+                <h4>Window 2: Public</h4>
+                <div className="reg-date-row">
+                  <input type="date" required className="form-control" value={newTermForm.publicStart} onChange={(e) => setNewTermForm({...newTermForm, publicStart: e.target.value})} />
+                  <input type="date" required className="form-control" value={newTermForm.publicEnd} onChange={(e) => setNewTermForm({...newTermForm, publicEnd: e.target.value})} />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
+              <div className="reg-form-actions">
                 <button type="button" className="btn-text" onClick={() => setShowNewTermModal(false)}>Cancel</button>
                 <button type="submit" className="btn-primary">Create Term</button>
               </div>
@@ -624,26 +771,26 @@ const RegistrationAdmin = () => {
       {/* Seed Term Modal */}
       {seedModal.isOpen && (
         <div className="modal-overlay">
-          <div className="modal-content glass-card" style={{ maxWidth: '450px' }}>
+          <div className="modal-content glass-card reg-modal-md">
             <div className="registration-modal-header">
               <h2>Seed Term Data</h2>
-              <button className="icon-btn" onClick={() => setSeedModal({ isOpen: false, targetTermId: null, sourceTermId: '' })}>
+              <button className="icon-btn" onClick={() => setSeedModal({ isOpen: false, targetTermId: null, sourceTermId: '' })} aria-label="Close">
                 <X size={20} />
               </button>
             </div>
-            <div className="modal-body" style={{ marginTop: '16px' }}>
-              <p className="text-muted" style={{ marginBottom: '24px', lineHeight: '1.5' }}>
+            <div className="modal-body reg-modal-body">
+              <p className="text-muted reg-modal-text">
                 This action will analyze the rosters of a past/current term and automatically generate <strong>Priority Holds (Guaranteed Spots)</strong> for all active students in the new term.
               </p>
-              
+
               {terms.filter(t => t.id !== seedModal.targetTermId).length > 0 ? (
                 <div className="form-group">
-                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>Source Term to Copy From:</label>
-                  <select 
-                    className="form-control" 
+                  <label className="reg-label-strong">Source Term to Copy From:</label>
+                  <select
+                    className="form-control reg-input-full"
                     value={seedModal.sourceTermId}
                     onChange={(e) => setSeedModal({...seedModal, sourceTermId: e.target.value})}
-                    style={{ width: '100%', marginBottom: '24px' }}
+                    style={{ marginBottom: '24px' }}
                   >
                     {terms.filter(t => t.id !== seedModal.targetTermId).map(t => (
                       <option key={t.id} value={t.id}>{t.name} ({t.status})</option>
@@ -656,7 +803,7 @@ const RegistrationAdmin = () => {
                 </div>
               )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <div className="reg-form-actions" style={{ marginTop: 0 }}>
                 <button type="button" className="btn-text" onClick={() => setSeedModal({ isOpen: false, targetTermId: null, sourceTermId: '' })}>Cancel</button>
                 <button type="button" className="btn-primary" onClick={handleConfirmSeed} disabled={terms.filter(t => t.id !== seedModal.targetTermId).length === 0}>
                   <Copy size={16} /> Generate Priority Holds
@@ -667,58 +814,123 @@ const RegistrationAdmin = () => {
         </div>
       )}
 
-      {/* New/Edit Pod Modal */}
-      {showPodModal && (
+      {/* Schedule Sessions Modal */}
+      {showScheduleModal && (
         <div className="modal-overlay">
-          <div className="modal-content glass-card" style={{ maxWidth: '500px' }}>
+          <div className="modal-content glass-card reg-modal-lg">
             <div className="registration-modal-header">
-              <h2>{editingPod ? 'Edit Class Details' : 'Create New Class'}</h2>
-              <button type="button" className="icon-btn" onClick={() => setShowPodModal(false)}>
+              <h2>Schedule Sessions</h2>
+              <button type="button" className="icon-btn" onClick={() => setShowScheduleModal(false)} aria-label="Close">
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleSavePod} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+            <form onSubmit={handleScheduleSessions} className="reg-form">
+              <p className="text-muted" style={{ marginTop: 0 }}>
+                Creates real sessions for <strong>{pods.find(p => p.id === selectedPod)?.name}</strong> on the chosen weekdays, within the date range. Re-running this for the same dates won't create duplicates.
+              </p>
+              <div className="reg-date-row">
+                <div>
+                  <label className="reg-form-label">Start Date</label>
+                  <input type="date" required className="form-control" value={scheduleForm.startDate}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, startDate: e.target.value })} />
+                </div>
+                <div>
+                  <label className="reg-form-label">End Date</label>
+                  <input type="date" required className="form-control" value={scheduleForm.endDate}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, endDate: e.target.value })} />
+                </div>
+              </div>
+
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>Class / Pod Name</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  required 
+                <label className="reg-form-label">Repeat on</label>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {WEEKDAY_OPTIONS.map(w => (
+                    <button
+                      key={w.value}
+                      type="button"
+                      className={`badge ${scheduleForm.weekdays.includes(w.value) ? 'active' : ''}`}
+                      style={{ cursor: 'pointer', border: '1px solid var(--border-light)' }}
+                      onClick={() => toggleScheduleWeekday(w.value)}
+                    >
+                      {w.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="reg-date-row">
+                <div>
+                  <label className="reg-form-label">Start Time</label>
+                  <input type="time" required className="form-control" value={scheduleForm.startTime}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, startTime: e.target.value })} />
+                </div>
+                <div>
+                  <label className="reg-form-label">End Time</label>
+                  <input type="time" required className="form-control" value={scheduleForm.endTime}
+                    onChange={(e) => setScheduleForm({ ...scheduleForm, endTime: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="reg-form-actions">
+                <button type="button" className="btn-text" onClick={() => setShowScheduleModal(false)}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={scheduling || scheduleForm.weekdays.length === 0}>
+                  {scheduling ? 'Scheduling...' : 'Schedule Sessions'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* New/Edit Pod Modal */}
+      {showPodModal && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-card reg-modal-lg">
+            <div className="registration-modal-header">
+              <h2>{editingPod ? 'Edit Class Details' : 'Create New Class'}</h2>
+              <button type="button" className="icon-btn" onClick={() => setShowPodModal(false)} aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleSavePod} className="reg-form">
+              <div>
+                <label className="reg-form-label">Class / Pod Name</label>
+                <input
+                  type="text"
+                  className="form-control reg-input-full"
+                  required
                   placeholder="e.g. Maker Studio Monday"
                   value={podForm.name}
                   onChange={(e) => setPodForm({...podForm, name: e.target.value})}
-                  style={{ width: '100%' }}
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>Capacity</label>
-                <input 
-                  type="number" 
-                  className="form-control" 
-                  required 
+                <label className="reg-form-label">Capacity</label>
+                <input
+                  type="number"
+                  className="form-control reg-input-full"
+                  required
                   value={podForm.capacity}
                   onChange={(e) => setPodForm({...podForm, capacity: e.target.value})}
-                  style={{ width: '100%' }}
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <label className="reg-form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <Play size={14} color="#0ea5e9" /> Zoom / Meeting Link
                 </label>
-                <input 
-                  type="url" 
-                  className="form-control" 
+                <input
+                  type="url"
+                  className="form-control reg-input-full"
                   placeholder="https://zoom.us/j/..."
                   value={podForm.meetingUrl}
                   onChange={(e) => setPodForm({...podForm, meetingUrl: e.target.value})}
-                  style={{ width: '100%' }}
                 />
                 <p className="text-xs text-muted" style={{ marginTop: '4px' }}>This link will be visible to students in their dashboard.</p>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
+              <div className="reg-form-actions">
                 <button type="button" className="btn-text" onClick={() => setShowPodModal(false)}>Cancel</button>
                 <button type="submit" className="btn-primary">{editingPod ? 'Save Changes' : 'Create Class'}</button>
               </div>
@@ -730,70 +942,43 @@ const RegistrationAdmin = () => {
       {/* Add Student Modal */}
       {showAddStudentModal && (
         <div className="modal-overlay">
-          <div className="modal-content glass-card" style={{ maxWidth: '450px' }}>
+          <div className="modal-content glass-card reg-modal-md">
             <div className="registration-modal-header">
               <h2>Add Student to Roster</h2>
-              <button className="icon-btn" onClick={() => { setShowAddStudentModal(false); setStudentSearch(''); }}>
+              <button className="icon-btn" onClick={() => { setShowAddStudentModal(false); setStudentSearch(''); }} aria-label="Close">
                 <X size={20} />
               </button>
             </div>
-            <div style={{ marginTop: '16px' }}>
-              <input 
-                type="text" 
-                className="form-control" 
-                placeholder="Search student by name..." 
+            <div className="reg-modal-body">
+              <input
+                type="text"
+                className="form-control reg-search-input"
+                placeholder="Search student by name..."
                 value={studentSearch}
                 onChange={(e) => setStudentSearch(e.target.value)}
-                style={{ width: '100%', marginBottom: '16px' }}
                 autoFocus
               />
-              
-              <div className="student-search-results" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+
+              <div className="student-search-results reg-search-results">
                 {allStudents
                   .filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase()))
                   .map(student => (
-                    <button 
-                      key={student.id} 
+                    <button
+                      key={student.id}
                       className="search-result-item"
                       onClick={() => handleManualAddStudent(student)}
-                      style={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        padding: '12px',
-                        border: 'none',
-                        background: 'none',
-                        borderBottom: '1px solid var(--border-light)',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'background 0.2s'
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0,0,0,0.02)'}
-                      onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
                     >
-                      <div style={{ 
-                        width: '32px', 
-                        height: '32px', 
-                        borderRadius: '50%', 
-                        background: '#e0f2fe', 
-                        color: '#0369a1', 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center', 
-                        fontWeight: '700', 
-                        fontSize: '12px' 
-                      }}>
+                      <div className="reg-search-avatar">
                         {student.fullName.split(' ').map(n => n[0]).join('').substring(0, 2)}
                       </div>
-                      <span style={{ fontWeight: '500' }}>{student.fullName}</span>
-                      <div style={{ flex: 1 }}></div>
+                      <span className="reg-search-name">{student.fullName}</span>
+                      <div className="reg-search-spacer"></div>
                       <Plus size={16} className="text-muted" />
                     </button>
                   ))
                 }
                 {allStudents.filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase())).length === 0 && (
-                  <p className="text-muted" style={{ textAlign: 'center', padding: '20px' }}>No students found matching "{studentSearch}"</p>
+                  <p className="text-muted reg-search-empty">No students found matching "{studentSearch}"</p>
                 )}
               </div>
             </div>
@@ -804,35 +989,24 @@ const RegistrationAdmin = () => {
       {/* Custom Alert Modal */}
       {appAlert.isOpen && (
         <div className="modal-overlay" style={{ zIndex: 1100 }}>
-          <div className="modal-content glass-card" style={{ maxWidth: '400px', textAlign: 'center', padding: '30px' }}>
-            <div style={{ 
-              width: '60px', 
-              height: '60px', 
-              borderRadius: '50%', 
-              background: appAlert.type === 'confirm' ? '#e0f2fe' : (appAlert.type === 'warning' ? '#fef3c7' : '#f0fdf4'),
-              color: appAlert.type === 'confirm' ? '#0369a1' : (appAlert.type === 'warning' ? '#d97706' : '#166534'),
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 20px auto'
-            }}>
+          <div className="modal-content glass-card reg-alert-modal">
+            <div className={`reg-alert-icon ${appAlert.type}`}>
               {appAlert.type === 'confirm' ? <Settings size={30} /> : (appAlert.type === 'warning' ? <Clock size={30} /> : <CheckCircle size={30} />)}
             </div>
-            
-            <h2 style={{ marginBottom: '12px', fontSize: '20px' }}>{appAlert.title}</h2>
-            <p className="text-muted" style={{ marginBottom: '24px', lineHeight: '1.5' }}>{appAlert.message}</p>
-            
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+
+            <h2>{appAlert.title}</h2>
+            <p className="text-muted reg-modal-text">{appAlert.message}</p>
+
+            <div className="reg-alert-actions">
               {appAlert.type === 'confirm' && (
                 <button className="btn-text" onClick={() => setAppAlert({ ...appAlert, isOpen: false })}>Cancel</button>
               )}
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary reg-alert-confirm-btn"
                 onClick={() => {
                   if (appAlert.onConfirm) appAlert.onConfirm();
                   setAppAlert({ ...appAlert, isOpen: false });
                 }}
-                style={{ padding: '10px 30px' }}
               >
                 {appAlert.type === 'confirm' ? 'Confirm' : 'OK'}
               </button>

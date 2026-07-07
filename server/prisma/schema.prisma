@@ -106,6 +106,7 @@ model Class {
   subject          String?               @db.VarChar(100)
   teacherId        String?               @map("teacher_id") @db.Uuid
   type             ClassType             @default(IN_PERSON)
+  groupType        GroupType             @default(REGULAR) @map("group_type")
   meetingUrl       String?               @map("meeting_url")
   maxStudents      Int                   @default(10) @map("max_students")
   status           String                @default("active") @db.VarChar(20)
@@ -272,8 +273,11 @@ model Invoice {
   id                  String        @id @default(uuid()) @db.Uuid
   invoiceNumber       String        @unique @map("invoice_number") @db.VarChar(20)
   familyId            String?       @map("family_id") @db.Uuid
+  studentId           String?       @map("student_id") @db.Uuid
   date                DateTime      @default(now()) @db.Date
   dateRange           String?       @map("date_range") @db.VarChar(100)
+  poNumbers           String[]      @default([]) @map("po_numbers")
+  source              String?       @db.VarChar(20)
   subtotal            Decimal       @db.Decimal(10, 2)
   processingFee       Decimal       @default(0) @map("processing_fee") @db.Decimal(10, 2)
   totalAmount         Decimal       @map("total_amount") @db.Decimal(10, 2)
@@ -443,15 +447,31 @@ model Announcement {
   body           String
   authorId       String?   @map("author_id") @db.Uuid
   targetAudience String    @default("all") @map("target_audience") @db.VarChar(20)
+  category       String    @default("general") @map("category") @db.VarChar(30)
+  imageUrl       String?   @map("image_url")
   isPinned       Boolean   @default(false) @map("is_pinned")
   publishedAt    DateTime  @default(now()) @map("published_at") @db.Timestamptz(6)
   expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
   author         User?     @relation(fields: [authorId], references: [id])
   reads          AnnouncementRead[]
+  media          AnnouncementMedia[]
 
   @@index([targetAudience])
   @@index([publishedAt])
   @@map("announcements")
+}
+
+model AnnouncementMedia {
+  id             String       @id @default(uuid()) @db.Uuid
+  announcementId String       @map("announcement_id") @db.Uuid
+  url            String
+  type           String       @default("image") @db.VarChar(10) // 'image' | 'video'
+  position       Int          @default(0)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  @@index([announcementId])
+  @@map("announcement_media")
 }
 
 model RegistrationTerm {
@@ -464,12 +484,40 @@ model RegistrationTerm {
   window2OpensAt     DateTime              @map("window2_opens_at") @db.Timestamptz(6)
   window3OpensAt     DateTime              @map("window3_opens_at") @db.Timestamptz(6)
   registrationCloses DateTime              @map("registration_closes") @db.Timestamptz(6)
+  regularRate        Decimal               @default(0) @map("regular_rate") @db.Decimal(10, 2)
+  anchoredRate       Decimal               @default(0) @map("anchored_rate") @db.Decimal(10, 2)
+  depositDueDate     DateTime?             @map("deposit_due_date") @db.Date
+  calendarAssetUrl   String?               @map("calendar_asset_url")
   createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   classes            Class[]               @relation("TermClasses")
   priorityHolds      PriorityHold[]
   requests           RegistrationRequest[]
+  electives          Elective[]
 
   @@map("registration_terms")
+}
+
+model Elective {
+  id       String                        @id @default(uuid()) @db.Uuid
+  termId   String                        @map("term_id") @db.Uuid
+  name     String                        @db.VarChar(255)
+  price    Decimal                       @default(130) @db.Decimal(10, 2)
+  term     RegistrationTerm              @relation(fields: [termId], references: [id], onDelete: Cascade)
+  requests RegistrationElectiveChoice[]
+
+  @@index([termId])
+  @@map("electives")
+}
+
+model RegistrationElectiveChoice {
+  id         String              @id @default(uuid()) @db.Uuid
+  requestId  String              @map("request_id") @db.Uuid
+  electiveId String              @map("elective_id") @db.Uuid
+  request    RegistrationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  elective   Elective            @relation(fields: [electiveId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, electiveId])
+  @@map("registration_elective_choices")
 }
 
 model PriorityHold {
@@ -498,11 +546,21 @@ model RegistrationRequest {
   secondChoiceClassId String?          @map("second_choice_class_id") @db.Uuid
   status              String           @default("pending") @db.VarChar(50)
   submittedAt         DateTime         @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  ixlPlan             IxlPlan          @default(NONE) @map("ixl_plan")
+  baseRate            Decimal          @default(0) @map("base_rate") @db.Decimal(10, 2)
+  electivesTotal      Decimal          @default(0) @map("electives_total") @db.Decimal(10, 2)
+  ixlTotal            Decimal          @default(0) @map("ixl_total") @db.Decimal(10, 2)
+  totalQuarterly      Decimal          @default(0) @map("total_quarterly") @db.Decimal(10, 2)
+  depositAmount       Decimal          @default(0) @map("deposit_amount") @db.Decimal(10, 2)
+  depositDueDate      DateTime?        @map("deposit_due_date") @db.Date
+  emailStatus         RegistrationEmailStatus @default(PENDING) @map("email_status")
+  emailSentAt         DateTime?        @map("email_sent_at") @db.Timestamptz(6)
   firstChoice         Class            @relation("FirstChoice", fields: [firstChoiceClassId], references: [id])
   secondChoice        Class?           @relation("SecondChoice", fields: [secondChoiceClassId], references: [id])
   student             User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
   term                RegistrationTerm @relation(fields: [termId], references: [id], onDelete: Cascade)
   waitlistEntries     WaitlistEntry[]
+  electiveChoices     RegistrationElectiveChoice[]
 
   @@map("registration_requests")
 }
@@ -643,6 +701,29 @@ enum ClassType {
   HYBRID    @map("hybrid")
 
   @@map("class_type")
+}
+
+enum GroupType {
+  REGULAR
+  ANCHORED
+
+  @@map("group_type")
+}
+
+enum IxlPlan {
+  NONE
+  CORE
+  CORE_SPANISH
+
+  @@map("ixl_plan")
+}
+
+enum RegistrationEmailStatus {
+  PENDING
+  SENT
+  FAILED
+
+  @@map("registration_email_status")
 }
 
 enum SessionStatus {
@@ -830,12 +911,15 @@ model TimeOffRequest {
   id             String         @id @default(uuid()) @db.Uuid
   teacherId      String         @map("teacher_id") @db.Uuid
   date           DateTime       @db.Date
+  groupId        String?        @map("group_id") @db.Uuid
   type           TimeOffType    @default(PTO)
   status         TimeOffStatus  @default(PENDING)
+  reason         String?
   managerNotes   String?        @map("manager_notes")
   createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   teacher        User           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
 
+  @@index([groupId])
   @@map("time_off_requests")
 }
 
@@ -853,6 +937,7 @@ model SpaceReservation {
   userId      String      @map("user_id") @db.Uuid
   startTime   DateTime    @map("start_time") @db.Timestamptz(6)
   endTime     DateTime    @map("end_time") @db.Timestamptz(6)
+  purpose     String?
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   space       SharedSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)

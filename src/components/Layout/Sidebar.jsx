@@ -7,7 +7,6 @@ import {
   Users,
   CreditCard,
   LogOut,
-  LayoutDashboard,
   Menu,
   X,
   ClipboardList,
@@ -16,18 +15,74 @@ import {
   Camera,
   UserCircle,
   Compass,
+  BookOpenCheck,
+  Wallet,
+  MoonStar,
+  Check,
+  Heart,
+  BookOpen,
+  Megaphone,
 } from 'lucide-react';
+import api from '../../lib/api';
+import { requestAndSaveFcmToken, listenForForegroundMessages } from '../../lib/fcm';
 import NotifDrawer from '../Notifications/NotifDrawer';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useToast } from './ToastProvider';
 import './Sidebar.css';
 
 const Sidebar = () => {
   const { user, role, logout } = useAuth();
+  const toast = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifTab, setNotifTab] = useState('inbox');
   const notif = useNotifications(role);
   const bellRef = useRef(null);
+
+  /* Push Notifications (FCM) — register device token once per session, show toast for foreground pushes */
+  useEffect(() => {
+    if (!user?.id) return;
+    requestAndSaveFcmToken(user.id);
+    const unsubscribe = listenForForegroundMessages((notification) => {
+      if (notification?.title) toast.info(`${notification.title}${notification.body ? `: ${notification.body}` : ''}`, 8000);
+    });
+    return unsubscribe;
+  }, [user?.id]);
+
+  /* Quiet Hours */
+  const [quietOpen, setQuietOpen] = useState(false);
+  const [quietActive, setQuietActive] = useState(false);
+  const [quietStart, setQuietStart] = useState('17:00');
+  const [quietEnd, setQuietEnd] = useState('09:00');
+  const [quietMsg, setQuietMsg] = useState('I have quiet hours enabled and will respond within 1 business day.');
+  const [quietSaving, setQuietSaving] = useState(false);
+
+  useEffect(() => {
+    if (role === 'TEACHER' && user?.id) {
+      api.get(`/users/${user.id}`).then(r => {
+        const u = r.data.user || r.data;
+        if (u.quietHoursStart) {
+          setQuietActive(true);
+          setQuietStart(u.quietHoursStart);
+          setQuietEnd(u.quietHoursEnd || '09:00');
+          setQuietMsg(u.autoResponderMessage || 'I have quiet hours enabled and will respond within 1 business day.');
+        }
+      }).catch(() => {});
+    }
+  }, [role, user?.id]);
+
+  const handleQuietSave = async () => {
+    setQuietSaving(true);
+    try {
+      await api.put(`/users/${user.id}`, {
+        quietHoursStart: quietActive ? quietStart : null,
+        quietHoursEnd: quietActive ? quietEnd : null,
+        autoResponderMessage: quietActive ? quietMsg : null,
+      });
+    } catch { /* silent */ }
+    setQuietSaving(false);
+    setQuietOpen(false);
+  };
 
   const closeMenu = () => setIsOpen(false);
   const navigate = useNavigate();
@@ -40,9 +95,9 @@ const Sidebar = () => {
           {isOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
         
-        <img 
-          src="https://static.wixstatic.com/media/eb9967_0719931637634500ba7ba4e8b4b9193b~mv2.png/v1/fill/w_372,h_260,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/67389084_2346556398731120_57365730817873.png" 
-          alt="Lovelearning Logo" 
+        <img
+          src="/logo.png"
+          alt="Love Learning Explorers Logo"
           className="mobile-logo"
         />
         
@@ -66,9 +121,9 @@ const Sidebar = () => {
 
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
         <div className="sidebar-brand desk-only">
-          <img 
-            src="https://static.wixstatic.com/media/eb9967_0719931637634500ba7ba4e8b4b9193b~mv2.png/v1/fill/w_372,h_260,al_c,q_85,usm_0.66_1.00_0.01,enc_avif,quality_auto/67389084_2346556398731120_57365730817873.png" 
-            alt="Lovelearning Logo" 
+          <img
+            src="/logo.png"
+            alt="Love Learning Explorers Logo"
             className="brand-logo"
           />
         </div>
@@ -76,7 +131,7 @@ const Sidebar = () => {
         
         <nav className="sidebar-nav">
           <div className="nav-section">
-            <p className="nav-label">Principal</p>
+            <p className="nav-label">Main</p>
             {role === 'STUDENT' && (
               <NavLink to="/portal/student" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <UserCircle size={20} />
@@ -101,52 +156,74 @@ const Sidebar = () => {
                 <span>Teacher Portal</span>
               </NavLink>
             )}
-            {(role === 'STUDENT' || role === 'PARENT') && (
-              <NavLink to="/dashboard" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-                <LayoutDashboard size={20} />
-                <span>Dashboard</span>
-              </NavLink>
-            )}
+            <NavLink to="/feed" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+              <Megaphone size={20} />
+              <span>Academy Feed</span>
+            </NavLink>
             <NavLink to="/chat" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <MessageSquare size={20} />
               <span>Chat Hub</span>
             </NavLink>
             <NavLink to="/calendar" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <Calendar size={20} />
-              <span>Calendario</span>
+              <span>Calendar</span>
             </NavLink>
             {(role === 'ADMIN' || role === 'TEACHER') && (
               <NavLink to="/students" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Users size={20} />
-                <span>Directorio</span>
+                <span>Directory</span>
+              </NavLink>
+            )}
+            {role === 'TEACHER' && (
+              <NavLink to="/my-payroll" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+                <Wallet size={20} />
+                <span>My Payroll</span>
               </NavLink>
             )}
           </div>
 
           {(role === 'ADMIN' || role === 'TEACHER') && (
             <div className="nav-section">
-              <p className="nav-label">Administración</p>
+              <p className="nav-label">Administration</p>
               {role === 'ADMIN' && (
                 <>
                   <NavLink to="/billing" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                     <CreditCard size={20} />
-                    <span>Facturación</span>
+                    <span>Billing</span>
                   </NavLink>
                   <NavLink to="/registration" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                     <ClipboardList size={20} />
-                    <span>Registros y Términos</span>
+                    <span>Registration & Terms</span>
                   </NavLink>
 
                 </>
               )}
 <NavLink to="/behavior" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <AlertTriangle size={20} />
-                <span>Comportamiento</span>
+                <span>Behavior</span>
               </NavLink>
               <NavLink to="/marketing" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Camera size={20} />
                 <span>Marketing Hub</span>
               </NavLink>
+              {role === 'ADMIN' && (
+                <NavLink to="/supervision" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+                  <BookOpenCheck size={20} />
+                  <span>Academic Supervision</span>
+                </NavLink>
+              )}
+              {role === 'ADMIN' && (
+                <NavLink to="/medical" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+                  <Heart size={20} />
+                  <span>Medical Incidents</span>
+                </NavLink>
+              )}
+              {role === 'ADMIN' && (
+                <NavLink to="/lesson-plans" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+                  <BookOpen size={20} />
+                  <span>Lesson Plans</span>
+                </NavLink>
+              )}
             </div>
           )}
         </nav>
@@ -156,11 +233,54 @@ const Sidebar = () => {
           <div className="sidebar-notif-anchor desk-only">
             <button ref={bellRef} className="sidebar-bell-btn" onClick={() => setIsNotifOpen(p => !p)}>
               <Bell size={18} />
-              <span>Notificaciones</span>
+              <span>Notifications</span>
               {notif.unreadCount > 0 && (
                 <span className="sidebar-notif-pill">{notif.unreadCount > 9 ? '9+' : notif.unreadCount}</span>
               )}
             </button>
+          </div>
+        )}
+
+        {role === 'TEACHER' && (
+          <div className="quiet-hours-section">
+            <button className={`quiet-toggle-btn ${quietActive ? 'active' : ''}`} onClick={() => setQuietOpen(!quietOpen)}>
+              <MoonStar size={16} />
+              <span>{quietActive ? 'Quiet Hours On' : 'Quiet Hours'}</span>
+              {quietActive && <span className="quiet-dot" />}
+            </button>
+            {quietOpen && (
+              <div className="quiet-popup">
+                <div className="quiet-popup-header">
+                  <h4><MoonStar size={16} /> Quiet Hours</h4>
+                  <button className="quiet-popup-close" onClick={() => setQuietOpen(false)}><X size={16} /></button>
+                </div>
+                <label className="quiet-switch-label">
+                  <input type="checkbox" checked={quietActive} onChange={e => setQuietActive(e.target.checked)} />
+                  <span>{quietActive ? 'Enabled' : 'Disabled'}</span>
+                </label>
+                {quietActive && (
+                  <>
+                    <div className="quiet-time-row">
+                      <div className="quiet-time-field">
+                        <label>From</label>
+                        <input type="time" value={quietStart} onChange={e => setQuietStart(e.target.value)} />
+                      </div>
+                      <div className="quiet-time-field">
+                        <label>To</label>
+                        <input type="time" value={quietEnd} onChange={e => setQuietEnd(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="quiet-msg-field">
+                      <label>Auto-response message</label>
+                      <textarea value={quietMsg} onChange={e => setQuietMsg(e.target.value)} rows={2} />
+                    </div>
+                  </>
+                )}
+                <button className="quiet-save-btn" onClick={handleQuietSave} disabled={quietSaving}>
+                  <Check size={14} /> {quietSaving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -170,16 +290,16 @@ const Sidebar = () => {
               {user ? user.fullName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'U'}
             </div>
             <div className="user-info">
-              <p className="user-name">{user ? user.fullName : 'Usuario'}</p>
+              <p className="user-name">{user ? user.fullName : 'User'}</p>
               <p className="user-role">
-                {role === 'ADMIN' && 'Administrador'}
-                {role === 'TEACHER' && 'Profesor'}
-                {role === 'PARENT' && 'Padre'}
-                {role === 'STUDENT' && 'Estudiante'}
+                {role === 'ADMIN' && 'Administrator'}
+                {role === 'TEACHER' && 'Teacher'}
+                {role === 'PARENT' && 'Parent'}
+                {role === 'STUDENT' && 'Student'}
               </p>
             </div>
           </div>
-          <button className="logout-btn" onClick={logout} title="Cerrar Sesión">
+          <button className="logout-btn" onClick={logout} title="Sign Out">
             <LogOut size={18} />
           </button>
         </div>

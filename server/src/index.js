@@ -34,14 +34,33 @@ import announcementsRoutes from './routes/announcements.routes.js';
 import medicalRoutes from './routes/medical.routes.js';
 import lessonPlanRoutes from './routes/lessonPlan.routes.js';
 import calendarRoutes from './routes/calendar.routes.js';
+import rewardsRoutes from './routes/rewards.routes.js';
+import importRoutes from './routes/import.routes.js';
+import paymentsRoutes from './routes/payments.routes.js';
 
 const app = express();
 const httpServer = createServer(app);
 
+// Allows phones/other devices on the same Wi-Fi, and any localhost port
+// (Vite auto-increments when 5173 is busy — e.g. multiple sandboxed preview
+// instances), to reach the dev server without opening CORS up in production.
+const isLanDevOrigin = (origin) => {
+  if (process.env.NODE_ENV !== 'development') return false;
+  return /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):517\d$/.test(origin || '')
+    || /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin || '');
+};
+
 // Socket.IO setup (will be used for chat & notifications later)
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: [process.env.FRONTEND_URL, 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'].filter(Boolean),
+    origin: (origin, callback) => {
+      const allowed = [process.env.FRONTEND_URL, 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'].filter(Boolean);
+      if (!origin || allowed.includes(origin) || isLanDevOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -70,7 +89,7 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin) || isLanDevOrigin(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -122,12 +141,9 @@ app.use('/api/sessions', sessionsRoutes);
 app.use('/api/registration', registrationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/billing', billingRoutes);
-
-// Phase 3+ routes will be added here:
-// app.use('/api/billing', billingRoutes);
-// app.use('/api/payments', paymentsRoutes);
-// app.use('/api/snacks', snacksRoutes);
-// app.use('/api/prizes', prizesRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/rewards', rewardsRoutes);
+app.use('/api/import', importRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/behavior', behaviorRoutes);
 app.use('/api/medical', medicalRoutes);

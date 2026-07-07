@@ -1,18 +1,57 @@
+import admin from 'firebase-admin';
+import '../config/firebase-admin.js';
 import prisma from '../config/database.js';
 
 /**
- * Sends a push notification to specific users.
- * Currently mocked for development. Will use Firebase Admin SDK later.
+ * Sends a real push notification (via Firebase Cloud Messaging) to specific users.
+ * Falls back to a console log if a user has no registered device token.
  */
 export const sendPushNotification = async (userIds, title, body, data = {}) => {
-  console.log(`[Push Notification] Sending to users: ${userIds.join(', ')}`);
-  console.log(`[Push Notification] Title: ${title}`);
-  console.log(`[Push Notification] Body: ${body}`);
-  
-  // Future implementation:
-  // const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { fcmToken: true } });
-  // const tokens = users.map(u => u.fcmToken).filter(Boolean);
-  // if (tokens.length > 0) admin.messaging().sendMulticast({ tokens, notification: { title, body }, data });
+  if (!userIds || userIds.length === 0) return;
+
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, fcmToken: true },
+  });
+
+  const tokens = users.map(u => u.fcmToken).filter(Boolean);
+
+  console.log(`[Push Notification] "${title}" → ${userIds.length} user(s), ${tokens.length} with a device token.`);
+
+  if (tokens.length === 0) return;
+
+  // FCM data payloads must be flat string key/value pairs
+  const stringData = Object.fromEntries(
+    Object.entries(data).map(([k, v]) => [k, String(v)])
+  );
+
+  try {
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: { title, body },
+      data: stringData,
+      webpush: {
+        notification: { icon: '/logo.png' },
+        fcmOptions: { link: '/' },
+      },
+    });
+
+    // Clean up tokens that are no longer valid (app uninstalled, permissions revoked, etc.)
+    const staleTokens = [];
+    response.responses.forEach((r, i) => {
+      if (!r.success && ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'].includes(r.error?.code)) {
+        staleTokens.push(tokens[i]);
+      }
+    });
+    if (staleTokens.length > 0) {
+      await prisma.user.updateMany({
+        where: { fcmToken: { in: staleTokens } },
+        data: { fcmToken: null },
+      });
+    }
+  } catch (error) {
+    console.error('[Push Notification] Error sending via FCM:', error.message);
+  }
 };
 
 /**

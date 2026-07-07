@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import prisma from '../config/database.js';
 
 export const getCalendarData = async (req, res, next) => {
@@ -28,8 +29,7 @@ export const getCalendarData = async (req, res, next) => {
       ptoRequests = await prisma.timeOffRequest.findMany({
         where: {
           teacherId: userId,
-          startDate: { lte: toDate },
-          endDate: { gte: fromDate }
+          date: { gte: fromDate, lte: toDate }
         }
       });
     }
@@ -38,11 +38,11 @@ export const getCalendarData = async (req, res, next) => {
     if (showSharedSpaces === 'true') {
       spaceReservations = await prisma.spaceReservation.findMany({
         where: {
-          date: { gte: fromDate, lte: toDate }
+          startTime: { gte: fromDate, lte: toDate }
         },
         include: {
           space: true,
-          reservedBy: { select: { id: true, fullName: true } }
+          user: { select: { id: true, fullName: true } }
         }
       });
     }
@@ -59,34 +59,69 @@ export const getCalendarData = async (req, res, next) => {
 
 export const requestPTO = async (req, res, next) => {
   try {
-    const { type, startDate, endDate, reason } = req.body;
+    const { type, date, startDate, endDate, reason } = req.body;
     const teacherId = req.user.id;
 
-    if (!type || !startDate || !endDate) {
-      return res.status(400).json({ error: 'Validation Error', message: 'type, startDate, and endDate are required' });
+    const rangeStart = startDate || date;
+    const rangeEnd = endDate || date;
+
+    if (!type || !rangeStart || !rangeEnd) {
+      return res.status(400).json({ error: 'Validation Error', message: 'type and date (or startDate/endDate) are required' });
     }
 
-    const request = await prisma.timeOffRequest.create({
-      data: {
-        teacherId,
-        type, // PTO or SICK
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        reason,
-        status: 'PENDING'
-      }
-    });
+    const start = new Date(rangeStart);
+    const end = new Date(rangeEnd);
 
-    // Notify management
-    import('../utils/pushNotifications.js').then(({ broadcastToManagement }) => {
-      broadcastToManagement(
-        'New Time Off Request',
-        `${req.user.fullName} requested ${type} from ${startDate} to ${endDate}.`,
-        { type: 'PTO' }
-      );
-    });
+    if (end < start) {
+      return res.status(400).json({ error: 'Validation Error', message: 'endDate must be on or after startDate' });
+    }
 
-    res.status(201).json({ request });
+    const dates = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      dates.push(new Date(d));
+    }
+
+    const groupId = dates.length > 1 ? crypto.randomUUID() : null;
+
+    const requests = await prisma.$transaction(
+      dates.map(d => prisma.timeOffRequest.create({
+        data: {
+          teacherId,
+          type,
+          date: d,
+          groupId,
+          reason: reason || null,
+          status: 'PENDING'
+        }
+      }))
+    );
+
+    res.status(201).json({ requests, request: requests[0] });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const cancelPTO = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const teacherId = req.user.id;
+
+    const existing = await prisma.timeOffRequest.findUnique({ where: { id } });
+    if (!existing || existing.teacherId !== teacherId) {
+      return res.status(404).json({ error: 'Not Found' });
+    }
+    if (existing.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Validation Error', message: 'Only pending requests can be cancelled.' });
+    }
+
+    if (existing.groupId) {
+      await prisma.timeOffRequest.deleteMany({ where: { groupId: existing.groupId, teacherId, status: 'PENDING' } });
+    } else {
+      await prisma.timeOffRequest.delete({ where: { id } });
+    }
+
+    res.json({ success: true });
   } catch (error) {
     next(error);
   }
@@ -104,23 +139,20 @@ export const listSharedSpaces = async (req, res, next) => {
 export const reserveSpace = async (req, res, next) => {
   try {
     const { spaceId, date, startTime, endTime, purpose } = req.body;
-    const reservedById = req.user.id;
+    const userId = req.user.id;
 
     if (!spaceId || !date || !startTime || !endTime) {
       return res.status(400).json({ error: 'Validation Error', message: 'Missing required fields' });
     }
 
-    // Check for conflicts
+    const startDt = new Date(`${date}T${startTime}:00Z`);
+    const endDt = new Date(`${date}T${endTime}:00Z`);
+
     const conflict = await prisma.spaceReservation.findFirst({
       where: {
         spaceId,
-        date: new Date(date),
-        OR: [
-          {
-            startTime: { lt: new Date(`1970-01-01T${endTime}:00Z`) },
-            endTime: { gt: new Date(`1970-01-01T${startTime}:00Z`) }
-          }
-        ]
+        startTime: { lt: endDt },
+        endTime: { gt: startDt }
       }
     });
 
@@ -131,11 +163,10 @@ export const reserveSpace = async (req, res, next) => {
     const reservation = await prisma.spaceReservation.create({
       data: {
         spaceId,
-        reservedById,
-        date: new Date(date),
-        startTime: new Date(`1970-01-01T${startTime}:00Z`),
-        endTime: new Date(`1970-01-01T${endTime}:00Z`),
-        purpose
+        userId,
+        startTime: startDt,
+        endTime: endDt,
+        purpose: purpose || null
       },
       include: {
         space: true

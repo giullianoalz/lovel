@@ -15,7 +15,7 @@ const ErrorBanner = ({ message, onRetry }) => (
   }}>
     <AlertTriangle size={18} style={{ color: '#dc2626', flexShrink: 0 }} />
     <span style={{ flex: 1, fontSize: '14px', color: '#991b1b', fontWeight: 500 }}>
-      {message || 'Ocurrió un error al cargar los datos.'}
+      {message || 'An error occurred while loading data.'}
     </span>
     {onRetry && (
       <button
@@ -27,7 +27,7 @@ const ErrorBanner = ({ message, onRetry }) => (
           cursor: 'pointer', whiteSpace: 'nowrap',
         }}
       >
-        <RefreshCw size={13} /> Reintentar
+        <RefreshCw size={13} /> Retry
       </button>
     )}
   </div>

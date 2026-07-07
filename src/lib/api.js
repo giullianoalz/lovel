@@ -2,8 +2,12 @@ import axios from 'axios';
 import { auth } from './firebase';
 import { signOut } from 'firebase/auth';
 
+// Falls back to the current page's hostname (not hardcoded 'localhost') so the
+// same dev build works whether opened as localhost or from a phone via LAN IP.
+const configuredApiUrl = import.meta.env.VITE_API_URL;
+const isLocalDevDefault = !configuredApiUrl || configuredApiUrl === 'http://localhost:4000/api';
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:4000/api',
+  baseURL: isLocalDevDefault ? `http://${window.location.hostname}:4000/api` : configuredApiUrl,
   headers: { 'Content-Type': 'application/json' },
   timeout: 15000,
 });
@@ -49,13 +53,15 @@ api.interceptors.response.use(
 
     // Network errors or server unreachable
     if (!error.response) {
-      error.userMessage = 'No se pudo conectar con el servidor. Verifica tu conexión.';
+      error.userMessage = 'Could not connect to the server. Check your connection.';
     } else if (status >= 500) {
-      error.userMessage = 'Error interno del servidor. Inténtalo de nuevo en un momento.';
+      error.userMessage = 'Internal server error. Please try again in a moment.';
     } else if (status === 403) {
-      error.userMessage = 'No tienes permisos para realizar esta acción.';
+      error.userMessage = 'You do not have permission to perform this action.';
     } else if (status === 404) {
-      error.userMessage = 'El recurso solicitado no fue encontrado.';
+      error.userMessage = 'The requested resource was not found.';
+    } else if (status === 429) {
+      error.userMessage = 'Too many requests — please wait a moment and try again.';
     }
 
     return Promise.reject(error);
