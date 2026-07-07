@@ -10,12 +10,21 @@ import {
   updateAttendance,
   addSessionNote,
   supervisionSessions,
+  cancelStudentSession,
+  listCancellations,
+  resolveCancellation,
 } from '../controllers/sessions.controller.js';
 
 const router = Router();
 
 // GET /api/sessions/supervision — Admin supervision view
 router.get('/supervision', authenticate, requireRole('ADMIN'), supervisionSessions);
+
+// GET /api/sessions/cancellations — Admin review queue for late cancellations
+router.get('/cancellations', authenticate, requireRole('ADMIN'), listCancellations);
+
+// PATCH /api/sessions/cancellations/:id/resolve — Admin decides the final charge
+router.patch('/cancellations/:id/resolve', authenticate, requireRole('ADMIN'), resolveCancellation);
 
 // GET /api/sessions — List sessions for calendar (All auth users)
 router.get('/', authenticate, listSessions);
@@ -37,5 +46,8 @@ router.put('/:id/attendance', authenticate, requireRole('ADMIN', 'TEACHER'), upd
 
 // POST /api/sessions/:id/notes — Add session notes (Admin/Teacher)
 router.post('/:id/notes', authenticate, requireRole('ADMIN', 'TEACHER'), addSessionNote);
+
+// POST /api/sessions/:id/cancel-student — Cancel one student's spot (Admin/front desk)
+router.post('/:id/cancel-student', authenticate, requireRole('ADMIN'), cancelStudentSession);
 
 export default router;

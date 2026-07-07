@@ -68,6 +68,10 @@ export const purchaseSnack = async (req, res, next) => {
         tx.snackItem.findUniqueOrThrow({ where: { id: snackId } }),
       ]);
 
+      if (snack.costPunches > student.snackPunches) {
+        return { insufficientBalance: true, currentBalance: student.snackPunches };
+      }
+
       const newBalance = student.snackPunches - snack.costPunches;
       await tx.user.update({ where: { id: studentId }, data: { snackPunches: newBalance } });
       await tx.snackPurchase.create({
@@ -75,6 +79,12 @@ export const purchaseSnack = async (req, res, next) => {
       });
       return { newBalance, snackName: snack.name };
     });
+
+    if (result.insufficientBalance) {
+      return res.status(400).json({
+        message: `Student only has ${result.currentBalance} punches — cannot afford this snack.`,
+      });
+    }
 
     res.json({ success: true, newBalance: result.newBalance, snackName: result.snackName });
   } catch (error) {

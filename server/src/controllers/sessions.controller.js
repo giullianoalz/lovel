@@ -1,4 +1,10 @@
 import prisma from '../config/database.js';
+import { broadcastToManagement } from '../utils/pushNotifications.js';
+
+// A student cancelling with less than this many hours' notice triggers a
+// suggested (not automatic) 50% charge that the admin must review.
+const CANCELLATION_WINDOW_HOURS = 48;
+const LATE_CANCELLATION_SUGGESTED_PERCENT = 50;
 
 /**
  * GET /api/sessions
@@ -90,22 +96,10 @@ export const createSession = async (req, res, next) => {
       },
     });
 
-    // Auto-create blank attendance records for all active enrollments
-    const enrollments = await prisma.classEnrollment.findMany({
-      where: { classId, status: 'active' },
-      select: { studentId: true },
-    });
-
-    if (enrollments.length > 0) {
-      await prisma.attendance.createMany({
-        data: enrollments.map((e) => ({
-          sessionId: session.id,
-          studentId: e.studentId,
-          status: 'PRESENT', // Default assumption
-        })),
-      });
-    }
-
+    // Attendance is recorded by the teacher when the session happens (see
+    // updateAttendance) — pre-filling PRESENT here would fabricate attendance
+    // for a session that hasn't occurred yet, and payroll only pays for
+    // sessions with a real PRESENT record.
     res.status(201).json({ message: 'Session created successfully.', session });
   } catch (error) {
     next(error);
@@ -126,16 +120,19 @@ export const bulkScheduleSessions = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: 'classId, startDate, endDate, weekdays[], startTime, and endTime are required.' });
     }
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    // Parse as UTC-midnight dates and check weekday with getUTCDay() throughout —
+    // mixing local getDay() with UTC-parsed dates shifts the matched weekday
+    // in any timezone behind UTC (the academy runs on US Eastern time).
+    const start = new Date(`${startDate}T00:00:00Z`);
+    const end = new Date(`${endDate}T00:00:00Z`);
     if (end < start) {
       return res.status(400).json({ error: 'Validation Error', message: 'endDate must be on or after startDate.' });
     }
 
     const weekdaySet = new Set(weekdays.map(Number));
     const dates = [];
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      if (weekdaySet.has(d.getDay())) dates.push(new Date(d));
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      if (weekdaySet.has(d.getUTCDay())) dates.push(new Date(d));
     }
 
     if (dates.length === 0) {
@@ -157,11 +154,10 @@ export const bulkScheduleSessions = async (req, res, next) => {
     const startObj = new Date(`1970-01-01T${startTime}:00Z`);
     const endObj = new Date(`1970-01-01T${endTime}:00Z`);
 
-    const enrollments = await prisma.classEnrollment.findMany({
-      where: { classId, status: 'active' },
-      select: { studentId: true },
-    });
-
+    // Attendance is not pre-filled here — it must be recorded by the teacher
+    // when the session actually happens (see updateAttendance below). Payroll
+    // only pays for sessions with a real PRESENT record, so scheduling a
+    // class must not fabricate attendance on its own.
     const createdSessions = await prisma.$transaction(
       newDates.map((date) =>
         prisma.session.create({
@@ -169,14 +165,6 @@ export const bulkScheduleSessions = async (req, res, next) => {
         })
       )
     );
-
-    if (enrollments.length > 0) {
-      await prisma.attendance.createMany({
-        data: createdSessions.flatMap((session) =>
-          enrollments.map((e) => ({ sessionId: session.id, studentId: e.studentId, status: 'PRESENT' }))
-        ),
-      });
-    }
 
     res.status(201).json({ message: `${createdSessions.length} sessions scheduled.`, created: createdSessions.length });
   } catch (error) {
@@ -294,6 +282,10 @@ export const supervisionSessions = async (req, res, next) => {
       include: {
         teacher: { select: { id: true, fullName: true } },
         _count: { select: { enrollments: { where: { status: 'active' } } } },
+        enrollments: {
+          where: { status: 'active' },
+          select: { student: { select: { id: true, fullName: true } } },
+        },
       },
     });
 
@@ -322,6 +314,171 @@ export const addSessionNote = async (req, res, next) => {
     });
 
     res.status(201).json({ message: 'Session note added.', note });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/sessions/:id/cancel-student
+ * Admin/front-desk cancels a single student's spot in a session.
+ * >=48h before the class: free, auto-resolved, no admin action needed.
+ * <48h before the class: suggests a 50% charge but does NOT charge anything —
+ * it opens a review item and notifies the admin, who decides the final amount.
+ */
+export const cancelStudentSession = async (req, res, next) => {
+  try {
+    const { studentId, reason } = req.body;
+    const cancelledById = req.user.id;
+
+    if (!studentId) {
+      return res.status(400).json({ error: 'Validation Error', message: 'studentId is required.' });
+    }
+
+    const session = await prisma.session.findUniqueOrThrow({
+      where: { id: req.params.id },
+      include: { class: { select: { id: true, name: true, enrollments: { where: { status: 'active' } } } } },
+    });
+
+    const classDateTime = new Date(session.date);
+    const startOfDay = new Date(Date.UTC(classDateTime.getUTCFullYear(), classDateTime.getUTCMonth(), classDateTime.getUTCDate()));
+    const startTime = new Date(session.startTime);
+    startOfDay.setUTCHours(startTime.getUTCHours(), startTime.getUTCMinutes(), startTime.getUTCSeconds());
+
+    const hoursBeforeClass = (startOfDay.getTime() - Date.now()) / (1000 * 60 * 60);
+    const suggestedChargePercent = hoursBeforeClass >= CANCELLATION_WINDOW_HOURS ? 0 : LATE_CANCELLATION_SUGGESTED_PERCENT;
+    const autoResolved = suggestedChargePercent === 0;
+
+    const [, cancellation] = await prisma.$transaction([
+      prisma.attendance.upsert({
+        where: { sessionId_studentId: { sessionId: session.id, studentId } },
+        update: { status: 'EXCUSED', checkedAt: new Date() },
+        create: { sessionId: session.id, studentId, status: 'EXCUSED' },
+      }),
+      prisma.sessionCancellation.create({
+        data: {
+          sessionId: session.id,
+          studentId,
+          cancelledById,
+          reason: reason || null,
+          hoursBeforeClass,
+          suggestedChargePercent,
+          status: autoResolved ? 'RESOLVED' : 'PENDING_REVIEW',
+          finalChargePercent: autoResolved ? 0 : null,
+          resolvedAt: autoResolved ? new Date() : null,
+        },
+        include: { student: { select: { id: true, fullName: true } } },
+      }),
+    ]);
+
+    // Cancelling the only enrolled student cancels the session itself —
+    // for group sessions, the other students keep their spot.
+    if (session.class.enrollments.length <= 1) {
+      await prisma.session.update({ where: { id: session.id }, data: { status: 'CANCELLED' } });
+    }
+
+    if (!autoResolved) {
+      const io = req.app.get('io');
+      if (io) {
+        io.to('admin_room').emit('cancellation_pending', {
+          id: cancellation.id,
+          studentName: cancellation.student.fullName,
+          className: session.class.name,
+          sessionDate: session.date,
+          hoursBeforeClass,
+          suggestedChargePercent,
+          reason: cancellation.reason,
+          createdAt: cancellation.createdAt,
+        });
+      }
+      await broadcastToManagement(
+        'Cancellation needs a decision',
+        `${cancellation.student.fullName} cancelled ${session.class.name} with less than 48h notice — decide how much to charge (suggested ${LATE_CANCELLATION_SUGGESTED_PERCENT}%).`,
+        { cancellationId: cancellation.id }
+      );
+    }
+
+    res.status(201).json({ cancellation, autoResolved });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/sessions/cancellations — Admin review queue (default: pending only)
+ */
+export const listCancellations = async (req, res, next) => {
+  try {
+    const { status } = req.query;
+
+    const cancellations = await prisma.sessionCancellation.findMany({
+      where: { status: status ? status.toUpperCase() : 'PENDING_REVIEW' },
+      include: {
+        student: { select: { id: true, fullName: true } },
+        cancelledBy: { select: { id: true, fullName: true } },
+        resolvedBy: { select: { id: true, fullName: true } },
+        session: { select: { id: true, date: true, startTime: true, class: { select: { id: true, name: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({ cancellations });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PATCH /api/sessions/cancellations/:id/resolve
+ * Admin decides the final charge. If a chargeAmount is given, it's recorded
+ * as a real Charge transaction against the student's family right away.
+ */
+export const resolveCancellation = async (req, res, next) => {
+  try {
+    const { finalChargePercent, chargeAmount } = req.body;
+    const resolvedById = req.user.id;
+
+    if (finalChargePercent === undefined || finalChargePercent === null) {
+      return res.status(400).json({ error: 'Validation Error', message: 'finalChargePercent is required.' });
+    }
+
+    const cancellation = await prisma.sessionCancellation.findUniqueOrThrow({
+      where: { id: req.params.id },
+      include: { student: { select: { id: true, fullName: true } }, session: { include: { class: { select: { name: true } } } } },
+    });
+
+    const updated = await prisma.sessionCancellation.update({
+      where: { id: req.params.id },
+      data: {
+        status: 'RESOLVED',
+        finalChargePercent: parseInt(finalChargePercent),
+        chargeAmount: chargeAmount != null ? parseFloat(chargeAmount) : null,
+        resolvedById,
+        resolvedAt: new Date(),
+      },
+    });
+
+    if (chargeAmount != null && parseFloat(chargeAmount) > 0) {
+      const familyMember = await prisma.familyMember.findFirst({ where: { userId: cancellation.studentId } });
+      if (familyMember) {
+        await prisma.transaction.create({
+          data: {
+            studentId: cancellation.studentId,
+            familyId: familyMember.familyId,
+            amount: parseFloat(chargeAmount),
+            type: 'CHARGE',
+            description: `Late cancellation fee — ${cancellation.session.class.name} (${cancellation.finalChargePercent ?? finalChargePercent}%)`,
+          },
+        });
+      }
+    }
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to('admin_room').emit('cancellation_resolved', { id: updated.id });
+    }
+
+    res.json({ cancellation: updated });
   } catch (error) {
     next(error);
   }

@@ -1,5 +1,11 @@
 .my-payroll {
   max-width: 1000px; margin: 0 auto; padding: 24px 20px 60px;
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .my-payroll-header {
   display: flex; align-items: flex-start; gap: 14px;
@@ -26,6 +32,7 @@
 .payroll-card {
   background: rgba(255,255,255,0.8); backdrop-filter: blur(12px);
   border: 1px solid rgba(0,0,0,0.06); border-radius: 16px; padding: 20px;
+  animation: fadeIn 0.35s ease-out;
 }
 .payroll-card h4 {
   margin: 0 0 14px; font-size: 14px; font-weight: 600;

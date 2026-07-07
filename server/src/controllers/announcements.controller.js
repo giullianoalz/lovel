@@ -95,14 +95,18 @@ export const listAnnouncements = async (req, res, next) => {
   try {
     const userId = req.user.id;
     
-    // Determine the user's audience groups based on role
-    // For simplicity, we fetch all non-expired announcements that match 'all' or the user's role
+    const baseWhere = req.user.role === 'ADMIN' 
+      ? {} 
+      : {
+          OR: [
+            { targetAudience: 'all' },
+            { targetAudience: req.user.role.toLowerCase() }
+          ]
+        };
+
     const announcements = await prisma.announcement.findMany({
       where: {
-        OR: [
-          { targetAudience: 'all' },
-          { targetAudience: req.user.role.toLowerCase() }
-        ],
+        ...baseWhere,
         AND: [
           {
             OR: [

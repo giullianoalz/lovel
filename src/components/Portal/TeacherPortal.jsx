@@ -1,20 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, Bell, MessageSquare, Calendar as CalendarIcon,
+  ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, MessageSquare, Calendar as CalendarIcon,
   Check, Users, FileText, Calendar, Shell, AlertTriangle, Stethoscope,
   BookOpen, CheckCircle2, X, Clock, Star, Gift, History, Eye, EyeOff,
   ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List,
   Link2, Image, Paperclip, Video, LogOut, LifeBuoy, AlertCircle, FileWarning,
 } from 'lucide-react';
-import mammoth from 'mammoth';
-import * as xlsx from 'xlsx';
 import { useAuth } from '../../context/AuthContext';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import StudentProfileModal from '../Students/StudentProfileModal';
-import NotifDrawer from '../Notifications/NotifDrawer';
-import { useNotifications } from '../../hooks/useNotifications';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './TeacherPortal.css';
 
@@ -30,11 +26,6 @@ const TeacherPortal = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('session');
 
-  /* ── Notifications ── */
-  const notif = useNotifications(role);
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [notifTab, setNotifTab] = useState('inbox');
-  const bellRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [scheduleError, setScheduleError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -193,9 +184,12 @@ const TeacherPortal = () => {
       .then((r) => r.arrayBuffer())
       .then(async (buf) => {
         if (ext === 'docx') {
+          // Loaded on demand — mammoth/xlsx are heavy and only needed for previews.
+          const { default: mammoth } = await import('mammoth');
           const r = await mammoth.convertToHtml({ arrayBuffer: buf });
           setOfficePreviewHtml(r.value || '<p style="padding:20px;text-align:center">Empty document.</p>');
         } else {
+          const xlsx = await import('xlsx');
           const wb = xlsx.read(new Uint8Array(buf), { type: 'array' });
           if (wb.SheetNames.length > 0) {
             setOfficePreviewHtml(`<div class="xlsx-preview-table-container">${xlsx.utils.sheet_to_html(wb.Sheets[wb.SheetNames[0]])}</div>`);
@@ -505,7 +499,6 @@ const TeacherPortal = () => {
       {/* ── TOP BAR: title + notification bell ───────────────── */}
       <div className="tp-topbar">
         <div className="tp-topbar-left">
-          <h1 className="tp-page-title">Teacher Portal</h1>
           <span className="tp-greeting">Welcome back, {role === 'ADMIN' ? 'Team' : user?.fullName?.split(' ')[0]} 👋</span>
         </div>
       </div>
@@ -1159,22 +1152,6 @@ const TeacherPortal = () => {
           </div>
         </div>
       )}
-
-      {/* ── NOTIFICATION DRAWER ──────────────────────────────── */}
-      <NotifDrawer
-        open={notifOpen}
-        onClose={() => setNotifOpen(false)}
-        activeTab={notifTab}
-        setActiveTab={setNotifTab}
-        anchorRef={bellRef}
-        inboxItems={notif.inboxItems}
-        laterItems={notif.laterItems}
-        archiveItems={notif.archiveItems}
-        markRead={notif.markRead}
-        markLater={notif.markLater}
-        restoreToInbox={notif.restoreToInbox}
-        markAllRead={notif.markAllRead}
-      />
 
       {/* ── STUDENT PROFILE MODAL ───────────────────────────── */}
       {profileStudent && (

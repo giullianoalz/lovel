@@ -2,6 +2,12 @@
   padding: 40px;
   max-width: 1200px;
   margin: 0 auto;
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .students-header {
@@ -103,6 +109,7 @@
   gap: 16px;
   position: relative;
   overflow: hidden;
+  animation: fadeIn 0.35s ease-out;
 }
 
 .student-card::before {
@@ -359,3 +366,13 @@
   gap: 6px;
 }
 
+
+/* Mobile: keep the directory tabs inside a narrow viewport.
+   Placed after the base .dir-tab rules so it wins on source order. */
+@media (max-width: 480px) {
+  .dir-tab {
+    padding: 10px 8px;
+    font-size: 13px;
+    gap: 6px;
+  }
+}

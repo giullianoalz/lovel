@@ -11,11 +11,14 @@ export const handleStripeWebhook = async (req, res) => {
   const signature = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  if (!webhookSecret) {
+    console.error('[Stripe webhook] STRIPE_WEBHOOK_SECRET is not configured — refusing unverified event.');
+    return res.status(503).send('Webhook not configured.');
+  }
+
   let event;
   try {
-    event = webhookSecret
-      ? stripe.webhooks.constructEvent(req.body, signature, webhookSecret)
-      : JSON.parse(req.body.toString());
+    event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
   } catch (err) {
     console.error('[Stripe webhook] signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);

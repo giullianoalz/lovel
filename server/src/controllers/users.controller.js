@@ -178,7 +178,8 @@ export const getTeacherPayroll = async (req, res, next) => {
         },
         timeOffRequests: {
           where: {
-            status: 'APPROVED'
+            status: 'APPROVED',
+            date: { gte: new Date(targetYear, 0, 1), lte: new Date(targetYear, 11, 31) },
           }
         }
       },

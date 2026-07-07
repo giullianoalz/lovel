@@ -72,21 +72,21 @@ const SnackCabinetModal = ({
     <div className="cabinet-overlay" onClick={onClose}>
       <div className="cabinet-popup" onClick={e => e.stopPropagation()}>
         <header className="cabinet-header">
-          <h3 style={{display: 'flex', alignItems: 'center', gap: '8px', margin: 0}}>
+          <h3 className="cabinet-header-title">
             <ShoppingBag size={20} /> Snack Cabinet {mode === 'manage' && '- Admin'}
           </h3>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div className="cabinet-header-actions">
             <button className="icon-btn" onClick={onClose}><X size={20} /></button>
           </div>
         </header>
-        
+
         <div className="cabinet-content">
           {isAddingSnack ? (
             <div className="add-snack-form">
-              <h4 style={{ margin: '0 0 16px 0', fontSize: '16px' }}>Add New Snack</h4>
-              
-              <div 
-                className="image-upload-area" 
+              <h4 className="add-snack-form-title">Add New Snack</h4>
+
+              <div
+                className="image-upload-area"
                 onClick={() => fileInputRef.current?.click()}
               >
                 {newSnackForm.image ? (
@@ -94,42 +94,42 @@ const SnackCabinetModal = ({
                 ) : (
                   <>
                     <Camera size={32} color="#94a3b8" />
-                    <span style={{ fontSize: '13px', fontWeight: 500 }}>Tap to take photo or attach</span>
+                    <span className="add-snack-upload-hint">Tap to take photo or attach</span>
                   </>
                 )}
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  capture="environment" 
-                  style={{ display: 'none' }} 
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="add-snack-file-input"
                   ref={fileInputRef}
                   onChange={handleImageUpload}
                 />
               </div>
 
-              <div className="form-group" style={{ marginBottom: '12px' }}>
+              <div className="form-group form-group-spaced">
                 <label>Snack Name</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  placeholder="e.g. Granola Bar" 
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Granola Bar"
                   value={newSnackForm.name}
                   onChange={e => setNewSnackForm({...newSnackForm, name: e.target.value})}
                 />
               </div>
-              <div className="form-group" style={{ marginBottom: '24px' }}>
+              <div className="form-group form-group-spaced-lg">
                 <label>Cost (Punches)</label>
-                <input 
-                  type="number" 
-                  className="form-control" 
-                  placeholder="e.g. 2" 
+                <input
+                  type="number"
+                  className="form-control"
+                  placeholder="e.g. 2"
                   value={newSnackForm.cost}
                   onChange={e => setNewSnackForm({...newSnackForm, cost: e.target.value})}
                 />
               </div>
-              <div style={{ display: 'flex', gap: '12px' }}>
-                <button className="action-btn outline" style={{ flex: 1 }} onClick={() => setIsAddingSnack(false)}>Cancel</button>
-                <button className="action-btn primary" style={{ flex: 1 }} onClick={handleSaveSnack}>Save Snack</button>
+              <div className="add-snack-form-actions">
+                <button className="action-btn outline" onClick={() => setIsAddingSnack(false)}>Cancel</button>
+                <button className="action-btn primary" onClick={handleSaveSnack}>Save Snack</button>
               </div>
             </div>
           ) : loading ? (
@@ -144,14 +144,14 @@ const SnackCabinetModal = ({
                     <span className="snack-cost">{snack.costPunches} Punches</span>
                   </div>
                   {isManagingCabinet ? (
-                    <button 
-                      className="action-btn small outline danger" 
+                    <button
+                      className="action-btn small outline danger"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteSnack(snack.id);
                       }}
                     >
-                      <Trash2 size={14} style={{ marginRight: '4px' }}/> Delete
+                      <Trash2 size={14} className="snack-delete-icon" /> Delete
                     </button>
                   ) : (
                     <button className="action-btn primary small outline" disabled={purchasing}>
@@ -160,13 +160,13 @@ const SnackCabinetModal = ({
                   )}
                 </div>
               ))}
-              
+
               {isManagingCabinet && (
                 <div className="add-snack-card" onClick={() => setIsAddingSnack(true)}>
                   <div className="add-snack-icon">
                     <Plus size={24} color="#3b82f6" />
                   </div>
-                  <span style={{ fontWeight: 600 }}>Add New Snack</span>
+                  <span className="add-snack-card-label">Add New Snack</span>
                 </div>
               )}
             </div>

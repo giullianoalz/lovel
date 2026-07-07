@@ -91,7 +91,7 @@ const Sidebar = () => {
     <>
       {/* Mobile Top Header */}
       <div className="mobile-header">
-        <button className="mobile-toggle" onClick={() => setIsOpen(!isOpen)}>
+        <button className="mobile-toggle" onClick={() => setIsOpen(!isOpen)} aria-label={isOpen ? 'Close menu' : 'Open menu'}>
           {isOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
         
@@ -104,6 +104,7 @@ const Sidebar = () => {
         {(role === 'ADMIN' || role === 'TEACHER') && (
           <div style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', zIndex: 200 }}>
             <button ref={bellRef} className="global-notif-bell" onClick={() => setIsNotifOpen(p => !p)}
+              aria-label={notif.unreadCount > 0 ? `Notifications, ${notif.unreadCount} unread` : 'Notifications'}
               style={{ position: 'relative', background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Bell size={20} color="var(--text-main)" />
               {notif.unreadCount > 0 && (

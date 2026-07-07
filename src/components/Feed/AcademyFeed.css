@@ -2,6 +2,12 @@
   padding: 24px;
   max-width: 720px;
   margin: 0 auto;
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .feed-header {
@@ -234,6 +240,7 @@
   padding: 18px 20px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
   position: relative;
+  animation: fadeIn 0.35s ease-out;
 }
 .feed-card.pinned {
   border-color: #fde68a;

@@ -25,7 +25,10 @@ const AUDIENCES = [
   { value: 'teacher', label: 'Teachers Only' },
 ];
 
-const MEDIA_BASE = (import.meta.env.VITE_API_URL || `http://${window.location.hostname}:4000/api`).replace(/\/api\/?$/, '');
+const configuredApiUrl = import.meta.env.VITE_API_URL;
+const isLocalDevDefault = !configuredApiUrl || configuredApiUrl === 'http://localhost:4000/api';
+const BASE_API = isLocalDevDefault ? `http://${window.location.hostname}:4000/api` : configuredApiUrl;
+const MEDIA_BASE = BASE_API.replace(/\/api\/?$/, '');
 
 const timeAgo = (dateStr) => {
   const diffMs = new Date() - new Date(dateStr);

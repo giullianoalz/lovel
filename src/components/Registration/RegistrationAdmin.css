@@ -662,6 +662,8 @@
 .reg-date-row { display: flex; gap: 12px; }
 .reg-date-row .form-control { flex: 1; }
 
+.reg-schedule-mode-toggle { display: flex; gap: 8px; margin-bottom: 16px; }
+
 /* Roster detail rows */
 .reg-back-btn { padding: 0; margin-bottom: 16px; }
 .reg-roster-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }

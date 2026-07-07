@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { database } from '../../lib/database';
 import { Check, X, AlertTriangle, FileWarning, Clock, Users, Star, Gift, TrendingUp, FileText, Image, Paperclip, Video, History, Eye, EyeOff, ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List, Link2, Type, Activity, Wind, LogOut, LifeBuoy, AlertCircle } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
-import mammoth from 'mammoth';
-import * as xlsx from 'xlsx';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
 import './ClassSession.css';
@@ -110,11 +108,14 @@ const ClassSession = () => {
            const arrayBuffer = await response.arrayBuffer();
 
            if (ext === 'docx') {
-             // Mammoth works well with arrayBuffer
+             // Mammoth is heavy (~1MB) and only needed when previewing a docx —
+             // load it on demand so it stays out of the initial bundle.
+             const { default: mammoth } = await import('mammoth');
              const result = await mammoth.convertToHtml({ arrayBuffer });
              setOfficePreviewHtml(result.value || '<p style="text-align:center; padding:20px;">The document is empty.</p>');
            } else if (ext === 'xlsx') {
-             // XLSX (SheetJS)
+             // XLSX (SheetJS) — also heavy and on-demand only.
+             const xlsx = await import('xlsx');
              const data = new Uint8Array(arrayBuffer);
              const workbook = xlsx.read(data, { type: 'array' });
              if (workbook.SheetNames.length > 0) {

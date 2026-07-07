@@ -184,3 +184,59 @@
 .alert-note-item.allergy { background: #fef3c7; border-left: 3px solid #f59e0b; color: #78350f; }
 .alert-note-item.medical { background: #fee2e2; border-left: 3px solid #ef4444; color: #7f1d1d; }
 .alert-note-item.accommodation { background: #eff6ff; border-left: 3px solid #3b82f6; color: #1e3a8a; }
+
+/* Cancellation-charge review queue */
+.cancellation-queue { margin-bottom: 24px; animation: fadeIn 0.3s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+.cancellation-queue-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 700; color: #991b1b; margin: 0 0 12px;
+}
+.cancellation-queue-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.cancellation-card {
+  background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px; padding: 14px 16px;
+}
+.cancellation-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.cancellation-suggested-badge {
+  background: #fee2e2; color: #991b1b; font-size: 11px; font-weight: 700;
+  padding: 3px 10px; border-radius: 10px; white-space: nowrap;
+}
+.cancellation-meta { font-size: 12px; color: var(--text-muted); margin: 0 0 6px; }
+.cancellation-reason { font-size: 12px; color: #78350f; font-style: italic; margin: 0 0 10px; }
+.cancellation-resolve-btn {
+  display: flex; align-items: center; gap: 6px; width: 100%; justify-content: center;
+  padding: 8px 12px; border: none; border-radius: 8px; background: #dc2626; color: white;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.cancellation-resolve-btn:hover { background: #b91c1c; }
+
+/* Shared confirm/resolve modal (cancel & resolve dialogs) */
+.cancel-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+  animation: fadeIn 0.15s ease;
+}
+.cancel-modal {
+  background: var(--bg-card); border-radius: 16px; width: 95%; max-width: 460px;
+  padding: 24px; box-shadow: var(--shadow-md);
+}
+.cancel-modal h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 17px; color: #991b1b; }
+.cancel-modal p { font-size: 13px; color: var(--text-muted); margin: 0 0 14px; line-height: 1.5; }
+.cancel-modal-label {
+  display: block; font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.3px; margin-bottom: 6px; color: var(--text-main);
+}
+.cancel-modal input, .cancel-modal textarea {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border-light); border-radius: 10px;
+  font-size: 14px; font-family: inherit; box-sizing: border-box; outline: none;
+}
+.cancel-modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.cancel-modal-back {
+  padding: 10px 18px; border: 1px solid var(--border-light); background: var(--bg-card);
+  color: var(--text-main); border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.cancel-modal-confirm {
+  padding: 10px 18px; border: none; background: #dc2626; color: white;
+  border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.cancel-modal-back:disabled, .cancel-modal-confirm:disabled { opacity: 0.6; cursor: not-allowed; }

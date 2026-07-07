@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   BookOpenCheck, Filter, Download, ChevronDown, ChevronRight,
   FileText, Paperclip, Video, Eye, EyeOff, Users, Clock,
-  Calendar, Search, User, CheckCircle, XCircle, AlertCircle,
+  Calendar, Search, User, CheckCircle, XCircle, AlertCircle, Ban,
 } from 'lucide-react';
 import api from '../../lib/api';
 import './SupervisionPanel.css';
@@ -24,6 +24,12 @@ const SupervisionPanel = () => {
   /* UI state */
   const [expandedSessions, setExpandedSessions] = useState({});
   const [generatingPdf, setGeneratingPdf] = useState(null);
+
+  /* Cancellation */
+  const [cancelTarget, setCancelTarget] = useState(null); // { sessionId, studentId, studentName, className }
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
+  const [actionMessage, setActionMessage] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -78,6 +84,56 @@ const SupervisionPanel = () => {
     const absent = att?.filter(a => a.status === 'ABSENT').length || 0;
     const late = att?.filter(a => a.status === 'LATE').length || 0;
     return { present, absent, late, total: att?.length || 0 };
+  };
+
+  // Enrolled students don't get an attendance row until the teacher marks it
+  // (or a cancellation excuses them) — merge the class roster with whatever
+  // attendance already exists so upcoming sessions still show who to cancel.
+  const rosterFor = (session) => {
+    const cls = classes.find(c => c.id === session.class?.id);
+    const attendanceByStudent = new Map((session.attendance || []).map(a => [a.studentId, a]));
+    const enrolled = cls?.enrollments?.map(e => e.student) || [];
+    return enrolled.map(s => ({
+      id: s.id,
+      fullName: s.fullName,
+      status: attendanceByStudent.get(s.id)?.status || null,
+    }));
+  };
+
+  const openCancelModal = (session, student) => {
+    setCancelReason('');
+    setCancelTarget({
+      sessionId: session.id,
+      studentId: student.id,
+      studentName: student.fullName,
+      className: session.class?.name,
+    });
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!cancelTarget) return;
+    setCancelSubmitting(true);
+    try {
+      const { autoResolved } = await api
+        .post(`/sessions/${cancelTarget.sessionId}/cancel-student`, {
+          studentId: cancelTarget.studentId,
+          reason: cancelReason || null,
+        })
+        .then(r => r.data);
+      setActionMessage(
+        autoResolved
+          ? `${cancelTarget.studentName}'s cancellation was free (48h+ notice) — no charge.`
+          : `${cancelTarget.studentName}'s cancellation is under 48h — sent to the admin to decide the charge.`
+      );
+      setCancelTarget(null);
+      await fetchData();
+    } catch (err) {
+      console.error('Error cancelling session for student:', err);
+      setActionMessage('Could not cancel this session — please try again.');
+    } finally {
+      setCancelSubmitting(false);
+      setTimeout(() => setActionMessage(null), 6000);
+    }
   };
 
   const handleDownloadPdf = async (classGroup) => {
@@ -165,6 +221,8 @@ const SupervisionPanel = () => {
         </div>
       </div>
 
+      {actionMessage && <div className="supervision-action-message">{actionMessage}</div>}
+
       {/* Filters */}
       <div className="supervision-filters">
         <div className="filter-group">
@@ -240,6 +298,8 @@ const SupervisionPanel = () => {
                     const att = attendanceSummary(session.attendance);
                     const hasNotes = session.notes?.length > 0;
                     const hasMaterials = session.materials?.length > 0;
+                    const roster = rosterFor(session);
+                    const canCancel = session.status === 'SCHEDULED';
 
                     return (
                       <div key={session.id} className={`session-card ${isOpen ? 'open' : ''}`}>
@@ -295,17 +355,27 @@ const SupervisionPanel = () => {
                               </div>
                             )}
 
-                            {/* Attendance */}
-                            {session.attendance?.length > 0 && (
+                            {/* Roster / Attendance */}
+                            {roster.length > 0 && (
                               <div className="session-detail-section">
-                                <h4><Users size={15} /> Attendance ({att.total} students)</h4>
+                                <h4><Users size={15} /> Roster ({roster.length} students){att.total > 0 && ` — ${att.total} marked`}</h4>
                                 <div className="attendance-grid">
-                                  {session.attendance.map(a => (
-                                    <div key={a.id} className={`att-chip ${a.status.toLowerCase()}`}>
-                                      <span>{a.student?.fullName || 'Unknown'}</span>
-                                      <span className="att-status-icon">
-                                        {a.status === 'PRESENT' ? '✓' : a.status === 'ABSENT' ? '✗' : '⏰'}
-                                      </span>
+                                  {roster.map(s => (
+                                    <div key={s.id} className={`att-chip ${(s.status || 'scheduled').toLowerCase()}`}>
+                                      <span>{s.fullName}</span>
+                                      {s.status ? (
+                                        <span className="att-status-icon">
+                                          {s.status === 'PRESENT' ? '✓' : s.status === 'ABSENT' ? '✗' : s.status === 'EXCUSED' ? '🚫' : '⏰'}
+                                        </span>
+                                      ) : canCancel ? (
+                                        <button
+                                          className="att-cancel-btn"
+                                          title="Cancel this student's spot"
+                                          onClick={() => openCancelModal(session, s)}
+                                        >
+                                          <Ban size={12} />
+                                        </button>
+                                      ) : null}
                                     </div>
                                   ))}
                                 </div>
@@ -320,6 +390,34 @@ const SupervisionPanel = () => {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Cancel-student confirmation modal */}
+      {cancelTarget && (
+        <div className="cancel-modal-overlay" onClick={() => !cancelSubmitting && setCancelTarget(null)}>
+          <div className="cancel-modal" onClick={e => e.stopPropagation()}>
+            <h3><Ban size={18} /> Cancel {cancelTarget.studentName}'s spot</h3>
+            <p>
+              {cancelTarget.className} — the system will automatically check the 48-hour policy:
+              free if cancelled 48h+ before class, otherwise it's sent to the admin to decide the charge (suggested 50%).
+            </p>
+            <label className="cancel-modal-label">Reason (optional)</label>
+            <textarea
+              rows={3}
+              value={cancelReason}
+              onChange={e => setCancelReason(e.target.value)}
+              placeholder="Why is this being cancelled?"
+            />
+            <div className="cancel-modal-actions">
+              <button className="cancel-modal-back" disabled={cancelSubmitting} onClick={() => setCancelTarget(null)}>
+                Back
+              </button>
+              <button className="cancel-modal-confirm" disabled={cancelSubmitting} onClick={handleConfirmCancel}>
+                {cancelSubmitting ? 'Cancelling...' : 'Confirm Cancellation'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

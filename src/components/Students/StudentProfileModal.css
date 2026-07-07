@@ -829,3 +829,16 @@
   transition: opacity 0.15s;
 }
 .view-billing-btn:hover { opacity: 0.85; }
+
+/* Snack cabinet modal (shares this stylesheet) */
+.cabinet-header-title { display: flex; align-items: center; gap: 8px; margin: 0; }
+.cabinet-header-actions { display: flex; gap: 12px; }
+.add-snack-form-title { margin: 0 0 16px; font-size: 16px; }
+.add-snack-upload-hint { font-size: 13px; font-weight: 500; }
+.add-snack-file-input { display: none; }
+.form-group-spaced { margin-bottom: 12px; }
+.form-group-spaced-lg { margin-bottom: 24px; }
+.add-snack-form-actions { display: flex; gap: 12px; }
+.add-snack-form-actions .action-btn { flex: 1; }
+.snack-delete-icon { margin-right: 4px; }
+.add-snack-card-label { font-weight: 600; }

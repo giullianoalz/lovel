@@ -69,19 +69,14 @@ export const getThreads = async (req, res, next) => {
         isBlocked: isBlocked,
         roles: roles,
         lastMsg: lastMsg ? lastMsg.text : (thread.isBot ? 'Hello! I am your Academy Assistant.' : 'No messages yet'),
+        timestamp: lastMsg ? lastMsg.sentAt.getTime() : thread.createdAt.getTime(),
         time: lastMsg ? lastMsg.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
         unread: 0 // Mocked for now
       };
     });
 
     // Sort threads by latest message time
-    threads.sort((a, b) => {
-      if (!a.time && !b.time) return 0;
-      if (!a.time) return 1;
-      if (!b.time) return -1;
-      // We should ideally sort by Date, but this is a rough approximation
-      return 0; 
-    });
+    threads.sort((a, b) => b.timestamp - a.timestamp);
 
     res.json({ threads });
   } catch (error) {
@@ -144,17 +139,18 @@ export const createThread = async (req, res, next) => {
     // instead of creating a duplicate every time "Message Teacher" is clicked.
     if (!isBot && allParticipants.length === 2) {
       const [a, b] = allParticipants;
-      const existing = await prisma.chatThread.findFirst({
+      const existingThreads = await prisma.chatThread.findMany({
         where: {
           isBot: false,
-          AND: [
-            { participants: { some: { userId: a } } },
-            { participants: { some: { userId: b } } },
-          ],
+          participants: { some: { userId: a } }
         },
         include: { participants: { include: { user: true } } },
       });
-      if (existing && existing.participants.length === 2) {
+      const existing = existingThreads.find(t => 
+        t.participants.length === 2 && 
+        t.participants.some(p => p.userId === b)
+      );
+      if (existing) {
         return res.status(200).json({ thread: existing });
       }
     }

@@ -800,6 +800,10 @@ const CalendarView = () => {
   };
 
   const handleDragStart = (e, eventItem) => {
+    if (role !== 'ADMIN') {
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.setData('eventId', eventItem.id.toString());
     const rect = e.currentTarget.getBoundingClientRect();
     e.dataTransfer.setData('offsetY', (e.clientY - rect.top).toString());
@@ -1395,9 +1399,9 @@ const CalendarView = () => {
                          <div 
                            key={e.id} 
                            className={`positioned-event ${e.subject}`}
-                           style={{...getPositionStyles(e.time), cursor: 'grab'}}
+                           style={{...getPositionStyles(e.time), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
                            title={`${e.title} · ${e.time} · ${e.teacher}`}
-                           draggable
+                           draggable={role === 'ADMIN'}
                            onDragStart={(evt) => handleDragStart(evt, e)}
                            onClick={() => handleEventClick(e)}
                          >
@@ -1462,8 +1466,8 @@ const CalendarView = () => {
                            <div 
                              key={e.id} 
                              className={`positioned-event ${e.subject}`}
-                             style={{...getPositionStyles(e.time), cursor: 'grab'}}
-                             draggable
+                             style={{...getPositionStyles(e.time), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
+                             draggable={role === 'ADMIN'}
                              onDragStart={(evt) => handleDragStart(evt, e)}
                              onClick={() => handleEventClick(e)}
                            >
@@ -1518,9 +1522,9 @@ const CalendarView = () => {
                               key={e.id} 
                               className={`mini-event ${e.subject}`} 
                               title={`${e.time} - ${e.title}`}
-                              draggable
+                              draggable={role === 'ADMIN'}
                               onDragStart={(evt) => handleDragStart(evt, e)}
-                              style={{ cursor: 'grab' }}
+                              style={{ cursor: role === 'ADMIN' ? 'grab' : 'pointer' }}
                             >
                                <div className="dot"></div>
                                <span>{e.time.split(' ')[0]} {e.title}</span>

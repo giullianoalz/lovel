@@ -37,6 +37,7 @@ const RegistrationAdmin = () => {
   const [allStudents, setAllStudents] = useState([]);
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleMode, setScheduleMode] = useState('recurring'); // 'recurring' | 'single'
   const [scheduleForm, setScheduleForm] = useState({ startDate: '', endDate: '', weekdays: [], startTime: '10:00', endTime: '11:00' });
   const [scheduling, setScheduling] = useState(false);
   const WEEKDAY_OPTIONS = [
@@ -276,8 +277,18 @@ const RegistrationAdmin = () => {
     e.preventDefault();
     setScheduling(true);
     try {
-      const res = await api.post('/sessions/bulk', { classId: selectedPod, ...scheduleForm });
-      showAlert(res.data.message, 'Sessions Scheduled', 'info');
+      if (scheduleMode === 'single') {
+        await api.post('/sessions', {
+          classId: selectedPod,
+          date: scheduleForm.startDate,
+          startTime: scheduleForm.startTime,
+          endTime: scheduleForm.endTime,
+        });
+        showAlert('Session scheduled.', 'Session Scheduled', 'info');
+      } else {
+        const res = await api.post('/sessions/bulk', { classId: selectedPod, ...scheduleForm });
+        showAlert(res.data.message, 'Sessions Scheduled', 'info');
+      }
       setShowScheduleModal(false);
       setScheduleForm({ startDate: '', endDate: '', weekdays: [], startTime: '10:00', endTime: '11:00' });
     } catch (error) {
@@ -518,7 +529,7 @@ const RegistrationAdmin = () => {
                   <p className="text-muted">Term: {terms.find(t => t.id === selectedTermForRoster)?.name}</p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="btn-primary" onClick={() => setShowScheduleModal(true)}>
+                  <button className="btn-primary" onClick={() => { setScheduleMode('recurring'); setShowScheduleModal(true); }}>
                     <Calendar size={16} /> Schedule Sessions
                   </button>
                   <button className="btn-outline" onClick={() => handleOpenPodModal(pods.find(p => p.id === selectedPod))}>
@@ -825,38 +836,74 @@ const RegistrationAdmin = () => {
               </button>
             </div>
             <form onSubmit={handleScheduleSessions} className="reg-form">
-              <p className="text-muted" style={{ marginTop: 0 }}>
-                Creates real sessions for <strong>{pods.find(p => p.id === selectedPod)?.name}</strong> on the chosen weekdays, within the date range. Re-running this for the same dates won't create duplicates.
-              </p>
-              <div className="reg-date-row">
+              <div className="reg-schedule-mode-toggle">
+                <button
+                  type="button"
+                  className={`badge ${scheduleMode === 'recurring' ? 'active' : ''}`}
+                  style={{ cursor: 'pointer', border: '1px solid var(--border-light)' }}
+                  onClick={() => setScheduleMode('recurring')}
+                >
+                  Recurring (weekdays)
+                </button>
+                <button
+                  type="button"
+                  className={`badge ${scheduleMode === 'single' ? 'active' : ''}`}
+                  style={{ cursor: 'pointer', border: '1px solid var(--border-light)' }}
+                  onClick={() => setScheduleMode('single')}
+                >
+                  Single date
+                </button>
+              </div>
+
+              {scheduleMode === 'single' ? (
+                <p className="text-muted" style={{ marginTop: 0 }}>
+                  Creates one real session for <strong>{pods.find(p => p.id === selectedPod)?.name}</strong> on a specific date.
+                </p>
+              ) : (
+                <p className="text-muted" style={{ marginTop: 0 }}>
+                  Creates real sessions for <strong>{pods.find(p => p.id === selectedPod)?.name}</strong> on the chosen weekdays, within the date range. Re-running this for the same dates won't create duplicates.
+                </p>
+              )}
+
+              {scheduleMode === 'single' ? (
                 <div>
-                  <label className="reg-form-label">Start Date</label>
+                  <label className="reg-form-label">Date</label>
                   <input type="date" required className="form-control" value={scheduleForm.startDate}
                     onChange={(e) => setScheduleForm({ ...scheduleForm, startDate: e.target.value })} />
                 </div>
-                <div>
-                  <label className="reg-form-label">End Date</label>
-                  <input type="date" required className="form-control" value={scheduleForm.endDate}
-                    onChange={(e) => setScheduleForm({ ...scheduleForm, endDate: e.target.value })} />
+              ) : (
+                <div className="reg-date-row">
+                  <div>
+                    <label className="reg-form-label">Start Date</label>
+                    <input type="date" required className="form-control" value={scheduleForm.startDate}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, startDate: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="reg-form-label">End Date</label>
+                    <input type="date" required className="form-control" value={scheduleForm.endDate}
+                      onChange={(e) => setScheduleForm({ ...scheduleForm, endDate: e.target.value })} />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div>
-                <label className="reg-form-label">Repeat on</label>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {WEEKDAY_OPTIONS.map(w => (
-                    <button
-                      key={w.value}
-                      type="button"
-                      className={`badge ${scheduleForm.weekdays.includes(w.value) ? 'active' : ''}`}
-                      style={{ cursor: 'pointer', border: '1px solid var(--border-light)' }}
-                      onClick={() => toggleScheduleWeekday(w.value)}
-                    >
-                      {w.label}
-                    </button>
-                  ))}
+              {scheduleMode === 'recurring' && (
+                <div>
+                  <label className="reg-form-label">Repeat on</label>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {WEEKDAY_OPTIONS.map(w => (
+                      <button
+                        key={w.value}
+                        type="button"
+                        className={`badge ${scheduleForm.weekdays.includes(w.value) ? 'active' : ''}`}
+                        style={{ cursor: 'pointer', border: '1px solid var(--border-light)' }}
+                        onClick={() => toggleScheduleWeekday(w.value)}
+                      >
+                        {w.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="reg-date-row">
                 <div>
@@ -873,8 +920,12 @@ const RegistrationAdmin = () => {
 
               <div className="reg-form-actions">
                 <button type="button" className="btn-text" onClick={() => setShowScheduleModal(false)}>Cancel</button>
-                <button type="submit" className="btn-primary" disabled={scheduling || scheduleForm.weekdays.length === 0}>
-                  {scheduling ? 'Scheduling...' : 'Schedule Sessions'}
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={scheduling || !scheduleForm.startDate || (scheduleMode === 'recurring' && (scheduleForm.weekdays.length === 0 || !scheduleForm.endDate))}
+                >
+                  {scheduling ? 'Scheduling...' : scheduleMode === 'single' ? 'Schedule Session' : 'Schedule Sessions'}
                 </button>
               </div>
             </form>

@@ -1,28 +1,36 @@
-import React from 'react'
+import React, { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Sidebar from './components/Layout/Sidebar'
 import Login from './components/Auth/Login'
-import ChatHub from './components/Chat/ChatHub'
-import Dashboard from './components/Dashboard/Dashboard'
-import StudentsList from './components/Students/StudentsList'
-import CalendarView from './components/Schedule/CalendarView'
-import ClassSession from './components/Schedule/ClassSession'
-import BillingPanel from './components/Billing/BillingPanel'
-import SupervisionPanel from './components/Supervision/SupervisionPanel'
-import RegistrationAdmin from './components/Registration/RegistrationAdmin'
-import StudentPortal from './components/Portal/StudentPortal'
-import ParentPortal from './components/Portal/ParentPortal'
-import BehaviorTracker from './components/Behavior/BehaviorTracker'
-import FrontDeskAlerts from './components/Alerts/FrontDeskAlerts'
-import MarketingHub from './components/Marketing/MarketingHub'
-import TeacherPortal from './components/Portal/TeacherPortal'
-import MyPayroll from './components/Payroll/MyPayroll'
-import MedicalIncidents from './components/Medical/MedicalIncidents'
-import LessonPlanReview from './components/LessonPlans/LessonPlanReview'
-import AcademyFeed from './components/Feed/AcademyFeed'
 import { ToastProvider } from './components/Layout/ToastProvider'
 import './index.css'
+
+// Route components are lazy-loaded so each lands in its own chunk — the initial
+// bundle only ships the shell (Sidebar, Login, providers), not every screen.
+const ChatHub = lazy(() => import('./components/Chat/ChatHub'))
+const Dashboard = lazy(() => import('./components/Dashboard/Dashboard'))
+const StudentsList = lazy(() => import('./components/Students/StudentsList'))
+const CalendarView = lazy(() => import('./components/Schedule/CalendarView'))
+const BillingPanel = lazy(() => import('./components/Billing/BillingPanel'))
+const SupervisionPanel = lazy(() => import('./components/Supervision/SupervisionPanel'))
+const RegistrationAdmin = lazy(() => import('./components/Registration/RegistrationAdmin'))
+const StudentPortal = lazy(() => import('./components/Portal/StudentPortal'))
+const ParentPortal = lazy(() => import('./components/Portal/ParentPortal'))
+const BehaviorTracker = lazy(() => import('./components/Behavior/BehaviorTracker'))
+const FrontDeskAlerts = lazy(() => import('./components/Alerts/FrontDeskAlerts'))
+const MarketingHub = lazy(() => import('./components/Marketing/MarketingHub'))
+const TeacherPortal = lazy(() => import('./components/Portal/TeacherPortal'))
+const MyPayroll = lazy(() => import('./components/Payroll/MyPayroll'))
+const MedicalIncidents = lazy(() => import('./components/Medical/MedicalIncidents'))
+const LessonPlanReview = lazy(() => import('./components/LessonPlans/LessonPlanReview'))
+const AcademyFeed = lazy(() => import('./components/Feed/AcademyFeed'))
+
+const RouteFallback = () => (
+  <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+    Loading…
+  </div>
+)
 
 // Root redirect: teachers/admins → Teacher Portal, others → Dashboard
 const SmartRoot = () => {
@@ -92,6 +100,7 @@ function App() {
                 <div className="app-container">
                   <Sidebar />
                   <main className="content">
+                    <Suspense fallback={<RouteFallback />}>
                     <Routes>
                       <Route path="/" element={<SmartRoot />} />
                       <Route path="/dashboard" element={<SmartDashboard />} />
@@ -213,6 +222,7 @@ function App() {
                       {/* Catch-all redirect */}
                       <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
+                    </Suspense>
                   </main>
                 </div>
               </ProtectedRoute>

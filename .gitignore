@@ -32,3 +32,9 @@ dist-ssr
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Runtime uploads (server-side storage, not source)
+server/uploads/
+
+# Stray test artifacts
+test.jpg

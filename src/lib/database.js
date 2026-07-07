@@ -86,14 +86,6 @@ let mockStudents = [
   }
 ];
 
-let mockSnackCabinet = [
-  { id: 'snk_1', name: 'Apple Juice', costPunches: 2, image: 'https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=400&h=400&fit=crop' },
-  { id: 'snk_2', name: 'Chocolate Chip Cookie', costPunches: 3, image: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=400&h=400&fit=crop' },
-  { id: 'snk_3', name: 'Potato Chips', costPunches: 3, image: 'https://images.unsplash.com/photo-1566478989037-eade3f7e2bd9?w=400&h=400&fit=crop' },
-  { id: 'snk_4', name: 'Granola Bar', costPunches: 2, image: 'https://images.unsplash.com/photo-1590080873974-9a3dcac5ee63?w=400&h=400&fit=crop' },
-  { id: 'snk_5', name: 'Organic Fruit Snacks', costPunches: 1, image: 'https://images.unsplash.com/photo-1582293041079-7814c2f12063?w=400&h=400&fit=crop' }
-];
-
 let mockTransactions = [
   { id: 'tx_1', studentId: '1', familyId: 'f1', amount: 50.00, type: 'Charge', description: 'In Person Tutoring with Prof. David Brown', date: '2026-04-20', invoiceId: null },
   { id: 'tx_2', studentId: '1', familyId: 'f1', amount: 30.00, type: 'Charge', description: 'Portfolio Evaluation', date: '2026-04-22', invoiceId: null },
@@ -280,60 +272,27 @@ export const database = {
   },
 
   // --- Snacks & Billing ---
+  // Punches/seashells are real earned balances — never fall back to fabricated
+  // numbers if the API call fails. Let the error propagate so the UI shows a
+  // real error state instead of a purchase that silently vanishes on reload.
   getSnackCabinet: async () => {
-    try {
-      const response = await api.get('/rewards/snacks');
-      return response.data.snacks;
-    } catch (error) {
-      console.error('Error fetching snacks, using mock:', error);
-      return mockSnackCabinet;
-    }
+    const response = await api.get('/rewards/snacks');
+    return response.data.snacks;
   },
 
   addSnack: async (snackData) => {
-    try {
-      const response = await api.post('/rewards/snacks', snackData);
-      return { success: true, snack: response.data.snack };
-    } catch (error) {
-      console.error('Error adding snack, using mock:', error);
-      const newSnack = {
-        id: `snk_${Date.now()}`,
-        name: snackData.name,
-        costPunches: parseInt(snackData.cost),
-        image: snackData.image || 'https://images.unsplash.com/photo-1599598425947-330026296904?w=400&h=400&fit=crop',
-      };
-      mockSnackCabinet.push(newSnack);
-      return { success: true, snack: newSnack };
-    }
+    const response = await api.post('/rewards/snacks', snackData);
+    return { success: true, snack: response.data.snack };
   },
 
   deleteSnack: async (snackId) => {
-    try {
-      await api.delete(`/rewards/snacks/${snackId}`);
-      return { success: true };
-    } catch (error) {
-      console.error('Error deleting snack, using mock:', error);
-      mockSnackCabinet = mockSnackCabinet.filter(s => s.id !== snackId);
-      return { success: true };
-    }
+    await api.delete(`/rewards/snacks/${snackId}`);
+    return { success: true };
   },
 
   purchaseSnack: async (studentId, snackId) => {
-    try {
-      const response = await api.post('/rewards/snacks/purchase', { studentId, snackId });
-      return response.data; // { success, newBalance, snackName }
-    } catch (error) {
-      console.error('Error purchasing snack, using mock:', error);
-      const student = mockStudents.find(s => s.id === studentId);
-      const snack = mockSnackCabinet.find(s => s.id === snackId);
-      if (!student || !snack) return false;
-
-      student.snackPunches -= snack.costPunches; // Allow punches to go negative
-      const record = { id: `sh_${Date.now()}`, date: new Date().toISOString(), snackName: snack.name, cost: snack.costPunches };
-      if (!student.snackHistory) student.snackHistory = [];
-      student.snackHistory.unshift(record);
-      return { success: true, newBalance: student.snackPunches };
-    }
+    const response = await api.post('/rewards/snacks/purchase', { studentId, snackId });
+    return response.data; // { success, newBalance, snackName }
   },
 
   logSnackConsumption: async (studentId) => {
@@ -410,45 +369,13 @@ export const database = {
   // --- Prizes System ---
   awardSeashells: async (studentIds, reason, points) => {
     const ids = Array.isArray(studentIds) ? studentIds : [studentIds];
-    try {
-      await api.post('/rewards/seashells/award', { studentIds: ids, reason, points: parseInt(points) });
-      return true;
-    } catch (error) {
-      console.error('Error awarding seashells, using mock:', error);
-      ids.forEach(id => {
-        const student = mockStudents.find(s => s.id === id);
-        if (student) {
-          student.seashells = (student.seashells || 0) + parseInt(points);
-          if (!student.seashellHistory) student.seashellHistory = [];
-          student.seashellHistory.unshift({
-            id: `pz_${Date.now()}_${id}`, reason, points: parseInt(points),
-            date: new Date().toISOString(), type: 'earned',
-          });
-        }
-      });
-      return true;
-    }
+    await api.post('/rewards/seashells/award', { studentIds: ids, reason, points: parseInt(points) });
+    return true;
   },
 
   redeemSeashells: async (studentId, prizeName, cost) => {
-    try {
-      const response = await api.post('/rewards/seashells/redeem', { studentId, reason: `Redeemed: ${prizeName}`, points: parseInt(cost) });
-      return response.data; // { success, newBalance }
-    } catch (error) {
-      console.error('Error redeeming seashells, using mock:', error);
-      const student = mockStudents.find(s => s.id === studentId);
-      if (!student) return { success: false, error: 'Student not found' };
-      if ((student.seashells || 0) < parseInt(cost)) {
-        return { success: false, error: 'Insufficient points' };
-      }
-      student.seashells -= parseInt(cost);
-      if (!student.seashellHistory) student.seashellHistory = [];
-      student.seashellHistory.unshift({
-        id: `rz_${Date.now()}`, reason: `Redeemed: ${prizeName}`, points: -parseInt(cost),
-        date: new Date().toISOString(), type: 'redeemed',
-      });
-      return { success: true, newBalance: student.seashells };
-    }
+    const response = await api.post('/rewards/seashells/redeem', { studentId, reason: `Redeemed: ${prizeName}`, points: parseInt(cost) });
+    return response.data; // { success, newBalance }
   },
 
   // --- Conversations ---
@@ -704,6 +631,27 @@ export const database = {
       console.error("Error saving real attendance:", error);
       return false;
     }
+  },
+
+  // Cancellation policy: >=48h before class is free (auto-resolved server-side);
+  // <48h suggests a 50% charge but never charges automatically — it opens an
+  // admin review item instead. Real money — no mock fallback if this fails.
+  cancelStudentSession: async (sessionId, studentId, reason) => {
+    const response = await api.post(`/sessions/${sessionId}/cancel-student`, { studentId, reason });
+    return response.data; // { cancellation, autoResolved }
+  },
+
+  fetchPendingCancellations: async () => {
+    const response = await api.get('/sessions/cancellations', { params: { status: 'PENDING_REVIEW' } });
+    return response.data.cancellations;
+  },
+
+  resolveCancellation: async (cancellationId, finalChargePercent, chargeAmount) => {
+    const response = await api.patch(`/sessions/cancellations/${cancellationId}/resolve`, {
+      finalChargePercent,
+      chargeAmount: chargeAmount || null,
+    });
+    return response.data.cancellation;
   },
 
   fetchDailySessions: async () => {

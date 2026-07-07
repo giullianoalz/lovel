@@ -38,6 +38,13 @@ const ChatHub = () => {
     try {
       const response = await api.get('/chat');
       setChatThreads(response.data.threads);
+      
+      // Join all rooms to receive incoming messages for threads we are not currently viewing
+      if (socketRef.current) {
+        response.data.threads.forEach(thread => {
+          socketRef.current.emit('join_room', thread.id);
+        });
+      }
     } catch (error) {
       console.error("Error loading chat threads:", error);
     }
@@ -120,12 +127,6 @@ const ChatHub = () => {
     if (activeChat) {
       loadMessages();
     }
-
-    return () => {
-      if (socketRef.current && activeChat) {
-        socketRef.current.emit('leave_room', activeChat);
-      }
-    };
   }, [activeChat]);
 
   const handleSelectChat = (id) => {

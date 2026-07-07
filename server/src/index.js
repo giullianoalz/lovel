@@ -77,7 +77,9 @@ app.set('io', io);
 app.use(compression());
 
 // Security headers
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 // CORS
 const allowedOrigins = [

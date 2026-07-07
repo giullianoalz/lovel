@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink } from 'lucide-react';
+import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import api from '../../lib/api';
@@ -24,6 +24,13 @@ const FrontDeskAlerts = () => {
   const socketRef = useRef(null);
   const navigate = useNavigate();
 
+  /* Cancellation-charge review queue */
+  const [cancellations, setCancellations] = useState([]);
+  const [resolveTarget, setResolveTarget] = useState(null); // cancellation object
+  const [resolvePercent, setResolvePercent] = useState(50);
+  const [resolveAmount, setResolveAmount] = useState('');
+  const [resolveSubmitting, setResolveSubmitting] = useState(false);
+
   const loadAlerts = async (status = 'active') => {
     setLoading(true);
     try {
@@ -39,9 +46,19 @@ const FrontDeskAlerts = () => {
     setLoading(false);
   };
 
+  const loadCancellations = async () => {
+    try {
+      const response = await api.get('/sessions/cancellations', { params: { status: 'PENDING_REVIEW' } });
+      setCancellations(response.data.cancellations);
+    } catch (error) {
+      console.error('Error loading pending cancellations:', error);
+    }
+  };
+
   useEffect(() => {
     loadAlerts('active');
     loadAlerts('resolved');
+    loadCancellations();
 
     // Connect to Socket.IO for real-time alerts
     socketRef.current = io(SOCKET_URL);
@@ -57,6 +74,14 @@ const FrontDeskAlerts = () => {
       loadAlerts('resolved');
     });
 
+    socketRef.current.on('cancellation_pending', (data) => {
+      setCancellations(prev => [data, ...prev]);
+    });
+
+    socketRef.current.on('cancellation_resolved', ({ id }) => {
+      setCancellations(prev => prev.filter(c => c.id !== id));
+    });
+
     return () => {
       if (socketRef.current) socketRef.current.disconnect();
     };
@@ -69,6 +94,29 @@ const FrontDeskAlerts = () => {
       await loadAlerts('resolved');
     } catch (error) {
       console.error('Error updating alert:', error);
+    }
+  };
+
+  const openResolveModal = (cancellation) => {
+    setResolvePercent(cancellation.suggestedChargePercent);
+    setResolveAmount('');
+    setResolveTarget(cancellation);
+  };
+
+  const handleResolveCancellation = async () => {
+    if (!resolveTarget) return;
+    setResolveSubmitting(true);
+    try {
+      await api.patch(`/sessions/cancellations/${resolveTarget.id}/resolve`, {
+        finalChargePercent: parseInt(resolvePercent) || 0,
+        chargeAmount: resolveAmount ? parseFloat(resolveAmount) : null,
+      });
+      setCancellations(prev => prev.filter(c => c.id !== resolveTarget.id));
+      setResolveTarget(null);
+    } catch (error) {
+      console.error('Error resolving cancellation:', error);
+    } finally {
+      setResolveSubmitting(false);
     }
   };
 
@@ -121,6 +169,36 @@ const FrontDeskAlerts = () => {
           </div>
         )}
       </header>
+
+      {/* Cancellation-charge review queue */}
+      {cancellations.length > 0 && (
+        <div className="cancellation-queue">
+          <h2 className="cancellation-queue-title"><Ban size={16} /> Cancellations Needing a Decision ({cancellations.length})</h2>
+          <div className="cancellation-queue-grid">
+            {cancellations.map(c => (
+              <div key={c.id} className="cancellation-card">
+                <div className="cancellation-card-top">
+                  <button
+                    className="alert-student-name-link"
+                    onClick={() => navigate(`/students?highlight=${c.studentId || c.student?.id}`)}
+                  >
+                    {c.studentName || c.student?.fullName}
+                    <ExternalLink size={12} />
+                  </button>
+                  <span className="cancellation-suggested-badge">Suggested {c.suggestedChargePercent}%</span>
+                </div>
+                <p className="cancellation-meta">
+                  {c.className || c.session?.class?.name} · cancelled with {Number(c.hoursBeforeClass).toFixed(1)}h notice
+                </p>
+                {c.reason && <p className="cancellation-reason">"{c.reason}"</p>}
+                <button className="cancellation-resolve-btn" onClick={() => openResolveModal(c)}>
+                  <DollarSign size={14} /> Decide Charge
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="reg-tabs">
@@ -291,6 +369,45 @@ const FrontDeskAlerts = () => {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {/* Resolve cancellation-charge modal */}
+      {resolveTarget && (
+        <div className="cancel-modal-overlay" onClick={() => !resolveSubmitting && setResolveTarget(null)}>
+          <div className="cancel-modal" onClick={e => e.stopPropagation()}>
+            <h3><DollarSign size={18} /> Decide the charge</h3>
+            <p>
+              {(resolveTarget.studentName || resolveTarget.student?.fullName)} cancelled{' '}
+              {resolveTarget.className || resolveTarget.session?.class?.name} with{' '}
+              {Number(resolveTarget.hoursBeforeClass).toFixed(1)}h notice (suggested {resolveTarget.suggestedChargePercent}%).
+            </p>
+            <label className="cancel-modal-label">Final charge percent</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={resolvePercent}
+              onChange={e => setResolvePercent(e.target.value)}
+            />
+            <label className="cancel-modal-label" style={{ marginTop: 12 }}>Charge amount ($, optional — creates the transaction now)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Leave blank to decide later"
+              value={resolveAmount}
+              onChange={e => setResolveAmount(e.target.value)}
+            />
+            <div className="cancel-modal-actions">
+              <button className="cancel-modal-back" disabled={resolveSubmitting} onClick={() => setResolveTarget(null)}>
+                Cancel
+              </button>
+              <button className="cancel-modal-confirm" disabled={resolveSubmitting} onClick={handleResolveCancellation}>
+                {resolveSubmitting ? 'Saving...' : 'Confirm Decision'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
