@@ -1,15 +1,41 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { authenticate } from '../middleware/auth.js';
 import {
   getThreads,
   createThread,
   getMessages,
   sendMessage,
+  uploadAttachment,
   blockContact,
   createGroupThread,
   resolveThread,
   getMyChildrensTeachers
 } from '../controllers/chat.controller.js';
+
+const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'chat');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, `chat-${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB — chat attachments, not video uploads
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|webp|pdf|doc|docx|xls|xlsx/;
+    const extValid = allowed.test(path.extname(file.originalname).toLowerCase());
+    if (extValid) return cb(null, true);
+    cb(new Error('That file type is not allowed in chat.'));
+  },
+});
 
 const router = Router();
 
@@ -27,6 +53,9 @@ router.get('/:threadId/messages', authenticate, getMessages);
 
 // POST /api/chat/:threadId/messages — Send a new message
 router.post('/:threadId/messages', authenticate, sendMessage);
+
+// POST /api/chat/:threadId/attachment — Send a file (image/document)
+router.post('/:threadId/attachment', authenticate, upload.single('file'), uploadAttachment);
 
 // POST /api/chat/:threadId/block — Toggle block status for a contact
 router.post('/:threadId/block', authenticate, blockContact);

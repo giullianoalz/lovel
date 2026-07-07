@@ -411,13 +411,14 @@ model ChatThread {
 }
 
 model ChatParticipant {
-  id        String     @id @default(uuid()) @db.Uuid
-  threadId  String     @map("thread_id") @db.Uuid
-  userId    String     @map("user_id") @db.Uuid
-  isBlocked Boolean    @default(false) @map("is_blocked")
-  joinedAt  DateTime   @default(now()) @map("joined_at") @db.Timestamptz(6)
-  thread    ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String     @id @default(uuid()) @db.Uuid
+  threadId   String     @map("thread_id") @db.Uuid
+  userId     String     @map("user_id") @db.Uuid
+  isBlocked  Boolean    @default(false) @map("is_blocked")
+  joinedAt   DateTime   @default(now()) @map("joined_at") @db.Timestamptz(6)
+  lastReadAt DateTime?  @map("last_read_at") @db.Timestamptz(6)
+  thread     ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([threadId, userId])
   @@map("chat_participants")
@@ -428,6 +429,9 @@ model ChatMessage {
   threadId String     @map("thread_id") @db.Uuid
   senderId String?    @map("sender_id") @db.Uuid
   text     String
+  fileUrl  String?    @map("file_url")
+  fileName String?    @map("file_name")
+  fileType String?    @map("file_type") @db.VarChar(100)
   sentAt   DateTime   @default(now()) @map("sent_at") @db.Timestamptz(6)
   sender   User?      @relation(fields: [senderId], references: [id])
   thread   ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)

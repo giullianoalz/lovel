@@ -2,6 +2,12 @@ import prisma from '../config/database.js';
 import { generateAssistantReply } from '../services/ai.service.js';
 import { findContactInfo } from '../utils/contentFilter.js';
 
+const formatAttachment = (msg) => ({
+  fileUrl: msg.fileUrl || null,
+  fileName: msg.fileName || null,
+  fileType: msg.fileType || null,
+});
+
 /** Returns true if `now` (HH:MM, local) falls within a quiet-hours window that may wrap midnight. */
 function isWithinQuietHours(start, end, now = new Date()) {
   if (!start || !end) return false;
@@ -26,7 +32,7 @@ export const getThreads = async (req, res, next) => {
 
     // Find all threads the user is part of
     const participants = await prisma.chatParticipant.findMany({
-      where: { 
+      where: {
         userId,
         thread: { status: status.toUpperCase() }
       },
@@ -45,12 +51,26 @@ export const getThreads = async (req, res, next) => {
       }
     });
 
-    const threads = participants.map(p => {
+    // Real unread counts: messages from someone else, sent after this
+    // participant last opened the thread (or since they joined, if never opened).
+    const unreadCounts = await Promise.all(
+      participants.map(p =>
+        prisma.chatMessage.count({
+          where: {
+            threadId: p.threadId,
+            senderId: { not: userId },
+            sentAt: { gt: p.lastReadAt || p.joinedAt },
+          },
+        })
+      )
+    );
+
+    const threads = participants.map((p, idx) => {
       const thread = p.thread;
       // Find the other participants to determine the thread name if not set
       const otherParticipants = thread.participants.filter(part => part.userId !== userId);
       const otherNames = otherParticipants.map(part => part.user.fullName).join(', ');
-      
+
       const lastMsg = thread.messages[0];
       const isBlocked = p.isBlocked;
 
@@ -68,10 +88,10 @@ export const getThreads = async (req, res, next) => {
         status: thread.status,
         isBlocked: isBlocked,
         roles: roles,
-        lastMsg: lastMsg ? lastMsg.text : (thread.isBot ? 'Hello! I am your Academy Assistant.' : 'No messages yet'),
+        lastMsg: lastMsg ? (lastMsg.text || (lastMsg.fileName ? `📎 ${lastMsg.fileName}` : 'Attachment')) : (thread.isBot ? 'Hello! I am your Academy Assistant.' : 'No messages yet'),
         timestamp: lastMsg ? lastMsg.sentAt.getTime() : thread.createdAt.getTime(),
         time: lastMsg ? lastMsg.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-        unread: 0 // Mocked for now
+        unread: unreadCounts[idx],
       };
     });
 
@@ -271,9 +291,16 @@ export const getMessages = async (req, res, next) => {
         senderId: msg.senderId,
         sender: isMe ? 'Me' : (msg.sender ? msg.sender.fullName : 'System'),
         text: msg.text,
+        ...formatAttachment(msg),
         time: msg.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         type: isMe ? 'sent' : 'received'
       };
+    });
+
+    // Opening the thread marks everything up to now as read for this user.
+    await prisma.chatParticipant.update({
+      where: { id: participant.id },
+      data: { lastReadAt: new Date() },
     });
 
     res.json({ messages: formattedMessages });
@@ -333,6 +360,7 @@ export const sendMessage = async (req, res, next) => {
       senderId: newMessage.senderId,
       sender: newMessage.sender.fullName,
       text: newMessage.text,
+      ...formatAttachment(newMessage),
       time: newMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: 'received' // from the perspective of others
     };
@@ -478,6 +506,63 @@ export const sendMessage = async (req, res, next) => {
         }
       })();
     }
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/chat/:threadId/attachment — send a file (image/document) as a chat message.
+// Uses multer (see chat.routes.js) to save the file to disk before this runs.
+export const uploadAttachment = async (req, res, next) => {
+  try {
+    const { threadId } = req.params;
+    const userId = req.user.id;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Validation Error', message: 'A file is required.' });
+    }
+
+    const participant = await prisma.chatParticipant.findUnique({
+      where: { threadId_userId: { threadId, userId } },
+      include: { thread: true }
+    });
+
+    if (!participant) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Not a participant in this thread' });
+    }
+
+    if (participant.isBlocked) {
+      return res.status(403).json({ error: 'Forbidden', message: 'You have blocked this contact' });
+    }
+
+    const newMessage = await prisma.chatMessage.create({
+      data: {
+        threadId,
+        senderId: userId,
+        text: '',
+        fileUrl: `/uploads/chat/${req.file.filename}`,
+        fileName: req.file.originalname,
+        fileType: req.file.mimetype,
+      },
+      include: { sender: true }
+    });
+
+    const formattedMessage = {
+      id: newMessage.id,
+      senderId: newMessage.senderId,
+      sender: newMessage.sender.fullName,
+      text: newMessage.text,
+      ...formatAttachment(newMessage),
+      time: newMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: 'received'
+    };
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(threadId).emit('receive_message', { threadId, message: formattedMessage });
+    }
+
+    res.status(201).json({ message: formattedMessage });
   } catch (error) {
     next(error);
   }

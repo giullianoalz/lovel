@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft } from 'lucide-react';
+import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft, FileText, Download } from 'lucide-react';
 import io from 'socket.io-client';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -9,6 +9,7 @@ const configuredApiUrl = import.meta.env.VITE_API_URL;
 const SOCKET_URL = (!configuredApiUrl || configuredApiUrl === 'http://localhost:4000/api')
   ? `http://${window.location.hostname}:4000`
   : configuredApiUrl.replace(/\/api\/?$/, '');
+const MEDIA_BASE = SOCKET_URL;
 
 const ChatHub = () => {
   const { role, user } = useAuth();
@@ -31,8 +32,10 @@ const ChatHub = () => {
   const [peopleQuery, setPeopleQuery] = useState('');
   const [people, setPeople] = useState([]);
   const [peopleLoading, setPeopleLoading] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const loadThreads = async () => {
     try {
@@ -79,10 +82,11 @@ const ChatHub = () => {
         };
       });
       
-      setChatThreads(prevThreads => 
-        prevThreads.map(t => 
-          t.id === threadId 
-            ? { ...t, lastMsg: message.text, time: message.time, unread: (activeChat === threadId ? 0 : (t.unread || 0) + 1) } 
+      const previewText = message.text || (message.fileName ? `📎 ${message.fileName}` : 'Attachment');
+      setChatThreads(prevThreads =>
+        prevThreads.map(t =>
+          t.id === threadId
+            ? { ...t, lastMsg: previewText, time: message.time, unread: (activeChat === threadId ? 0 : (t.unread || 0) + 1) }
             : t
         )
       );
@@ -115,7 +119,10 @@ const ChatHub = () => {
           ...prev,
           [activeChat]: response.data.messages
         }));
-        
+
+        // The server just marked this thread read (see getMessages) — reflect that locally.
+        setChatThreads(prev => prev.map(t => t.id === activeChat ? { ...t, unread: 0 } : t));
+
         if (socketRef.current) {
           socketRef.current.emit('join_room', activeChat);
         }
@@ -197,6 +204,74 @@ const ChatHub = () => {
       }));
       setInputText(sentText);
       setSendError(error.response?.data?.message || 'Could not send the message. Please try again.');
+    }
+  };
+
+  const handleAttachClick = () => {
+    if (!activeChat || isUploadingFile) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow picking the same file again later
+    if (!file || !activeChat) return;
+
+    if (file.size > 20 * 1024 * 1024) {
+      setSendError('That file is too large — the limit is 20MB.');
+      return;
+    }
+
+    setSendError(null);
+    setIsUploadingFile(true);
+
+    // Show it immediately (with a local preview) instead of waiting on the
+    // upload — the server broadcasts over the socket before the HTTP response
+    // even resolves, so without an optimistic entry the sender would briefly
+    // see their own file rendered as if it came from the other person.
+    const tempId = `temp-${Date.now()}`;
+    const localPreviewUrl = URL.createObjectURL(file);
+    const optimisticMessage = {
+      id: tempId,
+      sender: 'Me',
+      text: '',
+      fileUrl: localPreviewUrl,
+      fileName: file.name,
+      fileType: file.type,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      type: 'sent',
+    };
+    setMessages(prev => ({
+      ...prev,
+      [activeChat]: [...(prev[activeChat] || []), optimisticMessage]
+    }));
+    setChatThreads(prevThreads =>
+      prevThreads.map(t =>
+        t.id === activeChat ? { ...t, lastMsg: `📎 ${file.name}`, time: optimisticMessage.time } : t
+      )
+    );
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await api.post(`/chat/${activeChat}/attachment`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setMessages(prev => ({
+        ...prev,
+        [activeChat]: (prev[activeChat] || []).map(m => m.id === tempId ? { ...response.data.message, type: 'sent' } : m)
+      }));
+    } catch (error) {
+      console.error('Error uploading attachment:', error);
+      setMessages(prev => ({
+        ...prev,
+        [activeChat]: (prev[activeChat] || []).filter(m => m.id !== tempId)
+      }));
+      setSendError(error.response?.data?.message || 'Could not send the file. Please try again.');
+    } finally {
+      URL.revokeObjectURL(localPreviewUrl);
+      setIsUploadingFile(false);
     }
   };
 
@@ -413,15 +488,31 @@ const ChatHub = () => {
             <div className="messages-area">
               <div className="message-date-divider"><span>Today</span></div>
               
-              {(messages[activeChat] || []).map(msg => (
+              {(messages[activeChat] || []).map(msg => {
+                const fileSrc = msg.fileUrl && (msg.fileUrl.startsWith('blob:') || msg.fileUrl.startsWith('http') ? msg.fileUrl : MEDIA_BASE + msg.fileUrl);
+                return (
                 <div key={msg.id} className={`message ${msg.type}`}>
                   <div className="msg-bubble">
+                    {msg.fileUrl && (
+                      msg.fileType?.startsWith('image/') ? (
+                        <a href={fileSrc} target="_blank" rel="noopener noreferrer">
+                          <img className="chat-attachment-image" src={fileSrc} alt={msg.fileName || 'Attachment'} />
+                        </a>
+                      ) : (
+                        <a className="chat-attachment-file" href={fileSrc} target="_blank" rel="noopener noreferrer">
+                          <FileText size={18} />
+                          <span>{msg.fileName || 'Attachment'}</span>
+                          <Download size={14} />
+                        </a>
+                      )
+                    )}
                     {msg.text}
                     <span className="msg-time">{msg.time}</span>
                   </div>
                 </div>
-              ))}
-              
+                );
+              })}
+
               {(isTyping || typingThreads[activeChat]) && (
                 <div className="message received">
                   <div className="msg-bubble typing-bubble">
@@ -450,10 +541,19 @@ const ChatHub = () => {
                   </div>
                 )}
                 <div className="chat-input-area">
-                  <button className="icon-btn"><Paperclip size={20} /></button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    style={{ display: 'none' }}
+                    onChange={handleFileSelected}
+                    accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx"
+                  />
+                  <button className="icon-btn" onClick={handleAttachClick} disabled={isUploadingFile} title="Attach a file">
+                    <Paperclip size={20} />
+                  </button>
                   <input
                     type="text"
-                    placeholder="Type your message..."
+                    placeholder={isUploadingFile ? 'Sending file...' : 'Type your message...'}
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
