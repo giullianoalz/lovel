@@ -48,7 +48,9 @@ api.interceptors.response.use(
       } catch (_) {
         // ignore sign-out errors
       }
-      window.location.href = '/login';
+      
+      // TEMPORARILY DISABLED: prevents the page from reloading so we can read the error in the console
+      // window.location.href = '/login';
     }
 
     // Network errors or server unreachable
