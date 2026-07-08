@@ -12,7 +12,7 @@ export const authenticate = async (req, res, next) => {
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       // TEMPORAL: Bypassing auth in development so frontend can test APIs without Firebase
-      if (process.env.NODE_ENV === 'development') {
+      if (process.env.NODE_ENV === 'development' || process.env.ENABLE_TEST_LOGIN === 'true') {
         const devUserEmail = req.headers['x-dev-user-email'];
         let devUser;
         if (devUserEmail) {
