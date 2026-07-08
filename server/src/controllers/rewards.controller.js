@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { canUseSnackPunches } from '../utils/snackEligibility.js';
 
 /* ──────────────────────────── SNACK CABINET ──────────────────────────── */
 
@@ -68,6 +69,11 @@ export const purchaseSnack = async (req, res, next) => {
         tx.snackItem.findUniqueOrThrow({ where: { id: snackId } }),
       ]);
 
+      // Snack punches are for in-person students only — block online-only students.
+      if (!(await canUseSnackPunches(studentId, tx))) {
+        return { onlineStudent: true };
+      }
+
       if (snack.costPunches > student.snackPunches) {
         return { insufficientBalance: true, currentBalance: student.snackPunches };
       }
@@ -79,6 +85,12 @@ export const purchaseSnack = async (req, res, next) => {
       });
       return { newBalance, snackName: snack.name };
     });
+
+    if (result.onlineStudent) {
+      return res.status(403).json({
+        message: 'Snack punches are only available to in-person students.',
+      });
+    }
 
     if (result.insufficientBalance) {
       return res.status(400).json({

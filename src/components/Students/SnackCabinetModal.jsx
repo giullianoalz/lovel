@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, ShoppingBag, Settings, Plus, Trash2, Camera } from 'lucide-react';
 import { database } from '../../lib/database';
+import { useToast } from '../Layout/ToastProvider';
 import './StudentProfileModal.css'; // Reusing the same CSS for now
 
-const SnackCabinetModal = ({ 
-  onClose, 
+const SnackCabinetModal = ({
+  onClose,
   mode = 'purchase', // 'purchase' or 'manage'
   student = null,
   onUpdate = () => {}
 }) => {
+  const toast = useToast();
   const [snackCabinet, setSnackCabinet] = useState([]);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
@@ -59,13 +61,18 @@ const SnackCabinetModal = ({
   const handlePurchase = async (snack) => {
     if (mode !== 'purchase' || purchasing || !student) return;
     setPurchasing(true);
-    
-    const result = await database.purchaseSnack(student.id, snack.id);
-    if(result && result.success) {
-      onUpdate(result, snack);
-      onClose();
+
+    try {
+      const result = await database.purchaseSnack(student.id, snack.id);
+      if (result && result.success) {
+        onUpdate(result, snack);
+        onClose();
+      }
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Could not complete the purchase.');
+    } finally {
+      setPurchasing(false);
     }
-    setPurchasing(false);
   };
 
   return (

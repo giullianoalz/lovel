@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { canUseSnackPunches } from '../utils/snackEligibility.js';
 
 /**
  * GET /api/students
@@ -184,6 +185,15 @@ export const updateSnackPunches = async (req, res, next) => {
       action === 'set'
         ? parseInt(punches)
         : student.snackPunches + parseInt(punches);
+
+    // Snack punches are for in-person students only — don't let an online-only
+    // student end up with a positive balance (setting to 0 is still allowed).
+    if (newPunches > 0 && !(await canUseSnackPunches(req.params.id))) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Snack punches are only available to in-person students.',
+      });
+    }
 
     const updated = await prisma.user.update({
       where: { id: req.params.id },
