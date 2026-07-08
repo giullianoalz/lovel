@@ -9,7 +9,9 @@ const isLocalDevDefault = !configuredApiUrl || configuredApiUrl === 'http://loca
 const api = axios.create({
   baseURL: isLocalDevDefault ? `http://${window.location.hostname}:4000/api` : configuredApiUrl,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 15000,
+  // 60s so the first request survives a Render free-tier cold start (the server
+  // can take 30-50s to wake from sleep); warm requests still return in <1s.
+  timeout: 60000,
 });
 
 // Request interceptor — attach Firebase JWT or dev bypass header

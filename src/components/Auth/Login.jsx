@@ -48,7 +48,7 @@ const Login = () => {
       navigate('/'); // SmartRoot routes each role to its portal
     } catch (err) {
       console.error(err);
-      setError('Error connecting to the development database.');
+      setError('The server is waking up — please wait a moment and try again.');
     } finally {
       setLoading(false);
     }
