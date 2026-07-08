@@ -338,7 +338,7 @@ export const submitRegistrationRequest = async (req, res, next) => {
 /**
  * GET /api/registration/parent
  * Consolidated parent view: the open term, each child's window eligibility &
- * status, and the term's pods with live availability. One round-trip, no N+1.
+ * status, and the term's coves with live availability. One round-trip, no N+1.
  */
 export const getParentRegistration = async (req, res, next) => {
   try {

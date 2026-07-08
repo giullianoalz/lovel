@@ -6,13 +6,13 @@ import { useAuth } from '../../context/AuthContext';
 import './CalendarView.css';
 
 const MOCK_EVENTS = [
-  { id: 1, title: 'Morning POD: Math & Language Arts', subject: 'math', time: '10:00 AM - 12:50 PM', dayOffset: 0, type: 'Morning POD', teacher: 'Prof. David Brown', students: 12, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor'], notes: '1 hr math, 1 hr language arts, 50 min lunch/social.', materials: [] },
+  { id: 1, title: 'Morning COVE: Math & Language Arts', subject: 'math', time: '10:00 AM - 12:50 PM', dayOffset: 0, type: 'Morning COVE', teacher: 'Prof. David Brown', students: 12, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor'], notes: '1 hr math, 1 hr language arts, 50 min lunch/social.', materials: [] },
   { id: 2, title: 'Learn & Play (Ages 5-7)', subject: 'arts', time: '1:00 PM - 2:00 PM', dayOffset: 0, type: 'Elective Class', teacher: 'Prof. Sarah Jenkins', students: 8, studentList: ['Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson'], notes: 'Hands-on elective nurturing natural curiosity.', materials: [] },
   { id: 3, title: 'Minecraft IRL (Ages 8-12)', subject: 'science', time: '1:00 PM - 2:00 PM', dayOffset: 0, type: 'Elective Class', teacher: 'Prof. Mark Wilson', students: 10, studentList: ['Maria Garcia', 'John Doe', 'William Garcia', 'Mason Taylor', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'Lucas Davis'], notes: 'STEAM course without screens.', materials: [] },
-  { id: 4, title: 'Afternoon POD: Financial Literacy', subject: 'math', time: '2:10 PM - 5:00 PM', dayOffset: 0, type: 'Afternoon POD', teacher: 'Prof. Elena Rodriguez', students: 15, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor', 'Mia Anderson', 'Ethan Thomas', 'Charlotte Jackson'], notes: 'Budgeting, saving, investing.', materials: [] },
-  { id: 5, title: 'Morning POD: Math & Science', subject: 'science', time: '10:00 AM - 12:50 PM', dayOffset: 1, type: 'Morning POD', teacher: 'Prof. David Brown', students: 14, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor', 'Mia Anderson', 'Ethan Thomas'], notes: '1 hr math, 1 hr science, 50 min lunch/social.', materials: [] },
+  { id: 4, title: 'Afternoon COVE: Financial Literacy', subject: 'math', time: '2:10 PM - 5:00 PM', dayOffset: 0, type: 'Afternoon COVE', teacher: 'Prof. Elena Rodriguez', students: 15, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor', 'Mia Anderson', 'Ethan Thomas', 'Charlotte Jackson'], notes: 'Budgeting, saving, investing.', materials: [] },
+  { id: 5, title: 'Morning COVE: Math & Science', subject: 'science', time: '10:00 AM - 12:50 PM', dayOffset: 1, type: 'Morning COVE', teacher: 'Prof. David Brown', students: 14, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor', 'Mia Anderson', 'Ethan Thomas'], notes: '1 hr math, 1 hr science, 50 min lunch/social.', materials: [] },
   { id: 6, title: 'Logic & Puzzles (Ages 8+)', subject: 'math', time: '1:00 PM - 2:00 PM', dayOffset: 1, type: 'Elective Class', teacher: 'Prof. Mark Wilson', students: 10, studentList: ['Maria Garcia', 'John Doe', 'William Garcia', 'Mason Taylor', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'Lucas Davis'], notes: 'Strategy games, riddles, team challenges.', materials: [] },
-  { id: 7, title: 'Afternoon POD: LA & Social Studies', subject: 'languages', time: '2:10 PM - 5:00 PM', dayOffset: 1, type: 'Afternoon POD', teacher: 'Prof. Sarah Jenkins', students: 12, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor'], notes: '1 hr LA, 1 hr social studies, 50 min snack/social.', materials: [] },
+  { id: 7, title: 'Afternoon COVE: LA & Social Studies', subject: 'languages', time: '2:10 PM - 5:00 PM', dayOffset: 1, type: 'Afternoon COVE', teacher: 'Prof. Sarah Jenkins', students: 12, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor'], notes: '1 hr LA, 1 hr social studies, 50 min snack/social.', materials: [] },
   { id: 8, title: '1-on-1 Tutoring', subject: 'languages', time: '12:00 PM - 1:00 PM', dayOffset: 0, type: 'Tutoring', teacher: 'Prof. Elena Rodriguez', students: 1, studentList: ['Sofia Ramirez'], notes: 'Private reading session.', materials: [] }
 ];
 
@@ -73,8 +73,8 @@ const AVAILABLE_TUTORS = [
 
 const CATEGORY_GROUPS = [
   {
-    category: 'Learning PODs',
-    options: ['All Morning PODs', 'All Afternoon PODs']
+    category: 'Learning COVEs',
+    options: ['All Morning COVEs', 'All Afternoon COVEs']
   },
   {
     category: 'Other Services',
@@ -84,7 +84,7 @@ const CATEGORY_GROUPS = [
 
 const AVAILABLE_CATEGORIES = [
   'All',
-  'POD',
+  'COVE',
   'In-Person Class',
   'Online Class',
   'Event',
@@ -1654,8 +1654,8 @@ const CalendarView = () => {
                         onChange={e => setEditEventForm(prev => ({ ...prev, type: e.target.value }))}
                         style={{ flex: 1, height: '34px', fontSize: '13px' }}
                       >
-                        <option value="Morning POD">Morning POD</option>
-                        <option value="Afternoon POD">Afternoon POD</option>
+                        <option value="Morning COVE">Morning COVE</option>
+                        <option value="Afternoon COVE">Afternoon COVE</option>
                         <option value="Elective Class">Elective Class</option>
                         <option value="Tutoring">Tutoring</option>
                         <option value="Event">Event</option>
@@ -1878,7 +1878,7 @@ const CalendarView = () => {
                       onChange={e => setNewEventForm({
                         ...newEventForm, 
                         topLevelType: e.target.value,
-                        category: 'POD'
+                        category: 'COVE'
                       })} 
                     /> 
                     Class
@@ -1995,7 +1995,7 @@ const CalendarView = () => {
                     <div className="form-group">
                       <label>Category</label>
                       <select className="form-control" value={newEventForm.category} onChange={e => setNewEventForm({...newEventForm, category: e.target.value})}>
-                        <option value="POD">POD</option>
+                        <option value="COVE">COVE</option>
                         <option value="In-Person Class">In-Person Class</option>
                         <option value="Online Class">Online Class</option>
                         <option value="Event">Event</option>

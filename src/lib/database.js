@@ -90,7 +90,7 @@ let mockTransactions = [
   { id: 'tx_1', studentId: '1', familyId: 'f1', amount: 50.00, type: 'Charge', description: 'In Person Tutoring with Prof. David Brown', date: '2026-04-20', invoiceId: null },
   { id: 'tx_2', studentId: '1', familyId: 'f1', amount: 30.00, type: 'Charge', description: 'Portfolio Evaluation', date: '2026-04-22', invoiceId: null },
   { id: 'tx_3', studentId: '1', familyId: 'f1', amount: -50.00, type: 'Payment', description: 'EMA Disbursement', date: '2026-04-25', invoiceId: null },
-  { id: 'tx_4', studentId: '2', familyId: 'f2', amount: 385.00, type: 'Charge', description: 'Morning POD: Math & Science', date: '2026-04-01', invoiceId: 'INV-100' },
+  { id: 'tx_4', studentId: '2', familyId: 'f2', amount: 385.00, type: 'Charge', description: 'Morning COVE: Math & Science', date: '2026-04-01', invoiceId: 'INV-100' },
   { id: 'tx_5', studentId: '2', familyId: 'f2', amount: 5.00, type: 'Charge', description: 'Snack - Apple Juice', date: '2026-04-15', invoiceId: null }
 ];
 

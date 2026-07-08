@@ -49,7 +49,7 @@ router.post('/requests/:id/resend-email', authenticate, requireRole('ADMIN'), re
 router.post('/admin-register', authenticate, requireRole('ADMIN'), adminRegisterStudent);
 
 // --- PARENT/USER ROUTES ---
-// Consolidated parent registration view (open term, children eligibility, pods)
+// Consolidated parent registration view (open term, children eligibility, coves)
 router.get('/parent', authenticate, getParentRegistration);
 
 // Check window and status for a student

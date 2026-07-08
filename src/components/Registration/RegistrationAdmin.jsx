@@ -8,9 +8,9 @@ const RegistrationAdmin = () => {
   const [terms, setTerms] = useState([]);
   const [selectedTermForRoster, setSelectedTermForRoster] = useState('');
   
-  const [pods, setPods] = useState([]);
+  const [coves, setCoves] = useState([]);
   const [rosterSearchQuery, setRosterSearchQuery] = useState('');
-  const [selectedPod, setSelectedPod] = useState(null);
+  const [selectedCove, setSelectedCove] = useState(null);
   const [rosterDetails, setRosterDetails] = useState({ active: [], holds: [], waitlist: [] });
   
   const [showNewTermModal, setShowNewTermModal] = useState(false);
@@ -24,9 +24,9 @@ const RegistrationAdmin = () => {
     publicStart: '', publicEnd: ''
   });
   
-  const [showPodModal, setShowPodModal] = useState(false);
-  const [editingPod, setEditingPod] = useState(null);
-  const [podForm, setPodForm] = useState({
+  const [showCoveModal, setShowCoveModal] = useState(false);
+  const [editingCove, setEditingCove] = useState(null);
+  const [coveForm, setCoveForm] = useState({
     name: '',
     capacity: 15,
     meetingUrl: ''
@@ -161,15 +161,15 @@ const RegistrationAdmin = () => {
     if (!selectedTermForRoster) return;
     try {
       const res = await api.get(`/registration/classes?termId=${selectedTermForRoster}`);
-      setPods(res.data.classes);
+      setCoves(res.data.classes);
     } catch (err) {
       console.error(err);
     }
   };
 
-  const loadRoster = async (podId) => {
+  const loadRoster = async (coveId) => {
     try {
-      const res = await api.get(`/registration/classes/${podId}/roster`);
+      const res = await api.get(`/registration/classes/${coveId}/roster`);
       setRosterDetails(res.data);
     } catch (err) {
       console.error(err);
@@ -226,10 +226,10 @@ const RegistrationAdmin = () => {
   }, [activeTab, selectedTermForRoster]);
 
   useEffect(() => {
-    if (selectedPod) {
-      loadRoster(selectedPod);
+    if (selectedCove) {
+      loadRoster(selectedCove);
     }
-  }, [selectedPod]);
+  }, [selectedCove]);
 
   const formatDateForInput = (isoString) => {
     if (!isoString) return '';
@@ -310,22 +310,22 @@ const RegistrationAdmin = () => {
 
   const handleRevokeHold = async (studentId) => {
     try {
-      await api.delete(`/registration/holds/${studentId}?classId=${selectedPod}`);
-      loadRoster(selectedPod);
+      await api.delete(`/registration/holds/${studentId}?classId=${selectedCove}`);
+      loadRoster(selectedCove);
       loadClasses();
     } catch (error) {
       console.error(error);
     }
   };
 
-  const handleSweepHolds = (podId) => {
+  const handleSweepHolds = (coveId) => {
     const holdsCount = rosterDetails.holds?.length || 0;
     if (holdsCount === 0) return showAlert('No expired holds to sweep.', 'Notice', 'warning');
     
     showAlert(`Are you sure you want to sweep (revoke) ${holdsCount} holds? This will release their spots.`, 'Sweep Holds', 'confirm', async () => {
       try {
-        await api.post(`/registration/classes/${podId}/holds/sweep`);
-        loadRoster(podId);
+        await api.post(`/registration/classes/${coveId}/holds/sweep`);
+        loadRoster(coveId);
         loadClasses();
       } catch (error) {
         console.error(error);
@@ -333,9 +333,9 @@ const RegistrationAdmin = () => {
     });
   };
 
-  const handleRemindAllHolds = async (podId) => {
+  const handleRemindAllHolds = async (coveId) => {
     try {
-      const res = await api.post(`/registration/classes/${podId}/holds/remind`);
+      const res = await api.post(`/registration/classes/${coveId}/holds/remind`);
       showAlert(res.data.message, 'Reminders Sent', 'info');
     } catch (error) {
       console.error(error);
@@ -343,11 +343,11 @@ const RegistrationAdmin = () => {
   };
 
   const handleForcePromote = async () => {
-    if (!selectedPod) return;
+    if (!selectedCove) return;
     try {
-      const res = await api.post(`/registration/promote/${selectedPod}`);
+      const res = await api.post(`/registration/promote/${selectedCove}`);
       showAlert(res.data.message || 'Promoted successfully.', 'Success', 'info');
-      loadRoster(selectedPod);
+      loadRoster(selectedCove);
       loadClasses();
     } catch (error) {
       showAlert(error.response?.data?.message || 'Error promoting from waitlist', 'Error', 'warning');
@@ -367,14 +367,14 @@ const RegistrationAdmin = () => {
     try {
       if (scheduleMode === 'single') {
         await api.post('/sessions', {
-          classId: selectedPod,
+          classId: selectedCove,
           date: scheduleForm.startDate,
           startTime: scheduleForm.startTime,
           endTime: scheduleForm.endTime,
         });
         showAlert('Session scheduled.', 'Session Scheduled', 'info');
       } else {
-        const res = await api.post('/sessions/bulk', { classId: selectedPod, ...scheduleForm });
+        const res = await api.post('/sessions/bulk', { classId: selectedCove, ...scheduleForm });
         showAlert(res.data.message, 'Sessions Scheduled', 'info');
       }
       setShowScheduleModal(false);
@@ -386,35 +386,35 @@ const RegistrationAdmin = () => {
     }
   };
 
-  const handleOpenPodModal = (pod = null) => {
-    if (pod) {
-      setEditingPod(pod.id);
-      setPodForm({ name: pod.name, capacity: pod.capacity, meetingUrl: pod.meetingUrl || '' });
+  const handleOpenCoveModal = (cove = null) => {
+    if (cove) {
+      setEditingCove(cove.id);
+      setCoveForm({ name: cove.name, capacity: cove.capacity, meetingUrl: cove.meetingUrl || '' });
     } else {
-      setEditingPod(null);
-      setPodForm({ name: '', capacity: 15, meetingUrl: '' });
+      setEditingCove(null);
+      setCoveForm({ name: '', capacity: 15, meetingUrl: '' });
     }
-    setShowPodModal(true);
+    setShowCoveModal(true);
   };
 
-  const handleSavePod = async (e) => {
+  const handleSaveCove = async (e) => {
     e.preventDefault();
     try {
-      if (editingPod) {
-        await api.put(`/classes/${editingPod}`, {
-          name: podForm.name,
-          maxStudents: parseInt(podForm.capacity),
-          meetingUrl: podForm.meetingUrl
+      if (editingCove) {
+        await api.put(`/classes/${editingCove}`, {
+          name: coveForm.name,
+          maxStudents: parseInt(coveForm.capacity),
+          meetingUrl: coveForm.meetingUrl
         });
       } else {
         await api.post(`/classes`, {
-          name: podForm.name,
-          maxStudents: parseInt(podForm.capacity),
-          meetingUrl: podForm.meetingUrl,
+          name: coveForm.name,
+          maxStudents: parseInt(coveForm.capacity),
+          meetingUrl: coveForm.meetingUrl,
           termId: selectedTermForRoster
         });
       }
-      setShowPodModal(false);
+      setShowCoveModal(false);
       loadClasses();
     } catch (error) {
       showAlert(error.response?.data?.message || 'Error saving class', 'Error', 'warning');
@@ -422,12 +422,12 @@ const RegistrationAdmin = () => {
   };
 
   const handleManualAddStudent = async (student) => {
-    if (!selectedPod) return;
+    if (!selectedCove) return;
     try {
-      await api.post(`/classes/${selectedPod}/enrollments`, { studentId: student.id });
+      await api.post(`/classes/${selectedCove}/enrollments`, { studentId: student.id });
       setShowAddStudentModal(false);
       setStudentSearch('');
-      loadRoster(selectedPod);
+      loadRoster(selectedCove);
       loadClasses();
     } catch (error) {
       showAlert(error.response?.data?.message || 'Error adding student', 'Error', 'warning');
@@ -746,7 +746,7 @@ const RegistrationAdmin = () => {
           </div>
         )}
 
-        {activeTab === 'rosters' && !selectedPod && (
+        {activeTab === 'rosters' && !selectedCove && (
           <div className="rosters-view">
             <div className="filters-bar glass-card">
               <select className="form-control" style={{ width: '200px' }} value={selectedTermForRoster} onChange={(e) => setSelectedTermForRoster(e.target.value)}>
@@ -755,7 +755,7 @@ const RegistrationAdmin = () => {
                 ))}
               </select>
               <div style={{ flex: 1 }}></div>
-              <button className="btn-primary" style={{ marginRight: '12px' }} onClick={() => handleOpenPodModal()}>
+              <button className="btn-primary" style={{ marginRight: '12px' }} onClick={() => handleOpenCoveModal()}>
                 <Plus size={14} /> New Class
               </button>
               <input
@@ -772,7 +772,7 @@ const RegistrationAdmin = () => {
               <table className="rosters-table">
                 <thead>
                   <tr>
-                    <th>Class / Pod Day</th>
+                    <th>Class / Cove Day</th>
                     <th>Enrolled</th>
                     <th>Priority Holds</th>
                     <th>Waitlist</th>
@@ -780,40 +780,40 @@ const RegistrationAdmin = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {rosterSearchQuery && pods.length > 0 && pods.filter(pod => pod.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).length === 0 && (
+                  {rosterSearchQuery && coves.length > 0 && coves.filter(cove => cove.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).length === 0 && (
                     <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>No classes match "{rosterSearchQuery}".</td></tr>
                   )}
-                  {pods.filter(pod => pod.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).map(pod => {
-                    const totalOccupied = pod.enrolled + pod.holds;
-                    const isFull = totalOccupied >= pod.capacity;
-                    const canPromoteWaitlist = !isFull && pod.waitlist > 0;
-                    const enrolledPercent = (pod.enrolled / pod.capacity) * 100;
-                    const holdsPercent = (pod.holds / pod.capacity) * 100;
+                  {coves.filter(cove => cove.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).map(cove => {
+                    const totalOccupied = cove.enrolled + cove.holds;
+                    const isFull = totalOccupied >= cove.capacity;
+                    const canPromoteWaitlist = !isFull && cove.waitlist > 0;
+                    const enrolledPercent = (cove.enrolled / cove.capacity) * 100;
+                    const holdsPercent = (cove.holds / cove.capacity) * 100;
 
                     return (
-                      <tr key={pod.id}>
-                        <td className="font-semibold">{pod.name}</td>
+                      <tr key={cove.id}>
+                        <td className="font-semibold">{cove.name}</td>
                         <td>
                           <div className="progress-bar-container">
                             <div className="progress-fill active" style={{ width: `${enrolledPercent}%` }}></div>
                             <div className="progress-fill holds" style={{ width: `${holdsPercent}%` }}></div>
                           </div>
                           <div className="capacity-labels">
-                            <span className="text-sm mt-1 block">{totalOccupied} / {pod.capacity} Reserved</span>
+                            <span className="text-sm mt-1 block">{totalOccupied} / {cove.capacity} Reserved</span>
                             {isFull && <span className="text-xs text-muted block">(At Capacity)</span>}
                           </div>
                         </td>
                         <td>
-                          {pod.holds > 0 ? (
-                            <span className="badge pending">{pod.holds} unclaimed</span>
+                          {cove.holds > 0 ? (
+                            <span className="badge pending">{cove.holds} unclaimed</span>
                           ) : (
                             <span className="text-muted text-sm">0</span>
                           )}
                         </td>
                         <td>
-                          {pod.waitlist > 0 ? (
+                          {cove.waitlist > 0 ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-                              <span className="badge danger">{pod.waitlist} waiting</span>
+                              <span className="badge danger">{cove.waitlist} waiting</span>
                               {canPromoteWaitlist && (
                                 <span className="action-required-alert">Promote Waitlist!</span>
                               )}
@@ -824,14 +824,14 @@ const RegistrationAdmin = () => {
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: '8px' }}>
-                            <button className="btn-text" onClick={() => setSelectedPod(pod.id)}>Manage Class</button>
-                            <button className="icon-btn" style={{ padding: '4px' }} onClick={() => handleOpenPodModal(pod)} title="Edit Class Details"><Settings size={14} /></button>
+                            <button className="btn-text" onClick={() => setSelectedCove(cove.id)}>Manage Class</button>
+                            <button className="icon-btn" style={{ padding: '4px' }} onClick={() => handleOpenCoveModal(cove)} title="Edit Class Details"><Settings size={14} /></button>
                           </div>
                         </td>
                       </tr>
                     );
                   })}
-                  {pods.length === 0 && (
+                  {coves.length === 0 && (
                     <tr>
                       <td colSpan="5" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>No classes found for this term.</td>
                     </tr>
@@ -842,20 +842,20 @@ const RegistrationAdmin = () => {
           </div>
         )}
 
-        {activeTab === 'rosters' && selectedPod && (
+        {activeTab === 'rosters' && selectedCove && (
           <div className="roster-detail-view">
             <div className="detail-header">
-              <button className="btn-text reg-back-btn" onClick={() => setSelectedPod(null)}>← Back to All Rosters</button>
+              <button className="btn-text reg-back-btn" onClick={() => setSelectedCove(null)}>← Back to All Rosters</button>
               <div className="detail-title-row">
                 <div>
-                  <h2>{pods.find(p => p.id === selectedPod)?.name}</h2>
+                  <h2>{coves.find(p => p.id === selectedCove)?.name}</h2>
                   <p className="text-muted">Term: {terms.find(t => t.id === selectedTermForRoster)?.name}</p>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button className="btn-primary" onClick={() => { setScheduleMode('recurring'); setShowScheduleModal(true); }}>
                     <Calendar size={16} /> Schedule Sessions
                   </button>
-                  <button className="btn-outline" onClick={() => handleOpenPodModal(pods.find(p => p.id === selectedPod))}>
+                  <button className="btn-outline" onClick={() => handleOpenCoveModal(coves.find(p => p.id === selectedCove))}>
                     <Settings size={16} /> Class Settings
                   </button>
                 </div>
@@ -889,10 +889,10 @@ const RegistrationAdmin = () => {
                 </div>
                 {(rosterDetails.holds?.length || 0) > 0 && (
                   <div className="reg-roster-actions">
-                    <button className="btn-outline reg-btn-sm" onClick={() => handleRemindAllHolds(selectedPod)}>
+                    <button className="btn-outline reg-btn-sm" onClick={() => handleRemindAllHolds(selectedCove)}>
                       <Mail size={14} /> Remind All
                     </button>
-                    <button className="btn-outline reg-btn-sm reg-btn-danger" onClick={() => handleSweepHolds(selectedPod)}>
+                    <button className="btn-outline reg-btn-sm reg-btn-danger" onClick={() => handleSweepHolds(selectedCove)}>
                       <Trash2 size={14} /> Sweep Expired
                     </button>
                   </div>
@@ -1180,11 +1180,11 @@ const RegistrationAdmin = () => {
 
               {scheduleMode === 'single' ? (
                 <p className="text-muted" style={{ marginTop: 0 }}>
-                  Creates one real session for <strong>{pods.find(p => p.id === selectedPod)?.name}</strong> on a specific date.
+                  Creates one real session for <strong>{coves.find(p => p.id === selectedCove)?.name}</strong> on a specific date.
                 </p>
               ) : (
                 <p className="text-muted" style={{ marginTop: 0 }}>
-                  Creates real sessions for <strong>{pods.find(p => p.id === selectedPod)?.name}</strong> on the chosen weekdays, within the date range. Re-running this for the same dates won't create duplicates.
+                  Creates real sessions for <strong>{coves.find(p => p.id === selectedCove)?.name}</strong> on the chosen weekdays, within the date range. Re-running this for the same dates won't create duplicates.
                 </p>
               )}
 
@@ -1256,26 +1256,26 @@ const RegistrationAdmin = () => {
         </div>
       )}
 
-      {/* New/Edit Pod Modal */}
-      {showPodModal && (
+      {/* New/Edit Cove Modal */}
+      {showCoveModal && (
         <div className="modal-overlay">
           <div className="modal-content glass-card reg-modal-lg">
             <div className="registration-modal-header">
-              <h2>{editingPod ? 'Edit Class Details' : 'Create New Class'}</h2>
-              <button type="button" className="icon-btn" onClick={() => setShowPodModal(false)} aria-label="Close">
+              <h2>{editingCove ? 'Edit Class Details' : 'Create New Class'}</h2>
+              <button type="button" className="icon-btn" onClick={() => setShowCoveModal(false)} aria-label="Close">
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleSavePod} className="reg-form">
+            <form onSubmit={handleSaveCove} className="reg-form">
               <div>
-                <label className="reg-form-label">Class / Pod Name</label>
+                <label className="reg-form-label">Class / Cove Name</label>
                 <input
                   type="text"
                   className="form-control reg-input-full"
                   required
                   placeholder="e.g. Maker Studio Monday"
-                  value={podForm.name}
-                  onChange={(e) => setPodForm({...podForm, name: e.target.value})}
+                  value={coveForm.name}
+                  onChange={(e) => setCoveForm({...coveForm, name: e.target.value})}
                 />
               </div>
 
@@ -1285,8 +1285,8 @@ const RegistrationAdmin = () => {
                   type="number"
                   className="form-control reg-input-full"
                   required
-                  value={podForm.capacity}
-                  onChange={(e) => setPodForm({...podForm, capacity: e.target.value})}
+                  value={coveForm.capacity}
+                  onChange={(e) => setCoveForm({...coveForm, capacity: e.target.value})}
                 />
               </div>
 
@@ -1298,15 +1298,15 @@ const RegistrationAdmin = () => {
                   type="url"
                   className="form-control reg-input-full"
                   placeholder="https://zoom.us/j/..."
-                  value={podForm.meetingUrl}
-                  onChange={(e) => setPodForm({...podForm, meetingUrl: e.target.value})}
+                  value={coveForm.meetingUrl}
+                  onChange={(e) => setCoveForm({...coveForm, meetingUrl: e.target.value})}
                 />
                 <p className="text-xs text-muted" style={{ marginTop: '4px' }}>This link will be visible to students in their dashboard.</p>
               </div>
 
               <div className="reg-form-actions">
-                <button type="button" className="btn-text" onClick={() => setShowPodModal(false)}>Cancel</button>
-                <button type="submit" className="btn-primary">{editingPod ? 'Save Changes' : 'Create Class'}</button>
+                <button type="button" className="btn-text" onClick={() => setShowCoveModal(false)}>Cancel</button>
+                <button type="submit" className="btn-primary">{editingCove ? 'Save Changes' : 'Create Class'}</button>
               </div>
             </form>
           </div>

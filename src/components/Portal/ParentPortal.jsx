@@ -208,7 +208,7 @@ const RegistrationChildCard = ({ child, classes, electives, onClaim, onSubmit, s
         <div className="reg-field">
           <label>First choice</label>
           <select value={first} onChange={e => setFirst(e.target.value)}>
-            <option value="">Choose a pod...</option>
+            <option value="">Choose a cove...</option>
             {classes.map(c => (
               <option key={c.id} value={c.id} disabled={c.available <= 0}>
                 {c.name} — {c.available > 0 ? `${c.available} spots` : 'Full (waitlist)'}

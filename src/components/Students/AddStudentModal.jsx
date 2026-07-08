@@ -10,7 +10,7 @@ const TUTORS = [
   { id: 't5', name: 'Elena Rodriguez' }
 ];
 
-const CATEGORIES = ['Zoom Lesson', 'In Person Tutoring', 'Group POD', 'Test Prep', 'Portfolio Evaluation'];
+const CATEGORIES = ['Zoom Lesson', 'In Person Tutoring', 'Group COVE', 'Test Prep', 'Portfolio Evaluation'];
 
 const GROUP_TAGS = [
   { id: 'gt1', label: 'Fall 2025', color: '#a78bfa' },
