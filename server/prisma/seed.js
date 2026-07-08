@@ -116,7 +116,7 @@ async function main() {
       allergies: 'Peanuts, Shellfish',
       snackAuthorized: true,
       snackPunches: 8,
-      prizePoints: 120,
+      seashells: 120,
     },
   });
 
@@ -132,7 +132,7 @@ async function main() {
       allergies: 'None',
       snackAuthorized: false,
       snackPunches: 0,
-      prizePoints: 45,
+      seashells: 45,
     },
   });
 
@@ -147,7 +147,7 @@ async function main() {
       allergies: 'Lactose Intolerant',
       snackAuthorized: true,
       snackPunches: 2,
-      prizePoints: 0,
+      seashells: 0,
       status: 'INACTIVE',
     },
   });

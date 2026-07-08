@@ -130,7 +130,18 @@ const Sidebar = () => {
           />
         </div>
 
-        
+        {/* Desktop bell — pinned to the top-right corner of the sidebar */}
+        {(role === 'ADMIN' || role === 'TEACHER') && (
+          <div className="sidebar-notif-anchor desk-only">
+            <button ref={bellRef} className="sidebar-bell-btn" onClick={() => setIsNotifOpen(p => !p)} aria-label="Notifications">
+              <Bell size={18} />
+              {notif.unreadCount > 0 && (
+                <span className="sidebar-notif-pill">{notif.unreadCount > 9 ? '9+' : notif.unreadCount}</span>
+              )}
+            </button>
+          </div>
+        )}
+
         <nav className="sidebar-nav">
           <div className="nav-section">
             <p className="nav-label">Main</p>
@@ -236,19 +247,6 @@ const Sidebar = () => {
             </div>
           )}
         </nav>
-
-        {/* Desktop bell */}
-        {(role === 'ADMIN' || role === 'TEACHER') && (
-          <div className="sidebar-notif-anchor desk-only">
-            <button ref={bellRef} className="sidebar-bell-btn" onClick={() => setIsNotifOpen(p => !p)}>
-              <Bell size={18} />
-              <span>Notifications</span>
-              {notif.unreadCount > 0 && (
-                <span className="sidebar-notif-pill">{notif.unreadCount > 9 ? '9+' : notif.unreadCount}</span>
-              )}
-            </button>
-          </div>
-        )}
 
         {role === 'TEACHER' && (
           <div className="quiet-hours-section">

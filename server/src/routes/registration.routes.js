@@ -30,7 +30,7 @@ router.post('/terms', authenticate, requireRole('ADMIN'), createTerm);
 router.put('/terms/:id', authenticate, requireRole('ADMIN'), updateTerm);
 router.post('/terms/:id/seed-priority', authenticate, requireRole('ADMIN'), seedPriorityHolds);
 
-router.get('/classes', authenticate, requireRole('ADMIN'), withCache('registration:classes', 60), getRegistrationClasses);
+router.get('/classes', authenticate, requireRole('ADMIN'), withCache(req => `registration:classes:${req.query.termId || 'all'}`, 60), getRegistrationClasses);
 router.get('/classes/:id/roster', authenticate, requireRole('ADMIN'), getClassRoster);
 
 // Electives for a specific term (used by Manual Registration UI)

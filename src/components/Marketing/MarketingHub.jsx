@@ -179,7 +179,6 @@ const MarketingHub = () => {
     <div className="marketing-container">
       <header className="marketing-header">
         <div>
-          <h1>Marketing Hub</h1>
           <p className="text-muted">Weekly photo uploads, Student & Activity of the Week submissions.</p>
         </div>
       </header>

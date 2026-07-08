@@ -574,7 +574,8 @@
 
 /* ---- Tab Navigation ---- */
 .tp-tabs {
-  display: inline-flex;
+  display: flex;
+  max-width: 100%;
   gap: 8px;
   background: transparent;
   padding: 0;

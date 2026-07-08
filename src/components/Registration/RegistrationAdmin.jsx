@@ -241,8 +241,21 @@ const RegistrationAdmin = () => {
     return new Date(isoString).toLocaleDateString();
   };
 
+  // Windows must run in chronological order: Early opens -> Early ends/Public
+  // opens -> Public opens -> Registration closes. Returns an error string, or
+  // null if the order is valid.
+  const validateWindowOrder = (form) => {
+    const [d1, d2, d3, d4] = [form.earlySameDayStart, form.earlySameDayEnd, form.publicStart, form.publicEnd].map(d => new Date(d));
+    if (d1 >= d2) return 'The Early window must open before it ends.';
+    if (d2 >= d3) return 'The Public window must open after the Early window ends.';
+    if (d3 >= d4) return 'Registration must close after the Public window opens.';
+    return null;
+  };
+
   const handleCreateTerm = async (e) => {
     e.preventDefault();
+    const orderError = validateWindowOrder(newTermForm);
+    if (orderError) return showAlert(orderError, 'Invalid Dates', 'warning');
     try {
       await api.post('/registration/terms', {
         name: newTermForm.name,
@@ -276,6 +289,8 @@ const RegistrationAdmin = () => {
 
   const handleUpdateTerm = async (e) => {
     e.preventDefault();
+    const orderError = validateWindowOrder(editTermForm);
+    if (orderError) return showAlert(orderError, 'Invalid Dates', 'warning');
     try {
       await api.put(`/registration/terms/${editTermForm.id}`, {
         name: editTermForm.name,
@@ -299,7 +314,9 @@ const RegistrationAdmin = () => {
 
   const handleConfirmSeed = async () => {
     try {
-      const res = await api.post(`/registration/terms/${seedModal.targetTermId}/seed-priority`);
+      const res = await api.post(`/registration/terms/${seedModal.targetTermId}/seed-priority`, {
+        sourceTermId: seedModal.sourceTermId || undefined,
+      });
       setSeedModal({ isOpen: false, targetTermId: null, sourceTermId: '' });
       loadTerms();
       showAlert(res.data.message || 'Term Seeded', 'Term Seeded', 'info');
@@ -438,7 +455,6 @@ const RegistrationAdmin = () => {
     <div className="registration-admin">
       <div className="page-header">
         <div>
-          <h1>Registration & Terms</h1>
           <p className="text-muted">Manage academic terms, registration windows, and priority holds.</p>
         </div>
         <button className="btn-primary" onClick={() => setShowNewTermModal(true)}>

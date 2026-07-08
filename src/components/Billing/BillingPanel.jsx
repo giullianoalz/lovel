@@ -319,7 +319,6 @@ const BillingPanel = () => {
       <div className="billing-container">
         <header className="billing-header">
           <div>
-            <h1>Families & Invoices</h1>
             <p>Manage family accounts, process payments, and generate invoices.</p>
           </div>
         </header>

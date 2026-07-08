@@ -131,7 +131,18 @@
   background: rgba(255, 255, 255, 0.5);
   padding: 6px;
   border-radius: 12px;
-  display: inline-flex;
+  /* Constrain to the viewport and scroll horizontally instead of overflowing
+     the page (which pushed the layout wider than the screen on mobile). */
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.admin-tabs::-webkit-scrollbar { display: none; }
+
+.admin-tabs .tab {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .admin-tabs .tab {
@@ -641,6 +652,21 @@
   .detail-title-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .detail-title-row > div:last-child {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* Stack the paired date inputs in term/schedule modals on narrow screens */
+  .reg-date-row {
+    flex-direction: column;
+  }
+
+  .modal-content {
+    padding: 24px 20px;
   }
 }
 

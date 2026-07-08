@@ -180,7 +180,6 @@ const AcademyFeed = () => {
     <div className="feed-container">
       <header className="feed-header">
         <div>
-          <h1><Bell size={24} /> Academy Feed</h1>
           <p>Location changes, staff updates, open houses, and news from the whole team — in one place.</p>
         </div>
         {canPost && !composerOpen && (

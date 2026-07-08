@@ -204,7 +204,7 @@ const SupervisionPanel = () => {
       </div>
       ${sessionsHtml}
       <div style="text-align:center;margin-top:30px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;">
-        Academy Management System — Confidential
+        Love Learning Explorers — Confidential
       </div>
     </body></html>`;
   };

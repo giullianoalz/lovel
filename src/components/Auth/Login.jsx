@@ -143,7 +143,7 @@ const Login = () => {
             alt="Love Learning Explorers Logo"
             className="login-logo"
           />
-          <h2>Academy Management System</h2>
+          <h2>Love Learning Explorers</h2>
           <p>Sign in to your learning portal</p>
         </div>
 

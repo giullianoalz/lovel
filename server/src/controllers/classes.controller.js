@@ -91,7 +91,7 @@ export const getClass = async (req, res, next) => {
  */
 export const createClass = async (req, res, next) => {
   try {
-    const { name, subject, teacherId, type, meetingUrl, maxStudents } = req.body;
+    const { name, subject, teacherId, type, meetingUrl, maxStudents, termId, groupType } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Validation Error', message: 'Class name is required.' });
@@ -105,13 +105,17 @@ export const createClass = async (req, res, next) => {
         type: type || 'IN_PERSON',
         meetingUrl,
         maxStudents: maxStudents ? parseInt(maxStudents) : 10,
+        // Link to a registration term when created from the Registration → Rosters
+        // screen; otherwise it stays null (standalone class).
+        ...(termId && { termId }),
+        ...(groupType && { groupType }),
       },
       include: {
         teacher: { select: { fullName: true } },
       },
     });
 
-    invalidate('classes:*', 'registration:classes');
+    invalidate('classes:*', 'registration:classes:*');
     res.status(201).json({ message: 'Class created successfully.', class: newClass });
   } catch (error) {
     next(error);
@@ -139,7 +143,7 @@ export const updateClass = async (req, res, next) => {
       },
     });
 
-    invalidate('classes:*', 'registration:classes');
+    invalidate('classes:*', 'registration:classes:*');
     res.json({ message: 'Class updated successfully.', class: updatedClass });
   } catch (error) {
     next(error);
@@ -185,7 +189,7 @@ export const enrollStudent = async (req, res, next) => {
     });
 
     // Enrollments affect class counts and portal data
-    invalidate('classes:*', 'registration:classes', 'portal:student:*', 'portal:parent:*');
+    invalidate('classes:*', 'registration:classes:*', 'portal:student:*', 'portal:parent:*');
     res.status(201).json({ message: 'Student enrolled successfully.', enrollment });
   } catch (error) {
     next(error);
@@ -208,7 +212,7 @@ export const unenrollStudent = async (req, res, next) => {
       data: { status: 'inactive' },
     });
 
-    invalidate('classes:*', 'registration:classes', 'portal:student:*', 'portal:parent:*');
+    invalidate('classes:*', 'registration:classes:*', 'portal:student:*', 'portal:parent:*');
     res.json({ message: 'Student unenrolled successfully.', enrollment });
   } catch (error) {
     next(error);

@@ -87,7 +87,6 @@ const StudentsList = () => {
     <div className="students-container">
       <header className="students-header">
         <div>
-          <h1>Directory</h1>
           <p className="text-muted">
             {activeTab === 'students' 
               ? `Total Enrolled: ${students.length}` 

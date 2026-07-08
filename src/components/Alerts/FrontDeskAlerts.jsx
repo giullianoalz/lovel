@@ -158,7 +158,6 @@ const FrontDeskAlerts = () => {
             {alerts.length > 0 && <span className="pulse-dot" />}
           </div>
           <div>
-            <h1>Front Desk Alerts</h1>
             <p className="text-muted">Real-time alerts for student absences, class support, and medical needs.</p>
           </div>
         </div>

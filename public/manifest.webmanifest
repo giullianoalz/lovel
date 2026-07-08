@@ -1,7 +1,7 @@
 {
   "name": "Love Learning Academy",
   "short_name": "Love Learning",
-  "description": "Academy Management System — classes, attendance, billing, and family communication.",
+  "description": "Love Learning Explorers — classes, attendance, billing, and family communication.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

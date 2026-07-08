@@ -158,7 +158,7 @@ export const getDashboard = async (req, res, next) => {
         : [
             {
               id: 'default-1',
-              text: 'Welcome to the Academy Management System!',
+              text: 'Welcome to Love Learning Explorers!',
               date: 'Just now',
               type: 'info',
             },

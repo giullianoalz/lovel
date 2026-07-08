@@ -39,12 +39,28 @@ const notifyWaitlistPromotion = async (studentId, className, classId) => {
 };
 
 /**
+ * Windows must run in chronological order: Early opens -> Early ends/Public
+ * opens -> Public opens -> Registration closes. Returns an error message, or
+ * null if the order is valid.
+ */
+const validateWindowOrder = ({ window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses }) => {
+  const [d1, d2, d3, d4] = [window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses].map(d => new Date(d));
+  if (d1 >= d2) return 'The Early window must open before it ends.';
+  if (d2 >= d3) return 'The Public window must open after the Early window ends.';
+  if (d3 >= d4) return 'Registration must close after the Public window opens.';
+  return null;
+};
+
+/**
  * POST /api/registration/terms
  * Create a new Term and auto-seed Priority Holds for existing students
  */
 export const createTerm = async (req, res, next) => {
   try {
     const { name, startDate, endDate, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses } = req.body;
+
+    const orderError = validateWindowOrder({ window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses });
+    if (orderError) return res.status(400).json({ message: orderError });
 
     // 1. Create the Term
     const term = await prisma.registrationTerm.create({
@@ -77,11 +93,16 @@ export const createTerm = async (req, res, next) => {
 export const seedPriorityHolds = async (req, res, next) => {
   try {
     const termId = req.params.id;
+    const { sourceTermId } = req.body;
     const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
 
-    // Find all active enrollments from classes NOT in this new term (current rosters)
+    // Copy the rosters of the chosen source term (or, if none given, every current
+    // active roster) and match them by class name into the new term.
     const currentEnrollments = await prisma.classEnrollment.findMany({
-      where: { status: 'active' },
+      where: {
+        status: 'active',
+        ...(sourceTermId ? { class: { termId: sourceTermId } } : {}),
+      },
       include: { class: true },
     });
 
@@ -107,7 +128,7 @@ export const seedPriorityHolds = async (req, res, next) => {
       skipDuplicates: true,
     });
 
-    invalidate('registration:terms');
+    invalidate('registration:terms', 'registration:classes:*');
     res.json({ message: `Seeded ${holds.length} priority holds for the new term.`, count: holds.length });
   } catch (error) {
     next(error);
@@ -514,6 +535,7 @@ export const promoteFromWaitlist = async (req, res, next) => {
       await notifyWaitlistPromotion(result.studentId, result.className, classId);
     }
 
+    invalidate('registration:classes:*');
     res.json(result);
   } catch (error) {
     next(error);
@@ -582,6 +604,10 @@ export const updateTerm = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses } = req.body;
+
+    const orderError = validateWindowOrder({ window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses });
+    if (orderError) return res.status(400).json({ message: orderError });
+
     const term = await prisma.registrationTerm.update({
       where: { id },
       data: {
@@ -687,7 +713,8 @@ export const revokeHold = async (req, res, next) => {
     await prisma.priorityHold.deleteMany({
       where: { studentId: id, classId, status: 'pending' }
     });
-    
+
+    invalidate('registration:classes:*');
     res.json({ message: 'Hold revoked' });
   } catch (error) {
     next(error);
@@ -704,6 +731,7 @@ export const sweepHolds = async (req, res, next) => {
     await prisma.priorityHold.deleteMany({
       where: { classId: id, status: 'pending' }
     });
+    invalidate('registration:classes:*');
     res.json({ message: 'All pending holds swept' });
   } catch (error) {
     next(error);
@@ -716,7 +744,31 @@ export const sweepHolds = async (req, res, next) => {
  */
 export const remindHolds = async (req, res, next) => {
   try {
-    res.json({ message: 'Reminders queued' });
+    const { id } = req.params; // classId
+
+    const holds = await prisma.priorityHold.findMany({
+      where: { classId: id, status: 'pending' },
+      include: { class: { select: { name: true } } },
+    });
+
+    if (holds.length === 0) {
+      return res.json({ message: 'No pending holds to remind.' });
+    }
+
+    // One reminder per student per day (dedupKey includes the date) so an admin
+    // can nudge again tomorrow without spamming the same day.
+    const today = new Date().toISOString().slice(0, 10);
+    await Promise.all(holds.map(h => sendNotification({
+      userId: h.studentId,
+      type: 'REGISTRATION_HOLD_REMINDER',
+      title: 'Reserve your guaranteed spot',
+      message: `Your priority spot in ${h.class?.name || 'your class'} is still open. Complete registration before the early window closes to keep it.`,
+      referenceType: 'class',
+      referenceId: id,
+      dedupKey: `hold_reminder_${h.studentId}_${id}_${today}`,
+    })));
+
+    res.json({ message: `Sent ${holds.length} reminder${holds.length === 1 ? '' : 's'}.` });
   } catch (error) {
     next(error);
   }
