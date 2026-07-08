@@ -52,17 +52,32 @@ const isLanDevOrigin = (origin) => {
     || /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin || '');
 };
 
+// Normalise (drop any trailing slash) so a FRONTEND_URL typo like
+// "https://app.vercel.app/" still matches the browser's slash-less Origin header.
+const stripSlash = (u) => (u || '').replace(/\/+$/, '');
+const configuredOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+].filter(Boolean).map(stripSlash);
+
+// Central allow-check: configured origins, any *.vercel.app deployment (so the
+// production alias AND preview URLs both work without re-editing env vars), and
+// LAN/localhost in dev.
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true; // same-origin / server-to-server / curl
+  const o = stripSlash(origin);
+  if (configuredOrigins.includes(o)) return true;
+  if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(o)) return true;
+  if (isLanDevOrigin(origin)) return true;
+  return false;
+};
+
 // Socket.IO setup (will be used for chat & notifications later)
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: (origin, callback) => {
-      const allowed = [process.env.FRONTEND_URL, 'http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'].filter(Boolean);
-      if (!origin || allowed.includes(origin) || isLanDevOrigin(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -83,22 +98,10 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// CORS
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:5175'
-].filter(Boolean);
-
+// CORS — reject by omitting headers (callback(null, false)) rather than throwing,
+// so a blocked origin gets a clean CORS failure instead of a 500.
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin) || isLanDevOrigin(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
   credentials: true,
 }));
 
