@@ -192,7 +192,7 @@ const Login = () => {
           </button>
         </form>
 
-        {import.meta.env.DEV && (
+        {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_TEST_LOGIN === 'true') && (
           <>
             <div className="login-divider">
               <span>OR SIGN IN AS A TEST USER</span>
