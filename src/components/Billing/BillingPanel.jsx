@@ -35,7 +35,8 @@ const BillingPanel = () => {
   const [emaSyncState, setEmaSyncState] = useState({ step: 1, matched: 0, newInvoices: [] });
   const [isReconcileOpen, setIsReconcileOpen] = useState(false);
   const [reconcile, setReconcile] = useState({ step: 1, text: '', lines: [], report: null });
-  const [newTxForm, setNewTxForm] = useState({ type: 'Payment', amount: '', date: new Date().toISOString().split('T')[0], description: '', studentId: '' });
+  const [newTxForm, setNewTxForm] = useState({ type: 'Payment', amount: '', date: new Date().toISOString().split('T')[0], description: '', studentId: '', paymentMethod: '', invoiceId: '' });
+  const [refundModal, setRefundModal] = useState(null); // { invoice, payment, amount, reason }
 
   const loadBilling = async () => {
     setLoading(true);
@@ -62,12 +63,11 @@ const BillingPanel = () => {
 
   const calculateFamilyBalance = (familyId) => {
     const famTxs = transactions.filter(t => t.familyId === familyId);
-    // Charges increase balance owing, Payments/Discounts decrease it
+    // Charges/Refunds increase balance owing, Payments/Discounts/Credits decrease it
     return famTxs.reduce((acc, t) => {
       const type = t.type.toLowerCase();
-      if (type === 'charge') return acc + t.amount;
-      if (type === 'payment' || type === 'discount') return acc - Math.abs(t.amount);
-      if (type === 'refund') return acc + Math.abs(t.amount);
+      if (type === 'charge' || type === 'refund') return acc + Math.abs(t.amount);
+      if (type === 'payment' || type === 'discount' || type === 'credit') return acc - Math.abs(t.amount);
       return acc;
     }, 0);
   };
@@ -85,7 +85,8 @@ const BillingPanel = () => {
         type: newTxForm.type,
         description: newTxForm.description || `Manual ${newTxForm.type}`,
         date: newTxForm.date,
-        invoiceId: null
+        paymentMethod: newTxForm.type === 'Payment' ? (newTxForm.paymentMethod || null) : null,
+        invoiceId: newTxForm.type === 'Payment' ? (newTxForm.invoiceId || null) : null,
       });
 
       // 2. Auto-Generate Invoice if it's a Charge
@@ -99,6 +100,22 @@ const BillingPanel = () => {
     } catch (err) {
       setLoading(false);
       toast.error(err.userMessage || 'Could not save the transaction. Please try again.');
+    }
+  };
+
+  const handleRefund = async () => {
+    if (!refundModal?.payment) return;
+    const amount = parseFloat(refundModal.amount);
+    if (!amount || isNaN(amount) || amount <= 0) return;
+    setLoading(true);
+    try {
+      await database.refundPayment(refundModal.payment.id, { amount, reason: refundModal.reason });
+      toast.success('Refund processed.');
+      setRefundModal(null);
+      await loadBilling();
+    } catch (err) {
+      setLoading(false);
+      toast.error(err.userMessage || 'Could not process the refund. Please try again.');
     }
   };
 
@@ -719,6 +736,7 @@ const BillingPanel = () => {
                     <th>Date Range</th>
                     <th>Invoice Amount</th>
                     <th>Status</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -728,9 +746,23 @@ const BillingPanel = () => {
                       <td>{inv.dateRange}</td>
                       <td style={{fontWeight: 700}}>${inv.amount.toFixed(2)}</td>
                       <td><span className={`status-badge ${inv.status.toLowerCase()}`}>{inv.status}</span></td>
+                      <td>
+                        {inv.payments?.filter(p => p.status !== 'REFUNDED').length > 0 && (
+                          <button
+                            className="action-btn"
+                            style={{ padding: '4px 10px', fontSize: '12px' }}
+                            onClick={() => {
+                              const payment = inv.payments.find(p => p.status !== 'REFUNDED');
+                              setRefundModal({ invoice: inv, payment, amount: payment.amount.toFixed(2), reason: '' });
+                            }}
+                          >
+                            Refund
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
-                  {familyInvoices.length === 0 && <tr><td colSpan="4" className="text-center text-muted">No invoices generated yet.</td></tr>}
+                  {familyInvoices.length === 0 && <tr><td colSpan="5" className="text-center text-muted">No invoices generated yet.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -790,18 +822,105 @@ const BillingPanel = () => {
               </div>
 
               {newTxForm.type === 'Payment' && (
-                <div className="payment-allocation-mock">
-                  <p className="text-muted" style={{fontSize: '13px', marginTop: '16px'}}>
-                    <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
-                    Payments automatically reduce the Account Balance Owing.
-                  </p>
-                </div>
+                <>
+                  <div className="form-group">
+                    <label>Payment Method</label>
+                    <select
+                      className="form-control"
+                      value={newTxForm.paymentMethod}
+                      onChange={(e) => setNewTxForm({ ...newTxForm, paymentMethod: e.target.value })}
+                    >
+                      <option value="">— Not specified —</option>
+                      <option value="ZELLE">Zelle</option>
+                      <option value="VENMO">Venmo</option>
+                      <option value="PAYPAL">PayPal</option>
+                      <option value="CASH">Cash</option>
+                      <option value="CHECK">Check</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Apply to Invoice (optional)</label>
+                    <select
+                      className="form-control"
+                      value={newTxForm.invoiceId}
+                      onChange={(e) => setNewTxForm({ ...newTxForm, invoiceId: e.target.value })}
+                    >
+                      <option value="">— General family balance —</option>
+                      {familyInvoices
+                        .filter(inv => inv.amountPaid < inv.amount)
+                        .map(inv => (
+                          <option key={inv.dbId} value={inv.dbId}>
+                            {inv.id} — ${(inv.amount - inv.amountPaid).toFixed(2)} due
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="payment-allocation-mock">
+                    <p className="text-muted" style={{fontSize: '13px', marginTop: '16px'}}>
+                      <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
+                      Payments automatically reduce the Account Balance Owing. Any amount over what's due becomes credit for the next invoice.
+                    </p>
+                  </div>
+                </>
               )}
             </div>
 
             <div className="modal-actions" style={{marginTop: '24px'}}>
               <button className="btn-cancel" onClick={() => setIsAddTxModalOpen(false)}>Cancel</button>
               <button className="btn-send" onClick={handleAddTransaction}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Refund Modal */}
+      {refundModal && (
+        <div className="modal-overlay" onClick={() => setRefundModal(null)}>
+          <div className="tx-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Refund {refundModal.invoice.id}</h3>
+              <button onClick={() => setRefundModal(null)}><X size={20}/></button>
+            </div>
+            <div className="tx-form">
+              <div className="form-group">
+                <label>Original Payment Method</label>
+                <p style={{ fontWeight: 600 }}>{refundModal.payment.method}</p>
+              </div>
+              <div className="form-group">
+                <label>Refund Amount</label>
+                <input
+                  type="number"
+                  className="form-control"
+                  value={refundModal.amount}
+                  max={refundModal.payment.amount}
+                  onChange={e => setRefundModal({ ...refundModal, amount: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Reason (optional)</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  value={refundModal.reason}
+                  onChange={e => setRefundModal({ ...refundModal, reason: e.target.value })}
+                />
+              </div>
+              {refundModal.payment.method === 'STRIPE_CARD' ? (
+                <p className="text-muted" style={{fontSize: '13px'}}>
+                  <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
+                  This will reverse the charge on Stripe — the card will actually be refunded.
+                </p>
+              ) : (
+                <p className="text-muted" style={{fontSize: '13px'}}>
+                  <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
+                  This only records the refund in the ledger — return the money to the family outside the app first.
+                </p>
+              )}
+            </div>
+            <div className="modal-actions" style={{marginTop: '24px'}}>
+              <button className="btn-cancel" onClick={() => setRefundModal(null)}>Cancel</button>
+              <button className="btn-send" onClick={handleRefund}>Confirm Refund</button>
             </div>
           </div>
         </div>

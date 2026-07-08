@@ -207,10 +207,10 @@ const RegistrationAdmin = () => {
     setResendingId(requestId);
     try {
       await api.post(`/registration/requests/${requestId}/resend-email`);
-      showAlert('Correo reenviado con éxito.', 'Éxito', 'info');
+      showAlert('Email resent successfully.', 'Success', 'info');
       loadBillingSummary();
     } catch (error) {
-      showAlert(error.response?.data?.message || 'Error al reenviar el correo', 'Error', 'warning');
+      showAlert(error.response?.data?.message || 'Error resending the email', 'Error', 'warning');
     } finally {
       setResendingId(null);
     }

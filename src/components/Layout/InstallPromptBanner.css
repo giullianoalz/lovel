@@ -1,0 +1,198 @@
+.install-nav-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  text-align: left;
+}
+
+/* Normal flow (not fixed/sticky) so the banner reserves its own space at the
+   end of the page — it can never render on top of / hide whatever content
+   sits above it, even on short pages (e.g. an empty-state card). */
+.install-banner {
+  margin: 20px auto;
+  z-index: 2500;
+  width: calc(100% - 32px);
+  max-width: 480px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 18px;
+  box-shadow: 0 20px 40px -15px rgba(6, 78, 59, 0.18), 0 0 0 1px rgba(6, 78, 59, 0.03);
+  animation: installBannerSlideUp 0.35s ease-out;
+}
+
+@keyframes installBannerSlideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.install-banner-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+  color: white;
+}
+
+.install-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.install-banner-text strong {
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.install-banner-text span {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.install-banner-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.install-banner-btn {
+  padding: 9px 14px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(21, 128, 61, 0.2);
+  transition: all 0.2s ease;
+}
+
+.install-banner-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(21, 128, 61, 0.3);
+}
+
+.install-banner-dismiss {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  transition: background 0.15s ease;
+}
+
+.install-banner-dismiss:hover {
+  background: rgba(6, 78, 59, 0.08);
+}
+
+@media (max-width: 480px) {
+  .install-banner {
+    flex-wrap: wrap;
+  }
+}
+
+/* iOS "how to install" overlay */
+.install-ios-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  background-color: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.install-ios-card {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  padding: 28px 24px 24px;
+  animation: modalSlideUp 0.3s ease-out forwards;
+}
+
+@keyframes modalSlideUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.install-ios-card h3 {
+  font-size: 17px;
+  color: var(--text-main);
+  margin-bottom: 16px;
+}
+
+.install-ios-card ol {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  margin: 0 0 20px;
+  list-style: none;
+}
+
+.install-ios-card li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text-main);
+  line-height: 1.4;
+}
+
+.install-ios-card li svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.install-ios-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 78, 59, 0.06);
+  border: none;
+  color: var(--text-muted);
+}
+
+.install-ios-done {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+}

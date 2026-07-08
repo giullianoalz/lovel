@@ -436,11 +436,11 @@ export const getParentBilling = async (req, res, next) => {
       }),
     ]);
 
-    // Balance = sum of charges - sum of payments/refunds
+    // Balance = charges + refunds (increase what's owed) - payments/discounts/credits (reduce it)
     const balance = transactions.reduce((acc, t) => {
       const amt = Number(t.amount);
-      if (t.type === 'CHARGE') return acc + amt;
-      if (t.type === 'PAYMENT' || t.type === 'REFUND' || t.type === 'DISCOUNT') return acc - amt;
+      if (t.type === 'CHARGE' || t.type === 'REFUND') return acc + amt;
+      if (t.type === 'PAYMENT' || t.type === 'DISCOUNT' || t.type === 'CREDIT') return acc - amt;
       return acc;
     }, 0);
 

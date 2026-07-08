@@ -3,6 +3,40 @@ import { sleep } from '../utils/helpers.js';
 import { invalidate } from '../middleware/cache.js';
 import { calculateRegistrationBilling } from '../services/registrationPricing.service.js';
 import { sendRegistrationBillingEmail } from '../services/email.service.js';
+import { sendNotification } from '../jobs/notification.helper.js';
+
+/**
+ * Notifies the student and the family's invoice-recipient parent (if any) that a
+ * waitlist spot opened up for them — reuses the same recipient-resolution logic
+ * as the billing confirmation email so both channels reach the same people.
+ */
+const notifyWaitlistPromotion = async (studentId, className, classId) => {
+  try {
+    const [student, familyMember] = await Promise.all([
+      prisma.user.findUnique({ where: { id: studentId }, select: { fullName: true } }),
+      prisma.familyMember.findFirst({
+        where: { userId: studentId },
+        select: { family: { select: { members: { where: { isInvoiceRecipient: true }, select: { userId: true } } } } },
+      }),
+    ]);
+
+    const recipientIds = new Set([studentId]);
+    const parentUserId = familyMember?.family?.members?.[0]?.userId;
+    if (parentUserId) recipientIds.add(parentUserId);
+
+    await Promise.all([...recipientIds].map(userId => sendNotification({
+      userId,
+      type: 'REGISTRATION_PROMOTED',
+      title: 'Spot confirmed!',
+      message: `${student?.fullName || 'Your child'} was promoted from the waitlist and now has a confirmed spot in ${className}.`,
+      referenceType: 'class',
+      referenceId: classId,
+      dedupKey: `registration_promoted_${studentId}_${classId}`,
+    })));
+  } catch (err) {
+    console.error('[Registration] Failed to notify waitlist promotion:', err.message);
+  }
+};
 
 /**
  * POST /api/registration/terms
@@ -133,10 +167,10 @@ export const submitRegistrationRequest = async (req, res, next) => {
     // Window guard: registration must be open, and Window 1 requires a priority hold.
     const now = new Date();
     if (now < term.window1OpensAt) {
-      return res.status(403).json({ message: 'La inscripción aún no ha abierto.' });
+      return res.status(403).json({ message: 'Registration has not opened yet.' });
     }
     if (now > term.registrationCloses) {
-      return res.status(403).json({ message: 'La inscripción ya cerró.' });
+      return res.status(403).json({ message: 'Registration has already closed.' });
     }
     if (now < term.window2OpensAt) {
       // Still in Window 1 — only students with a pending priority hold may register.
@@ -144,14 +178,14 @@ export const submitRegistrationRequest = async (req, res, next) => {
         where: { termId, studentId, status: 'pending' },
       });
       if (!hold) {
-        return res.status(403).json({ message: 'Tu ventana de inscripción aún no ha abierto.' });
+        return res.status(403).json({ message: 'Your registration window has not opened yet.' });
       }
     }
 
     // Prevent duplicate registration requests for the same term.
     const existing = await prisma.registrationRequest.findFirst({ where: { termId, studentId } });
     if (existing) {
-      return res.status(409).json({ message: 'Este estudiante ya tiene una solicitud para este término.' });
+      return res.status(409).json({ message: 'This student already has a request for this term.' });
     }
 
     // 1. Transaction to ensure data integrity during resolution
@@ -278,13 +312,13 @@ export const submitRegistrationRequest = async (req, res, next) => {
       const emailResult = recipientEmail
         ? await sendRegistrationBillingEmail({
             to: recipientEmail,
-            studentName: student?.fullName || 'Estudiante',
+            studentName: student?.fullName || 'Student',
             className: result.className,
             electiveNames: result.electives.map(e => e.name),
             request: requestRow,
             term,
           })
-        : { ok: false, error: 'Sin correo de destinatario' };
+        : { ok: false, error: 'No recipient email' };
 
       await prisma.registrationRequest.update({
         where: { id: result.requestId },
@@ -472,8 +506,13 @@ export const promoteFromWaitlist = async (req, res, next) => {
         // or let the next cron cycle handle it.
       }
 
-      return { message: 'Promotion successful', studentId: nextInLine.studentId };
+      return { message: 'Promotion successful', studentId: nextInLine.studentId, className: classInfo.name };
     });
+
+    // Fire outside the transaction — a failed notification must never roll back the enrollment.
+    if (result.studentId) {
+      await notifyWaitlistPromotion(result.studentId, result.className, classId);
+    }
 
     res.json(result);
   } catch (error) {
@@ -768,9 +807,9 @@ export const resendBillingEmail = async (req, res, next) => {
     });
 
     if (!emailResult.ok) {
-      return res.status(502).json({ message: `No se pudo enviar el correo: ${emailResult.error}` });
+      return res.status(502).json({ message: `Could not send the email: ${emailResult.error}` });
     }
-    res.json({ message: 'Correo reenviado.' });
+    res.json({ message: 'Email resent.' });
   } catch (error) {
     next(error);
   }
@@ -803,7 +842,7 @@ export const adminRegisterStudent = async (req, res, next) => {
     // Prevent duplicate registrations
     const existing = await prisma.registrationRequest.findFirst({ where: { termId, studentId } });
     if (existing) {
-      return res.status(409).json({ message: 'Este estudiante ya tiene una solicitud para este término.' });
+      return res.status(409).json({ message: 'This student already has a request for this term.' });
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -899,7 +938,7 @@ export const adminRegisterStudent = async (req, res, next) => {
       emailResult = recipientEmail
         ? await sendRegistrationBillingEmail({
             to: recipientEmail,
-            studentName: student?.fullName || 'Estudiante',
+            studentName: student?.fullName || 'Student',
             className: result.className,
             electiveNames: result.electives.map(e => e.name),
             request: requestRow,

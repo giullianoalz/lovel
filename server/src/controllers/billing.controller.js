@@ -1,4 +1,8 @@
 import prisma from '../config/database.js';
+import stripe from '../config/stripe.js';
+import { applyAvailableCredit } from '../services/billingCredit.service.js';
+
+const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
 /**
  * GET /api/billing/transactions
@@ -44,21 +48,78 @@ export const listTransactions = async (req, res, next) => {
  */
 export const createTransaction = async (req, res, next) => {
   try {
-    const { familyId, studentId, amount, type, description, date } = req.body;
+    const { familyId, studentId, amount, type, description, date, paymentMethod, invoiceId } = req.body;
 
     if (!familyId || !amount || !type) {
       return res.status(400).json({ error: 'familyId, amount, and type are required.' });
     }
 
-    const tx = await prisma.transaction.create({
-      data: {
-        familyId,
-        studentId: studentId || null,
-        amount: parseFloat(amount),
-        type: type.toUpperCase(),
-        description: description || `Manual ${type}`,
-        date: date ? new Date(date) : new Date(),
-      },
+    const parsedAmount = parseFloat(amount);
+    const upperType = type.toUpperCase();
+    const method = paymentMethod ? paymentMethod.toUpperCase() : null;
+
+    const tx = await prisma.$transaction(async (db) => {
+      // Structured manual payment (Zelle/Venmo/PayPal/Cash/Check/Other) — mirrors
+      // the Payment + Transaction pair created by the EMA remittance reconciler,
+      // so these show up consistently in payment-method reporting.
+      let payment = null;
+      if (upperType === 'PAYMENT' && method && MANUAL_PAYMENT_METHODS.has(method)) {
+        payment = await db.payment.create({
+          data: {
+            familyId,
+            invoiceId: invoiceId || null,
+            amount: parsedAmount,
+            netAmount: parsedAmount,
+            method,
+            status: 'COMPLETED',
+            notes: description || `Manual ${type} (${method})`,
+          },
+        });
+      }
+
+      let created = await db.transaction.create({
+        data: {
+          familyId,
+          studentId: studentId || null,
+          invoiceId: invoiceId || null,
+          paymentId: payment?.id || null,
+          amount: parsedAmount,
+          type: upperType,
+          description: description || `Manual ${type}`,
+          date: date ? new Date(date) : new Date(),
+        },
+      });
+
+      // If applied against a specific invoice, cap at what's actually due and
+      // spill any excess into a CREDIT transaction instead of over-crediting
+      // that one invoice.
+      if (upperType === 'PAYMENT' && invoiceId) {
+        const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
+        if (invoice) {
+          const due = Number(invoice.totalAmount) - Number(invoice.amountPaid);
+          const appliedToInvoice = Math.min(parsedAmount, Math.max(0, due));
+          const newPaid = Number(invoice.amountPaid) + appliedToInvoice;
+          await db.invoice.update({
+            where: { id: invoiceId },
+            data: { amountPaid: newPaid, status: newPaid >= Number(invoice.totalAmount) ? 'PAID' : 'PARTIAL' },
+          });
+
+          const excess = parsedAmount - appliedToInvoice;
+          if (excess > 0) {
+            await db.transaction.create({
+              data: {
+                familyId,
+                studentId: studentId || null,
+                amount: excess,
+                type: 'CREDIT',
+                description: 'Overpayment applied as account credit',
+              },
+            });
+          }
+        }
+      }
+
+      return created;
     });
 
     res.status(201).json({
@@ -91,16 +152,25 @@ export const listInvoices = async (req, res, next) => {
     const invoices = await prisma.invoice.findMany({
       where,
       orderBy: { date: 'desc' },
-      include: { lines: true },
+      include: {
+        lines: true,
+        payments: {
+          where: { status: { in: ['COMPLETED', 'PARTIAL_REFUND'] } },
+          select: { id: true, amount: true, method: true, status: true },
+        },
+      },
     });
 
     const mapped = invoices.map((inv) => ({
       id: inv.invoiceNumber,
+      dbId: inv.id,
       familyId: inv.familyId,
       date: inv.date.toISOString().split('T')[0],
       dateRange: inv.dateRange || 'N/A',
       amount: Number(inv.totalAmount),
+      amountPaid: Number(inv.amountPaid),
       status: inv.status.charAt(0).toUpperCase() + inv.status.slice(1),
+      payments: inv.payments.map(p => ({ id: p.id, amount: Number(p.amount), method: p.method, status: p.status })),
     }));
 
     res.json({ invoices: mapped });
@@ -169,7 +239,10 @@ export const createInvoice = async (req, res, next) => {
         data: { invoiceId: created.id },
       });
 
-      return created;
+      // If the family has credit sitting on the books (e.g. a prior EMA
+      // overpayment), apply it to this new invoice automatically.
+      const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
+      return applied > 0 ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' } : created;
     });
 
     res.status(201).json({
@@ -179,7 +252,7 @@ export const createInvoice = async (req, res, next) => {
         date: invoice.date.toISOString().split('T')[0],
         dateRange: invoice.dateRange,
         amount: Number(invoice.totalAmount),
-        status: 'Sent',
+        status: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).toLowerCase(),
       },
     });
   } catch (error) {
@@ -247,6 +320,12 @@ export const generateEmaBatch = async (req, res, next) => {
           },
         });
 
+        // Apply any existing family credit (e.g. from a prior EMA overpayment)
+        // to this new invoice automatically.
+        if (familyId && total > 0) {
+          await applyAvailableCredit(tx, { familyId, studentId: student?.id || null, invoiceId: invoice.id, invoiceTotal: total });
+        }
+
         out.push({
           ...g,
           invoiceNumber: invoice.invoiceNumber,
@@ -291,9 +370,16 @@ export const reconcileEmaRemittance = async (req, res, next) => {
 
         if (!invoice) { r.unmatched.push(line); continue; }
 
-        const newPaid = Number(invoice.amountPaid) + amount;
+        // Cap what's applied to THIS invoice at its total — a remittance line
+        // that overpays (common with EMA's block payments) shouldn't inflate
+        // amountPaid past totalAmount; the excess becomes family credit instead.
+        const totalAmount = Number(invoice.totalAmount);
+        const appliedToInvoice = Math.min(amount, Math.max(0, totalAmount - Number(invoice.amountPaid)));
+        const excess = amount - appliedToInvoice;
+        const newPaid = Number(invoice.amountPaid) + appliedToInvoice;
         await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid: newPaid } });
 
+        // Payment records the full amount actually received from the remittance.
         await tx.payment.create({
           data: {
             familyId: invoice.familyId,
@@ -308,21 +394,34 @@ export const reconcileEmaRemittance = async (req, res, next) => {
         });
 
         if (invoice.familyId) {
-          await tx.transaction.create({
-            data: {
-              studentId: invoice.studentId || null,
-              familyId: invoice.familyId,
-              amount,
-              type: 'PAYMENT',
-              description: `EMA Step Up — ${line.poNumber || invoice.invoiceNumber}`,
-              invoiceId: invoice.id,
-            },
-          });
+          if (appliedToInvoice > 0) {
+            await tx.transaction.create({
+              data: {
+                studentId: invoice.studentId || null,
+                familyId: invoice.familyId,
+                amount: appliedToInvoice,
+                type: 'PAYMENT',
+                description: `EMA Step Up — ${line.poNumber || invoice.invoiceNumber}`,
+                invoiceId: invoice.id,
+              },
+            });
+          }
+          if (excess > 0) {
+            await tx.transaction.create({
+              data: {
+                studentId: invoice.studentId || null,
+                familyId: invoice.familyId,
+                amount: excess,
+                type: 'CREDIT',
+                description: `EMA Step Up overpayment — ${line.poNumber || invoice.invoiceNumber} (account credit)`,
+              },
+            });
+          }
         }
 
-        r.matched.push({ ...line, invoiceNumber: invoice.invoiceNumber, familyId: invoice.familyId });
+        r.matched.push({ ...line, invoiceNumber: invoice.invoiceNumber, familyId: invoice.familyId, creditApplied: excess });
         r.totalMatched += amount;
-        touched.set(invoice.id, { total: Number(invoice.totalAmount), paid: newPaid, number: invoice.invoiceNumber });
+        touched.set(invoice.id, { total: totalAmount, paid: newPaid, number: invoice.invoiceNumber });
       }
 
       for (const [id, info] of touched) {
@@ -335,6 +434,75 @@ export const reconcileEmaRemittance = async (req, res, next) => {
     });
 
     res.json(report);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/billing/payments/:id/refund
+ * Refunds a payment. If it was a Stripe card payment, actually reverses the
+ * charge via the Stripe API; otherwise (EMA, Zelle, cash, etc.) only records
+ * the ledger entry, since the admin already returned the money outside the app.
+ */
+export const refundPayment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { amount, reason } = req.body;
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id } });
+    const refundAmount = amount ? Number(amount) : Number(payment.amount);
+
+    if (refundAmount <= 0 || refundAmount > Number(payment.amount)) {
+      return res.status(400).json({ error: 'Invalid refund amount.' });
+    }
+
+    if (payment.method === 'STRIPE_CARD') {
+      if (!stripe) return res.status(503).json({ error: 'Stripe is not configured.' });
+      if (!payment.stripePaymentIntentId) {
+        return res.status(400).json({ error: 'This payment has no associated Stripe Payment Intent.' });
+      }
+      await stripe.refunds.create({
+        payment_intent: payment.stripePaymentIntentId,
+        amount: Math.round(refundAmount * 100),
+      });
+    }
+
+    const isFullRefund = refundAmount >= Number(payment.amount);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id },
+        data: { status: isFullRefund ? 'REFUNDED' : 'PARTIAL_REFUND' },
+      });
+
+      if (payment.invoiceId) {
+        const invoice = await tx.invoice.findUnique({ where: { id: payment.invoiceId } });
+        if (invoice) {
+          const newPaid = Math.max(0, Number(invoice.amountPaid) - refundAmount);
+          await tx.invoice.update({
+            where: { id: payment.invoiceId },
+            data: {
+              amountPaid: newPaid,
+              status: newPaid <= 0 ? 'SENT' : (newPaid < Number(invoice.totalAmount) ? 'PARTIAL' : 'PAID'),
+            },
+          });
+        }
+      }
+
+      await tx.transaction.create({
+        data: {
+          familyId: payment.familyId,
+          invoiceId: payment.invoiceId,
+          paymentId: payment.id,
+          amount: refundAmount,
+          type: 'REFUND',
+          description: reason || `Refund — ${payment.method.toLowerCase()}`,
+        },
+      });
+    });
+
+    res.json({ message: 'Refund processed.', refundAmount, stripeReversed: payment.method === 'STRIPE_CARD' });
   } catch (error) {
     next(error);
   }

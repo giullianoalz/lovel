@@ -366,6 +366,12 @@ export const database = {
     return response.data;
   },
 
+  // --- Refunds: reverses the Stripe charge if the payment was by card, otherwise ledger-only ---
+  refundPayment: async (paymentId, { amount, reason } = {}) => {
+    const response = await api.post(`/billing/payments/${paymentId}/refund`, { amount, reason });
+    return response.data;
+  },
+
   // --- Prizes System ---
   awardSeashells: async (studentIds, reason, points) => {
     const ids = Array.isArray(studentIds) ? studentIds : [studentIds];

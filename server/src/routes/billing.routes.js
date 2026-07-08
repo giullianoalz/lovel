@@ -8,6 +8,7 @@ import {
   createInvoice,
   generateEmaBatch,
   reconcileEmaRemittance,
+  refundPayment,
 } from '../controllers/billing.controller.js';
 
 const router = Router();
@@ -29,5 +30,8 @@ router.post('/ema/generate', authenticate, requireRole('ADMIN'), generateEmaBatc
 
 // EMA Step Up — reconcile a lump remittance against invoices (Admin)
 router.post('/ema/reconcile', authenticate, requireRole('ADMIN'), reconcileEmaRemittance);
+
+// POST /api/billing/payments/:id/refund — Refund a payment (Stripe reversal if card, ledger-only otherwise) (Admin)
+router.post('/payments/:id/refund', authenticate, requireRole('ADMIN'), refundPayment);
 
 export default router;

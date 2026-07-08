@@ -20,7 +20,7 @@ const PAYMENT_METHODS = [
     id: 'ema',
     name: 'EMA · Step Up for Students',
     icon: <GraduationCap size={18} />,
-    badge: 'Beca',
+    badge: 'Scholarship',
     accent: '#047857',
     detail: 'Request payment from your Step Up portal using the invoice number (e.g. LC-4391). We approve the charge and payment is processed with your scholarship.',
     copy: null,
@@ -70,8 +70,15 @@ const TABS = [
   { id: 'announcements', label: 'Announcements',    icon: <Bell size={16} /> },
 ];
 
-const fmt = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-const fmtShort = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+// mm/dd/yy — US school, dates are always numeric US format.
+const fmt = (iso) => {
+  const d = new Date(iso);
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
+};
+const fmtShort = (iso) => {
+  const d = new Date(iso);
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+};
 
 /* Human-readable countdown between now and a target date. */
 const countdown = (target, from = new Date()) => {
@@ -325,11 +332,11 @@ const PickupModal = ({ children, onClose, onCreated }) => {
 
 /* ────────── Invoice Row ────────── */
 const STATUS_META = {
-  DRAFT:    { label: 'Borrador',  cls: 'draft'    },
-  SENT:     { label: 'Pendiente', cls: 'sent'     },
-  PAID:     { label: 'Pagado',    cls: 'paid'     },
-  OVERDUE:  { label: 'Vencido',   cls: 'overdue'  },
-  VOID:     { label: 'Anulado',   cls: 'void'     },
+  DRAFT:    { label: 'Draft',    cls: 'draft'    },
+  SENT:     { label: 'Pending',  cls: 'sent'     },
+  PAID:     { label: 'Paid',     cls: 'paid'     },
+  OVERDUE:  { label: 'Overdue',  cls: 'overdue'  },
+  VOID:     { label: 'Voided',   cls: 'void'     },
 };
 
 const InvoiceRow = ({ inv, onPay, paying }) => {
@@ -372,9 +379,9 @@ const InvoiceRow = ({ inv, onPay, paying }) => {
       {open && (
         <div className="pp-invoice-detail">
           <div className="pp-inv-detail-meta">
-            <span>Fecha: {fmt(inv.date)}</span>
-            {inv.dueDate && <span>Vence: {fmt(inv.dueDate)}</span>}
-            {inv.amountPaid > 0 && <span>Pagado: ${inv.amountPaid.toFixed(2)}</span>}
+            <span>Date: {fmt(inv.date)}</span>
+            {inv.dueDate && <span>Due: {fmt(inv.dueDate)}</span>}
+            {inv.amountPaid > 0 && <span>Paid: ${inv.amountPaid.toFixed(2)}</span>}
           </div>
           {inv.lines.length > 0 && (
             <table className="pp-inv-lines">
@@ -730,7 +737,7 @@ const ParentPortal = () => {
                               </div>
                               <div className="pp-pickup-actions">
                                 <span className={`pp-pickup-badge ${isPast ? 'expired' : 'valid'}`}>
-                                  {isPast ? 'Expirado' : 'Activo'}
+                                  {isPast ? 'Expired' : 'Active'}
                                 </span>
                                 {!isPast && (
                                   <button className="pp-revoke-btn" onClick={() => handleDeleteAuth(auth.id)}>
@@ -815,7 +822,7 @@ const ParentPortal = () => {
                 {registration.students.length === 0 ? (
                   <div className="pp-billing-empty">
                     <Users size={32} />
-                    <p>No hay estudiantes vinculados a tu cuenta.</p>
+                    <p>No students linked to your account.</p>
                   </div>
                 ) : (
                   <div className="reg-children-grid">
@@ -853,10 +860,17 @@ const ParentPortal = () => {
                 {/* Balance summary */}
                 <div className={`pp-balance-card ${billing.balance > 0 ? 'owing' : 'clear'}`}>
                   <div className="pp-balance-left">
-                    <span className="pp-balance-label">Account Balance</span>
+                    <span className="pp-balance-label">{billing.balance < 0 ? 'Credit on Account' : 'Account Balance'}</span>
                     <span className="pp-balance-amount">
-                      {billing.balance > 0 ? `$${billing.balance.toFixed(2)}` : 'Paid up ✓'}
+                      {billing.balance > 0
+                        ? `$${billing.balance.toFixed(2)}`
+                        : billing.balance < 0
+                          ? `$${Math.abs(billing.balance).toFixed(2)}`
+                          : 'Paid up ✓'}
                     </span>
+                    {billing.balance < 0 && (
+                      <span className="pp-family-name">Will be applied automatically to your next invoice</span>
+                    )}
                     {billing.familyName && <span className="pp-family-name">{billing.familyName}</span>}
                   </div>
                   {billing.balance > 0 && (
@@ -958,13 +972,13 @@ const ParentPortal = () => {
             {announcements.length === 0 ? (
               <div className="pp-billing-empty">
                 <Bell size={32} />
-                <p>No hay anuncios en este momento.</p>
+                <p>No announcements right now.</p>
               </div>
             ) : (
               <div className="pp-ann-cards">
                 {announcements.map((a, i) => (
                   <div key={i} className="pp-ann-card">
-                    {a.isPinned && <span className="pp-pinned">📌 Fijado</span>}
+                    {a.isPinned && <span className="pp-pinned">📌 Pinned</span>}
                     <h4>{a.title}</h4>
                     <p>{a.body.substring(0, 200)}{a.body.length > 200 ? '…' : ''}</p>
                     <span className="pp-ann-date">

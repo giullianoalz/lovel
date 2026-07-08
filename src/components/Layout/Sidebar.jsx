@@ -28,6 +28,7 @@ import { requestAndSaveFcmToken, listenForForegroundMessages } from '../../lib/f
 import NotifDrawer from '../Notifications/NotifDrawer';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useToast } from './ToastProvider';
+import { InstallNavItem } from './InstallNavItem';
 import './Sidebar.css';
 
 const Sidebar = () => {
@@ -181,6 +182,7 @@ const Sidebar = () => {
                 <span>My Payroll</span>
               </NavLink>
             )}
+            <InstallNavItem onNavigate={closeMenu} />
           </div>
 
           {(role === 'ADMIN' || role === 'TEACHER') && (

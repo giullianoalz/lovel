@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import Sidebar from './components/Layout/Sidebar'
 import Login from './components/Auth/Login'
 import { ToastProvider } from './components/Layout/ToastProvider'
+import { InstallPromptBanner } from './components/Layout/InstallPromptBanner'
 import './index.css'
 
 // Route components are lazy-loaded so each lands in its own chunk — the initial
@@ -232,6 +233,7 @@ function App() {
                       <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
                     </Suspense>
+                    <InstallPromptBanner />
                   </main>
                 </div>
               </ProtectedRoute>
