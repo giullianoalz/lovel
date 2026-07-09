@@ -1062,7 +1062,7 @@ const TeacherPortal = () => {
 
                 <div className="lp-supply-section">
                   <label style={{fontWeight: 600, fontSize: 13}}>Supply List</label>
-                  <p className="text-muted" style={{fontSize: 12, margin: '2px 0 6px'}}>Items added here go straight to the office's shopping list.</p>
+                  <p className="text-muted" style={{fontSize: 12, margin: '2px 0 6px'}}>Submitting notifies the office right away — items move to the shopping list once this plan is approved.</p>
                   <div style={{display: 'flex', gap: 8, marginTop: 6}}>
                     <input type="text" placeholder="Item name" value={lpSupplyInput.itemName} onChange={e => setLpSupplyInput(p => ({...p, itemName: e.target.value}))} style={{flex: 1}} />
                     <input type="number" placeholder="Qty" value={lpSupplyInput.quantity} onChange={e => setLpSupplyInput(p => ({...p, quantity: Number(e.target.value)}))} style={{width: 60}} />

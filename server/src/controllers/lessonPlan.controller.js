@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { sendNotification } from '../jobs/notification.helper.js';
 
 export const createLessonPlan = async (req, res, next) => {
   try {
@@ -35,6 +36,28 @@ export const createLessonPlan = async (req, res, next) => {
         supplyItems: true,
       },
     });
+
+    // Let front-desk/admin know a purchase is needed — the supply list is
+    // useless if nobody finds out until they happen to open this screen.
+    if (lessonPlan.supplyItems.length > 0) {
+      const admins = await prisma.user.findMany({
+        where: { role: 'ADMIN', status: 'ACTIVE' },
+        select: { id: true },
+      });
+      const itemSummary = lessonPlan.supplyItems
+        .map(i => `${i.itemName} (×${i.quantity})`)
+        .join(', ');
+
+      await Promise.all(admins.map(admin => sendNotification({
+        userId: admin.id,
+        type: 'SUPPLY_REQUEST',
+        title: 'New supply request',
+        message: `${lessonPlan.teacher.fullName} requested supplies for ${lessonPlan.class?.name || 'a lesson plan'}: ${itemSummary}.`,
+        referenceType: 'lesson_plan',
+        referenceId: lessonPlan.id,
+        dedupKey: `supply_request_${lessonPlan.id}`,
+      })));
+    }
 
     res.status(201).json({ lessonPlan });
   } catch (error) {
