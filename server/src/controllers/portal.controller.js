@@ -180,7 +180,12 @@ export const getStudentPortal = async (req, res, next) => {
     });
 
     res.json({
-      student,
+      student: {
+        ...student,
+        // Snack cards are an on-site perk — hide the stat entirely for
+        // students with no active in-person/hybrid class.
+        isInPerson: enrollments.some(e => ['IN_PERSON', 'HYBRID'].includes(e.class.type)),
+      },
       enrollments: enrollments.map(e => ({
         classId: e.class.id,
         className: e.class.name,
@@ -330,7 +335,7 @@ export const getParentPortal = async (req, res, next) => {
             },
           },
         },
-      }),
+      }), // class.type is used below to derive isInPerson
       prisma.behaviorLog.groupBy({
         by: ['studentId', 'type'],
         where: {
@@ -390,6 +395,9 @@ export const getParentPortal = async (req, res, next) => {
       return {
         ...user,
         familyName,
+        // Pickup authorization and snack cards only make sense for students who
+        // actually show up on-site — at least one active in-person/hybrid class.
+        isInPerson: studentEnrollments.some(e => ['IN_PERSON', 'HYBRID'].includes(e.class.type)),
         enrollments: studentEnrollments.map(e => ({
           classId: e.class.id,
           className: e.class.name,

@@ -547,6 +547,9 @@ const ParentPortal = () => {
   const { children, announcements } = data;
   const child = children[activeChild] || null;
   const activeAuths = pickupAuths.filter(a => new Date(a.validDate) >= new Date(new Date().setHours(0,0,0,0)));
+  // Pickup + snack cards are an on-site concept — hide them entirely for
+  // families whose children are 100% online.
+  const inPersonChildren = children.filter(c => c.isInPerson);
 
   return (
     <div className="pp-root">
@@ -561,10 +564,12 @@ const ParentPortal = () => {
           </div>
         </div>
         <div className="pp-hero-actions">
-          <button className="pp-hero-btn" onClick={() => setShowPickupModal(true)}>
-            <QrCode size={15} /> Authorize Pickup
-            {activeAuths.length > 0 && <span className="pp-auth-badge">{activeAuths.length}</span>}
-          </button>
+          {inPersonChildren.length > 0 && (
+            <button className="pp-hero-btn" onClick={() => setShowPickupModal(true)}>
+              <QrCode size={15} /> Authorize Pickup
+              {activeAuths.length > 0 && <span className="pp-auth-badge">{activeAuths.length}</span>}
+            </button>
+          )}
           <button className="pp-hero-btn" onClick={() => navigate('/chat')}>
             <MessageSquare size={15} /> Chat with Teachers
           </button>
@@ -632,11 +637,13 @@ const ParentPortal = () => {
                       <span className="pp-cstat-num">{child.seashells || 0}</span>
                       <span className="pp-cstat-lbl">Seashells</span>
                     </div>
-                    <div className="pp-cstat snack">
-                      <span style={{ fontSize: 20 }}>🍪</span>
-                      <span className="pp-cstat-num">{child.snackPunches || 0}</span>
-                      <span className="pp-cstat-lbl">Punches</span>
-                    </div>
+                    {child.isInPerson && (
+                      <div className="pp-cstat snack">
+                        <span style={{ fontSize: 20 }}>🍪</span>
+                        <span className="pp-cstat-num">{child.snackPunches || 0}</span>
+                        <span className="pp-cstat-lbl">Punches</span>
+                      </div>
+                    )}
                     <div className="pp-cstat pos">
                       <ThumbsUp size={20} />
                       <span className="pp-cstat-num">{child.behaviorSummary?.positives || 0}</span>
@@ -715,45 +722,47 @@ const ParentPortal = () => {
                     )}
                   </div>
 
-                  {/* Pickup Authorizations */}
-                  <div className="pp-child-section">
-                    <h3><QrCode size={17} /> Pickup Authorizations</h3>
-                    {pickupAuths.length === 0 ? (
-                      <div className="pp-pickup-empty">
-                        <p className="pp-empty">No authorizations.</p>
-                        <button className="pp-secondary-btn" onClick={() => setShowPickupModal(true)}>
-                          <Plus size={13} /> Authorize
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="pp-pickup-list">
-                        {pickupAuths.slice(0, 5).map(auth => {
-                          const isPast = new Date(auth.validDate) < new Date(new Date().setHours(0,0,0,0));
-                          return (
-                            <div key={auth.id} className={`pp-pickup-item ${isPast ? 'expired' : 'valid'}`}>
-                              <div>
-                                <span className="pp-pickup-person">{auth.pickupPerson}</span>
-                                <span className="pp-pickup-date">{fmt(auth.validDate)}</span>
+                  {/* Pickup Authorizations — only relevant for students who are physically picked up */}
+                  {child.isInPerson && (
+                    <div className="pp-child-section">
+                      <h3><QrCode size={17} /> Pickup Authorizations</h3>
+                      {pickupAuths.length === 0 ? (
+                        <div className="pp-pickup-empty">
+                          <p className="pp-empty">No authorizations.</p>
+                          <button className="pp-secondary-btn" onClick={() => setShowPickupModal(true)}>
+                            <Plus size={13} /> Authorize
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="pp-pickup-list">
+                          {pickupAuths.slice(0, 5).map(auth => {
+                            const isPast = new Date(auth.validDate) < new Date(new Date().setHours(0,0,0,0));
+                            return (
+                              <div key={auth.id} className={`pp-pickup-item ${isPast ? 'expired' : 'valid'}`}>
+                                <div>
+                                  <span className="pp-pickup-person">{auth.pickupPerson}</span>
+                                  <span className="pp-pickup-date">{fmt(auth.validDate)}</span>
+                                </div>
+                                <div className="pp-pickup-actions">
+                                  <span className={`pp-pickup-badge ${isPast ? 'expired' : 'valid'}`}>
+                                    {isPast ? 'Expired' : 'Active'}
+                                  </span>
+                                  {!isPast && (
+                                    <button className="pp-revoke-btn" onClick={() => handleDeleteAuth(auth.id)}>
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                              <div className="pp-pickup-actions">
-                                <span className={`pp-pickup-badge ${isPast ? 'expired' : 'valid'}`}>
-                                  {isPast ? 'Expired' : 'Active'}
-                                </span>
-                                {!isPast && (
-                                  <button className="pp-revoke-btn" onClick={() => handleDeleteAuth(auth.id)}>
-                                    <Trash2 size={13} />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <button className="pp-secondary-btn pp-mt" onClick={() => setShowPickupModal(true)}>
-                          <Plus size={13} /> New Authorization
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                            );
+                          })}
+                          <button className="pp-secondary-btn pp-mt" onClick={() => setShowPickupModal(true)}>
+                            <Plus size={13} /> New Authorization
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
@@ -994,7 +1003,7 @@ const ParentPortal = () => {
 
       {showPickupModal && (
         <PickupModal
-          children={children}
+          children={inPersonChildren}
           onClose={() => setShowPickupModal(false)}
           onCreated={handlePickupCreated}
         />

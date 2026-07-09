@@ -69,11 +69,13 @@ const StudentPortal = () => {
             <span className="sp-stat-num">{student.seashells || 0}</span>
             <span className="sp-stat-lbl">Seashells</span>
           </div>
-          <div className="sp-stat-pill snack">
-            <span style={{ fontSize: 18 }}>🍪</span>
-            <span className="sp-stat-num">{student.snackPunches || 0}</span>
-            <span className="sp-stat-lbl">Punches</span>
-          </div>
+          {student.isInPerson && (
+            <div className="sp-stat-pill snack">
+              <span style={{ fontSize: 18 }}>🍪</span>
+              <span className="sp-stat-num">{student.snackPunches || 0}</span>
+              <span className="sp-stat-lbl">Punches</span>
+            </div>
+          )}
           <div className="sp-stat-pill pos">
             <ThumbsUp size={18} />
             <span className="sp-stat-num">{behaviorSummary.positives}</span>
