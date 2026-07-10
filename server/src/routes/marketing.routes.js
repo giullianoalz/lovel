@@ -9,6 +9,7 @@ import {
   getSubmission,
   updateSubmission,
   uploadPhotos,
+  getPhotoFile,
 } from '../controllers/marketing.controller.js';
 
 // Multer storage config for marketing photo uploads
@@ -59,5 +60,8 @@ router.post(
   upload.array('photos', 20), // Up to 20 photos at once
   uploadPhotos
 );
+
+// GET /api/marketing/photos/:photoId/file — stream a photo (Teacher/Admin)
+router.get('/photos/:photoId/file', authenticate, requireRole('ADMIN', 'TEACHER'), getPhotoFile);
 
 export default router;

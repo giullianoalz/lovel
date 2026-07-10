@@ -3,9 +3,8 @@ import { Camera, Star, Zap, Upload, X, Check, Calendar, Image, ChevronDown, Eye,
 import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
+import ProtectedImage from '../Layout/ProtectedImage';
 import './MarketingHub.css';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 const MarketingHub = () => {
   const { role } = useAuth();
@@ -384,7 +383,7 @@ const MarketingHub = () => {
                       <div className="gallery-photos">
                         {sub.photos.slice(0, 4).map((photo, i) => (
                           <div key={photo.id} className="gallery-photo-thumb">
-                            <img src={`${API_BASE}${photo.fileUrl}`} alt={photo.fileName} />
+                            <ProtectedImage apiPath={`/marketing/photos/${photo.id}/file`} alt={photo.fileName} />
                             {i === 3 && sub.photos.length > 4 && (
                               <div className="more-overlay">+{sub.photos.length - 4}</div>
                             )}

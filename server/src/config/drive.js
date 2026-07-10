@@ -31,6 +31,17 @@ const getDriveAuth = () => {
 const auth = getDriveAuth();
 export const drive = auth ? google.drive({ version: 'v3', auth }) : null;
 
+// Streams a Drive file's bytes back out — used to serve attachments/photos
+// without ever making the Drive file itself publicly shared.
+export const downloadFileFromDrive = async (fileId) => {
+  if (!drive) return null;
+  const response = await drive.files.get(
+    { fileId, alt: 'media' },
+    { responseType: 'stream' }
+  );
+  return response.data; // readable stream
+};
+
 export const uploadFileToDrive = async (filePath, originalName, mimeType, folderId) => {
   if (!drive) {
     console.warn('[Drive Config] Google Drive not configured, skipping upload.');

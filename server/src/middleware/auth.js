@@ -11,8 +11,12 @@ export const authenticate = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      // TEMPORAL: Bypassing auth in development so frontend can test APIs without Firebase
-      if (process.env.NODE_ENV === 'development' || process.env.ENABLE_TEST_LOGIN !== 'false') {
+      // Dev-only bypass so the frontend can test APIs without Firebase. In
+      // production this must be an explicit opt-in (e.g. a staging deploy) —
+      // defaulting to "on" would let anyone log in as any seeded user,
+      // including the admin, just by sending an x-dev-user-email header.
+      const testLoginEnabled = process.env.NODE_ENV !== 'production' || process.env.ENABLE_TEST_LOGIN === 'true';
+      if (testLoginEnabled) {
         const devUserEmail = req.headers['x-dev-user-email'];
         let devUser;
         if (devUserEmail) {

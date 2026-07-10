@@ -1,7 +1,7 @@
 import prisma from '../config/database.js';
 import path from 'path';
 import fs from 'fs';
-import { uploadFileToDrive, drive } from '../config/drive.js';
+import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
 
 // Ensure upload directory exists
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'marketing');
@@ -151,6 +151,43 @@ export const uploadPhotos = async (req, res, next) => {
     );
 
     res.status(201).json({ photos });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/marketing/photos/:photoId/file — stream a photo's bytes.
+// Local disk on Render is wiped on every restart, so Drive (if the photo made
+// it there) is the durable copy; local disk is only a fallback for dev or for
+// the brief window before the Drive upload finishes.
+export const getPhotoFile = async (req, res, next) => {
+  try {
+    const { photoId } = req.params;
+
+    const photo = await prisma.marketingPhoto.findUnique({ where: { id: photoId } });
+    if (!photo) {
+      return res.status(404).json({ error: 'Not Found', message: 'Photo not found.' });
+    }
+
+    if (photo.driveFileId) {
+      try {
+        const stream = await downloadFileFromDrive(photo.driveFileId);
+        if (stream) {
+          res.setHeader('Cache-Control', 'private, max-age=3600');
+          stream.on('error', (err) => next(err));
+          return stream.pipe(res);
+        }
+      } catch (driveErr) {
+        console.error(`[Marketing] Drive download failed for photo ${photoId}, falling back to local disk:`, driveErr.message);
+      }
+    }
+
+    const localPath = path.join(UPLOAD_DIR, path.basename(photo.fileUrl));
+    if (fs.existsSync(localPath)) {
+      return res.sendFile(localPath);
+    }
+
+    res.status(404).json({ error: 'Not Found', message: 'This photo is no longer available.' });
   } catch (error) {
     next(error);
   }

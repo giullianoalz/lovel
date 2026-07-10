@@ -1063,14 +1063,14 @@ const TeacherPortal = () => {
                 <div className="lp-supply-section">
                   <label style={{fontWeight: 600, fontSize: 13}}>Supply List</label>
                   <p className="text-muted" style={{fontSize: 12, margin: '2px 0 6px'}}>Submitting notifies the office right away — items move to the shopping list once this plan is approved.</p>
-                  <div style={{display: 'flex', gap: 8, marginTop: 6}}>
-                    <input type="text" placeholder="Item name" value={lpSupplyInput.itemName} onChange={e => setLpSupplyInput(p => ({...p, itemName: e.target.value}))} style={{flex: 1}} />
-                    <input type="number" placeholder="Qty" value={lpSupplyInput.quantity} onChange={e => setLpSupplyInput(p => ({...p, quantity: Number(e.target.value)}))} style={{width: 60}} />
-                    <select value={lpSupplyInput.dayNeeded} onChange={e => setLpSupplyInput(p => ({...p, dayNeeded: e.target.value}))} style={{width: 120}}>
+                  <div className="lp-supply-input-row">
+                    <input type="text" className="lp-supply-item-input" placeholder="Item name" value={lpSupplyInput.itemName} onChange={e => setLpSupplyInput(p => ({...p, itemName: e.target.value}))} />
+                    <input type="number" min="1" className="lp-supply-qty-input" placeholder="Qty" value={lpSupplyInput.quantity} onChange={e => setLpSupplyInput(p => ({...p, quantity: Number(e.target.value)}))} />
+                    <select className="lp-supply-day-select" value={lpSupplyInput.dayNeeded} onChange={e => setLpSupplyInput(p => ({...p, dayNeeded: e.target.value}))}>
                       <option value="">Day</option>
                       <option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option>
                     </select>
-                    <button type="button" className="tp-submit-btn" style={{margin: 0, padding: '6px 12px', fontSize: 12}} onClick={addSupplyItem}>Add</button>
+                    <button type="button" className="lp-supply-add-btn" onClick={addSupplyItem}>Add</button>
                   </div>
                   {lpForm.supplyItems.length > 0 && (
                     <div className="lp-supply-list">

@@ -1,6 +1,7 @@
 import prisma from '../config/database.js';
 import stripe from '../config/stripe.js';
 import { applyAvailableCredit } from '../services/billingCredit.service.js';
+import { broadcastToManagement } from '../utils/pushNotifications.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -354,7 +355,7 @@ export const reconcileEmaRemittance = async (req, res, next) => {
     }
 
     const report = await prisma.$transaction(async (tx) => {
-      const r = { matched: [], unmatched: [], totalMatched: 0, invoicesPaid: [] };
+      const r = { matched: [], unmatched: [], alreadyReconciled: [], totalMatched: 0, invoicesPaid: [] };
       const touched = new Map();
 
       for (const line of lines) {
@@ -369,6 +370,19 @@ export const reconcileEmaRemittance = async (req, res, next) => {
         });
 
         if (!invoice) { r.unmatched.push(line); continue; }
+
+        // A remittance line already reconciled (e.g. the same CSV/paste
+        // re-submitted by mistake) must not be applied twice — that would
+        // double-pay the invoice and mint duplicate account credit.
+        const alreadyPaid = await tx.payment.findFirst({
+          where: {
+            invoiceId: invoice.id,
+            method: 'SCHOLARSHIP_EMA',
+            externalReference: line.poNumber || invoice.invoiceNumber,
+            amount,
+          },
+        });
+        if (alreadyPaid) { r.alreadyReconciled.push({ ...line, invoiceNumber: invoice.invoiceNumber }); continue; }
 
         // Cap what's applied to THIS invoice at its total — a remittance line
         // that overpays (common with EMA's block payments) shouldn't inflate
@@ -457,52 +471,90 @@ export const refundPayment = async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid refund amount.' });
     }
 
+    // A payment already fully refunded must not be reversed again on Stripe —
+    // without this guard a double-click or a retry after a ledger failure
+    // (see below) would re-issue a second, separate refund on the card.
+    if (payment.status === 'REFUNDED') {
+      return res.status(409).json({ error: 'This payment was already fully refunded.' });
+    }
+
+    let stripeRefundId = null;
     if (payment.method === 'STRIPE_CARD') {
       if (!stripe) return res.status(503).json({ error: 'Stripe is not configured.' });
       if (!payment.stripePaymentIntentId) {
         return res.status(400).json({ error: 'This payment has no associated Stripe Payment Intent.' });
       }
-      await stripe.refunds.create({
-        payment_intent: payment.stripePaymentIntentId,
-        amount: Math.round(refundAmount * 100),
-      });
+      // Deterministic idempotency key: if this same refund is retried (e.g. the
+      // ledger write below fails and an admin retries), Stripe returns the
+      // original refund instead of reversing the card a second time.
+      const stripeRefund = await stripe.refunds.create(
+        {
+          payment_intent: payment.stripePaymentIntentId,
+          amount: Math.round(refundAmount * 100),
+        },
+        { idempotencyKey: `refund-${payment.id}-${Math.round(refundAmount * 100)}` }
+      );
+      stripeRefundId = stripeRefund.id;
     }
 
     const isFullRefund = refundAmount >= Number(payment.amount);
+    const description = reason || `Refund — ${payment.method.toLowerCase()}`;
 
-    await prisma.$transaction(async (tx) => {
-      await tx.payment.update({
-        where: { id },
-        data: { status: isFullRefund ? 'REFUNDED' : 'PARTIAL_REFUND' },
-      });
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.payment.update({
+          where: { id },
+          data: { status: isFullRefund ? 'REFUNDED' : 'PARTIAL_REFUND' },
+        });
 
-      if (payment.invoiceId) {
-        const invoice = await tx.invoice.findUnique({ where: { id: payment.invoiceId } });
-        if (invoice) {
-          const newPaid = Math.max(0, Number(invoice.amountPaid) - refundAmount);
-          await tx.invoice.update({
-            where: { id: payment.invoiceId },
-            data: {
-              amountPaid: newPaid,
-              status: newPaid <= 0 ? 'SENT' : (newPaid < Number(invoice.totalAmount) ? 'PARTIAL' : 'PAID'),
-            },
-          });
+        if (payment.invoiceId) {
+          const invoice = await tx.invoice.findUnique({ where: { id: payment.invoiceId } });
+          if (invoice) {
+            const newPaid = Math.max(0, Number(invoice.amountPaid) - refundAmount);
+            await tx.invoice.update({
+              where: { id: payment.invoiceId },
+              data: {
+                amountPaid: newPaid,
+                status: newPaid <= 0 ? 'SENT' : (newPaid < Number(invoice.totalAmount) ? 'PARTIAL' : 'PAID'),
+              },
+            });
+          }
         }
-      }
 
-      await tx.transaction.create({
-        data: {
-          familyId: payment.familyId,
-          invoiceId: payment.invoiceId,
-          paymentId: payment.id,
-          amount: refundAmount,
-          type: 'REFUND',
-          description: reason || `Refund — ${payment.method.toLowerCase()}`,
-        },
+        await tx.transaction.create({
+          data: {
+            familyId: payment.familyId,
+            invoiceId: payment.invoiceId,
+            paymentId: payment.id,
+            amount: refundAmount,
+            type: 'REFUND',
+            description: stripeRefundId ? `${description} (${stripeRefundId})` : description,
+          },
+        });
       });
-    });
+    } catch (ledgerError) {
+      // The card has already been refunded on Stripe's side at this point —
+      // this must never surface as a generic retryable error, or an admin
+      // retry would hit the idempotency guard above and think nothing happened.
+      if (stripeRefundId) {
+        console.error(
+          `[Refund] Stripe refund ${stripeRefundId} succeeded for payment ${payment.id} but the ledger update failed — needs manual reconciliation.`,
+          ledgerError
+        );
+        await broadcastToManagement(
+          'Refund needs manual reconciliation',
+          `Stripe refund ${stripeRefundId} for payment ${payment.id} (${payment.familyId || 'unknown family'}) succeeded, but recording it in the ledger failed. Check the payment and Stripe dashboard manually.`,
+          { paymentId: payment.id, stripeRefundId }
+        );
+        return res.status(500).json({
+          error: 'Stripe refund succeeded but the ledger update failed. Management has been alerted — do not retry this refund.',
+          stripeRefundId,
+        });
+      }
+      throw ledgerError;
+    }
 
-    res.json({ message: 'Refund processed.', refundAmount, stripeReversed: payment.method === 'STRIPE_CARD' });
+    res.json({ message: 'Refund processed.', refundAmount, stripeReversed: payment.method === 'STRIPE_CARD', stripeRefundId });
   } catch (error) {
     next(error);
   }

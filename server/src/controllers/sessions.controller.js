@@ -388,7 +388,7 @@ export const cancelStudentSession = async (req, res, next) => {
 
     const session = await prisma.session.findUniqueOrThrow({
       where: { id: req.params.id },
-      include: { class: { select: { id: true, name: true, enrollments: { where: { status: 'active' } } } } },
+      include: { class: { select: { id: true, name: true, teacherId: true, enrollments: { where: { status: 'active' } } } } },
     });
 
     // A student can only be cancelled from a given session once — a double
@@ -437,8 +437,23 @@ export const cancelStudentSession = async (req, res, next) => {
 
     // Cancelling the only enrolled student cancels the session itself —
     // for group sessions, the other students keep their spot.
-    if (session.class.enrollments.length <= 1) {
+    const sessionCancelled = session.class.enrollments.length <= 1;
+    if (sessionCancelled) {
       await prisma.session.update({ where: { id: session.id }, data: { status: 'CANCELLED' } });
+    }
+
+    if (session.class.teacherId) {
+      await sendNotification({
+        userId: session.class.teacherId,
+        type: 'SESSION_CANCELLED',
+        title: sessionCancelled ? 'A session was cancelled' : 'A student cancelled their session',
+        message: sessionCancelled
+          ? `${cancellation.student.fullName} was your only student in ${session.class.name} — the session was cancelled.`
+          : `${cancellation.student.fullName} cancelled their spot in ${session.class.name}. The rest of the class still meets as scheduled.`,
+        referenceType: 'session',
+        referenceId: session.id,
+        dedupKey: `session-cancel-${cancellation.id}`,
+      });
     }
 
     if (!autoResolved) {
@@ -508,7 +523,7 @@ export const resolveCancellation = async (req, res, next) => {
 
     const cancellation = await prisma.sessionCancellation.findUniqueOrThrow({
       where: { id: req.params.id },
-      include: { student: { select: { id: true, fullName: true } }, session: { include: { class: { select: { name: true } } } } },
+      include: { student: { select: { id: true, fullName: true } }, session: { include: { class: { select: { name: true, teacherId: true } } } } },
     });
 
     // Idempotency guard: a double-click, two admins on the same queue, or a
@@ -545,6 +560,18 @@ export const resolveCancellation = async (req, res, next) => {
           },
         });
       }
+    }
+
+    if (cancellation.session.class.teacherId) {
+      await sendNotification({
+        userId: cancellation.session.class.teacherId,
+        type: 'CANCELLATION_RESOLVED',
+        title: 'Cancellation charge decided',
+        message: `${cancellation.student.fullName}'s cancellation for ${cancellation.session.class.name} was resolved at ${updated.finalChargePercent}%.`,
+        referenceType: 'session_cancellation',
+        referenceId: cancellation.id,
+        dedupKey: `cancel-resolve-${cancellation.id}`,
+      });
     }
 
     const io = req.app.get('io');

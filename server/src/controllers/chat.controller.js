@@ -1,6 +1,11 @@
+import path from 'path';
+import fs from 'fs';
 import prisma from '../config/database.js';
 import { generateAssistantReply } from '../services/ai.service.js';
 import { findContactInfo } from '../utils/contentFilter.js';
+import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
+
+const CHAT_UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'chat');
 
 const formatAttachment = (msg) => ({
   fileUrl: msg.fileUrl || null,
@@ -146,6 +151,53 @@ export const getMyChildrensTeachers = async (req, res, next) => {
   }
 };
 
+// Returns true if userA and userB are allowed to open a direct chat thread.
+// This is the actual enforcement boundary — the frontend only ever offers
+// "safe" targets (assigned teacher, admins), but the API must not trust that,
+// since a rogue teacher/parent account calling it directly could otherwise
+// message any family in the academy (a real business risk: teachers have
+// contacted families outside their own roster to poach students).
+const canOpenDirectThread = async (userA, userB) => {
+  if (userA === userB) return true;
+
+  const [a, b] = await prisma.user.findMany({
+    where: { id: { in: [userA, userB] } },
+    select: { id: true, role: true },
+  });
+  if (!a || !b) return false;
+
+  // Admins can reach, and be reached by, anyone.
+  if (a.role === 'ADMIN' || b.role === 'ADMIN') return true;
+  // Staff-to-staff direct messages are fine — the poaching risk is staff
+  // reaching families that aren't theirs, not colleagues talking to each other.
+  if (a.role === 'TEACHER' && b.role === 'TEACHER') return true;
+
+  const teacher = a.role === 'TEACHER' ? a : (b.role === 'TEACHER' ? b : null);
+  const other = teacher === a ? b : a;
+
+  if (teacher && (other.role === 'PARENT' || other.role === 'STUDENT')) {
+    const studentIds = other.role === 'STUDENT'
+      ? [other.id]
+      : (await prisma.familyMember.findMany({
+          where: { userId: other.id, family: { members: { some: { user: { role: 'STUDENT' } } } } },
+          select: { family: { select: { members: { select: { userId: true, user: { select: { role: true } } } } } } },
+        })).flatMap((fm) => fm.family.members.filter((m) => m.user.role === 'STUDENT').map((m) => m.userId));
+
+    if (studentIds.length === 0) return false;
+    const enrolled = await prisma.classEnrollment.findFirst({
+      where: { studentId: { in: studentIds }, status: 'active', class: { teacherId: teacher.id } },
+    });
+    return !!enrolled;
+  }
+
+  // PARENT <-> PARENT or PARENT/STUDENT <-> a family that isn't theirs: only
+  // allowed if they're actually in the same family (e.g. two co-parents).
+  const sameFamily = await prisma.familyMember.findFirst({
+    where: { userId: a.id, family: { members: { some: { userId: b.id } } } },
+  });
+  return !!sameFamily;
+};
+
 // POST /api/chat
 export const createThread = async (req, res, next) => {
   try {
@@ -154,6 +206,21 @@ export const createThread = async (req, res, next) => {
 
     // Validate participantIds includes current user
     const allParticipants = Array.from(new Set([userId, ...(participantIds || [])]));
+
+    // This endpoint only creates direct 1:1 threads — group threads must go
+    // through POST /api/chat/group, which builds its own participant list
+    // server-side instead of trusting a client-supplied array.
+    if (!isBot && allParticipants.length !== 2 && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Only admins can start a thread with multiple participants directly.' });
+    }
+
+    if (!isBot && allParticipants.length === 2 && req.user.role !== 'ADMIN') {
+      const [a, b] = allParticipants;
+      const allowed = await canOpenDirectThread(a, b);
+      if (!allowed) {
+        return res.status(403).json({ error: 'You are not allowed to message this person.' });
+      }
+    }
 
     // For direct 1:1 threads, reuse an existing thread between the same two users
     // instead of creating a duplicate every time "Message Teacher" is clicked.
@@ -205,6 +272,14 @@ export const createGroupThread = async (req, res, next) => {
     const userId = req.user.id;
     let participantIds = [];
     let name = '';
+
+    // CLASS groups every parent of that class into one thread (they'd be able
+    // to message each other), and OCEAN_NAVIGATORS is the internal staff
+    // channel — neither is something a parent or student should be able to
+    // spin up. MANAGEMENT stays open to everyone: reaching admins is allowed.
+    if ((groupType === 'CLASS' || groupType === 'OCEAN_NAVIGATORS') && !['TEACHER', 'ADMIN'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Not allowed to create this group thread.' });
+    }
 
     if (groupType === 'CLASS' && classId) {
       const enrollments = await prisma.classEnrollment.findMany({
@@ -535,6 +610,19 @@ export const uploadAttachment = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden', message: 'You have blocked this contact' });
     }
 
+    // Local disk is wiped on every Render restart — Drive is the durable copy.
+    // We still keep the local file as a fallback for the local-dev/no-Drive case.
+    let driveFileId = null;
+    if (drive) {
+      try {
+        const folderId = process.env.DRIVE_CHAT_FOLDER_ID || null;
+        const driveFile = await uploadFileToDrive(req.file.path, req.file.originalname, req.file.mimetype, folderId);
+        driveFileId = driveFile?.id || null;
+      } catch (driveErr) {
+        console.error(`[Chat] Failed to upload attachment ${req.file.originalname} to Drive:`, driveErr.message);
+      }
+    }
+
     const newMessage = await prisma.chatMessage.create({
       data: {
         threadId,
@@ -543,6 +631,7 @@ export const uploadAttachment = async (req, res, next) => {
         fileUrl: `/uploads/chat/${req.file.filename}`,
         fileName: req.file.originalname,
         fileType: req.file.mimetype,
+        driveFileId,
       },
       include: { sender: true }
     });
@@ -563,6 +652,50 @@ export const uploadAttachment = async (req, res, next) => {
     }
 
     res.status(201).json({ message: formattedMessage });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/chat/:threadId/messages/:messageId/file — stream an attachment.
+// Gated on thread participation (the old express.static /uploads/chat route
+// had no such check — anyone with the URL could fetch it).
+export const getAttachmentFile = async (req, res, next) => {
+  try {
+    const { threadId, messageId } = req.params;
+    const userId = req.user.id;
+
+    const participant = await prisma.chatParticipant.findUnique({
+      where: { threadId_userId: { threadId, userId } },
+    });
+    if (!participant) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Not a participant in this thread' });
+    }
+
+    const message = await prisma.chatMessage.findUnique({ where: { id: messageId } });
+    if (!message || message.threadId !== threadId || !message.fileUrl) {
+      return res.status(404).json({ error: 'Not Found', message: 'Attachment not found.' });
+    }
+
+    if (message.driveFileId) {
+      try {
+        const stream = await downloadFileFromDrive(message.driveFileId);
+        if (stream) {
+          res.setHeader('Cache-Control', 'private, max-age=3600');
+          stream.on('error', (err) => next(err));
+          return stream.pipe(res);
+        }
+      } catch (driveErr) {
+        console.error(`[Chat] Drive download failed for message ${messageId}, falling back to local disk:`, driveErr.message);
+      }
+    }
+
+    const localPath = path.join(CHAT_UPLOAD_DIR, path.basename(message.fileUrl));
+    if (fs.existsSync(localPath)) {
+      return res.sendFile(localPath);
+    }
+
+    res.status(404).json({ error: 'Not Found', message: 'This attachment is no longer available.' });
   } catch (error) {
     next(error);
   }

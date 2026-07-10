@@ -8,15 +8,52 @@ export const listUsers = async (req, res, next) => {
   try {
     const { role, status, search, page = 1, limit = 50 } = req.query;
 
-    const where = {};
-    if (role) where.role = role.toUpperCase();
-    if (status) where.status = status.toUpperCase();
+    const andClauses = [];
+    if (role) andClauses.push({ role: role.toUpperCase() });
+    if (status) andClauses.push({ status: status.toUpperCase() });
     if (search) {
-      where.OR = [
-        { fullName: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
+      andClauses.push({
+        OR: [
+          { fullName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      });
     }
+
+    // This endpoint backs the chat "New Conversation" picker. A teacher must
+    // only be able to find staff (to reach management/colleagues) plus the
+    // families of students currently enrolled in their own classes — never
+    // the whole parent/student directory, which would let a teacher find and
+    // privately message a family that isn't theirs.
+    if (req.user.role === 'TEACHER') {
+      const enrollments = await prisma.classEnrollment.findMany({
+        where: { status: 'active', class: { teacherId: req.user.id } },
+        select: { studentId: true },
+      });
+      const studentIds = enrollments.map((e) => e.studentId);
+      const familyIds = studentIds.length
+        ? (
+            await prisma.familyMember.findMany({
+              where: { userId: { in: studentIds } },
+              select: { familyId: true },
+            })
+          ).map((f) => f.familyId)
+        : [];
+      const ownFamilyUserIds = familyIds.length
+        ? (
+            await prisma.familyMember.findMany({
+              where: { familyId: { in: familyIds } },
+              select: { userId: true },
+            })
+          ).map((m) => m.userId)
+        : [];
+
+      andClauses.push({
+        OR: [{ role: { in: ['TEACHER', 'ADMIN'] } }, { id: { in: ownFamilyUserIds } }],
+      });
+    }
+
+    const where = andClauses.length ? { AND: andClauses } : {};
 
     const [users, total] = await Promise.all([
       prisma.user.findMany({

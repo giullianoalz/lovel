@@ -9,6 +9,7 @@ import {
   getMessages,
   sendMessage,
   uploadAttachment,
+  getAttachmentFile,
   blockContact,
   createGroupThread,
   resolveThread,
@@ -56,6 +57,9 @@ router.post('/:threadId/messages', authenticate, sendMessage);
 
 // POST /api/chat/:threadId/attachment — Send a file (image/document)
 router.post('/:threadId/attachment', authenticate, upload.single('file'), uploadAttachment);
+
+// GET /api/chat/:threadId/messages/:messageId/file — Stream an attachment
+router.get('/:threadId/messages/:messageId/file', authenticate, getAttachmentFile);
 
 // POST /api/chat/:threadId/block — Toggle block status for a contact
 router.post('/:threadId/block', authenticate, blockContact);

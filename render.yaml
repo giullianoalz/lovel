@@ -12,8 +12,11 @@ services:
         value: production
       - key: FRONTEND_URL
         sync: false
-      - key: ENABLE_TEST_LOGIN
-        value: "true"
+      # ENABLE_TEST_LOGIN is deliberately NOT set here — it defaults to off in
+      # production. The old value: "true" let anyone log in as any seeded user
+      # (including the admin) with no password via an x-dev-user-email header.
+      # Only set it to "true" in Render's dashboard for a throwaway staging
+      # service, never on the real production API.
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
@@ -43,4 +46,6 @@ services:
       - key: DRIVE_PRIVATE_KEY
         sync: false
       - key: DRIVE_MARKETING_FOLDER_ID
+        sync: false
+      - key: DRIVE_CHAT_FOLDER_ID
         sync: false

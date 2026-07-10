@@ -3,6 +3,7 @@ import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, Arro
 import io from 'socket.io-client';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import ProtectedImage from '../Layout/ProtectedImage';
 import './ChatHub.css';
 
 const configuredApiUrl = import.meta.env.VITE_API_URL;
@@ -275,6 +276,23 @@ const ChatHub = () => {
     }
   };
 
+  // Non-image attachments are downloaded as a blob (not a plain <a href>)
+  // since the file endpoint requires our auth headers, which a bare link click
+  // can't send.
+  const handleDownloadAttachment = async (threadId, msg) => {
+    try {
+      const res = await api.get(`/chat/${threadId}/messages/${msg.id}/file`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = msg.fileName || 'attachment';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) { console.error('Error downloading attachment:', err); }
+  };
+
   const handleResolveThread = async (threadId) => {
     try {
       await api.put(`/chat/${threadId}/resolve`);
@@ -489,21 +507,37 @@ const ChatHub = () => {
               <div className="message-date-divider"><span>Today</span></div>
               
               {(messages[activeChat] || []).map(msg => {
-                const fileSrc = msg.fileUrl && (msg.fileUrl.startsWith('blob:') || msg.fileUrl.startsWith('http') ? msg.fileUrl : MEDIA_BASE + msg.fileUrl);
+                // A message just sent by this tab still shows its local blob:
+                // preview until the server round-trip replaces it with the
+                // real persisted message (fetched through the protected route).
+                const isLocalPreview = msg.fileUrl?.startsWith('blob:');
                 return (
                 <div key={msg.id} className={`message ${msg.type}`}>
                   <div className="msg-bubble">
                     {msg.fileUrl && (
                       msg.fileType?.startsWith('image/') ? (
-                        <a href={fileSrc} target="_blank" rel="noopener noreferrer">
-                          <img className="chat-attachment-image" src={fileSrc} alt={msg.fileName || 'Attachment'} />
-                        </a>
+                        isLocalPreview ? (
+                          <a href={msg.fileUrl} target="_blank" rel="noopener noreferrer">
+                            <img className="chat-attachment-image" src={msg.fileUrl} alt={msg.fileName || 'Attachment'} />
+                          </a>
+                        ) : (
+                          <ProtectedImage
+                            apiPath={`/chat/${activeChat}/messages/${msg.id}/file`}
+                            className="chat-attachment-image"
+                            alt={msg.fileName || 'Attachment'}
+                            onClick={(e) => window.open(e.currentTarget.src, '_blank')}
+                          />
+                        )
                       ) : (
-                        <a className="chat-attachment-file" href={fileSrc} target="_blank" rel="noopener noreferrer">
+                        <button
+                          type="button"
+                          className="chat-attachment-file"
+                          onClick={() => isLocalPreview ? window.open(msg.fileUrl, '_blank') : handleDownloadAttachment(activeChat, msg)}
+                        >
                           <FileText size={18} />
                           <span>{msg.fileName || 'Attachment'}</span>
                           <Download size={14} />
-                        </a>
+                        </button>
                       )
                     )}
                     {msg.text}

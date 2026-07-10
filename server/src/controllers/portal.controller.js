@@ -506,13 +506,23 @@ export const createPaymentSession = async (req, res, next) => {
     const amountDue = Number(invoice.totalAmount) - Number(invoice.amountPaid);
     if (amountDue <= 0) return res.status(400).json({ error: 'Invoice already paid.' });
 
-    // If a Stripe payment link already exists, return it
-    if (invoice.stripePaymentLink) {
-      return res.json({ url: invoice.stripePaymentLink, existing: true });
-    }
-
     if (!stripe) {
       return res.status(503).json({ error: 'Payment gateway not configured. Please contact the academy.' });
+    }
+
+    // A cached link is only safe to reuse if it hasn't expired AND still
+    // reflects the current amount owed — a partial Zelle/cash payment made
+    // after the link was created would otherwise leave the family paying the
+    // stale (higher) amount, or the family hitting an already-expired link.
+    if (invoice.stripePaymentLink && invoice.stripePaymentLinkId) {
+      const existingSession = await stripe.checkout.sessions.retrieve(invoice.stripePaymentLinkId).catch(() => null);
+      const stillValid = existingSession
+        && existingSession.status === 'open'
+        && existingSession.expires_at * 1000 > Date.now()
+        && existingSession.amount_total === Math.round(amountDue * 100);
+      if (stillValid) {
+        return res.json({ url: invoice.stripePaymentLink, existing: true });
+      }
     }
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';

@@ -1,6 +1,33 @@
 import prisma from '../config/database.js';
 import { invalidate } from '../middleware/cache.js';
 
+const MAX_STUDENTS_CAP = 100;
+
+// Shared by createClass/updateClass — returns an error message string, or
+// null if the input is valid. Catches typos (maxStudents=0, a stray letter)
+// and a teacherId that doesn't point to an actual active-ish teacher before
+// they become a class nobody can enroll into or a foreign-key crash.
+const validateClassInput = async ({ maxStudents, teacherId }) => {
+  if (maxStudents !== undefined && maxStudents !== null && maxStudents !== '') {
+    const n = Number(maxStudents);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_STUDENTS_CAP) {
+      return `maxStudents must be a whole number between 1 and ${MAX_STUDENTS_CAP}.`;
+    }
+  }
+
+  if (teacherId) {
+    const teacher = await prisma.user.findUnique({ where: { id: teacherId }, select: { role: true, status: true } });
+    if (!teacher || teacher.role !== 'TEACHER') {
+      return 'teacherId must reference an existing teacher account.';
+    }
+    if (teacher.status === 'SUSPENDED') {
+      return 'This teacher is suspended and cannot be assigned to a class.';
+    }
+  }
+
+  return null;
+};
+
 /**
  * GET /api/classes
  * List all classes, optionally filtered by teacher or status
@@ -97,6 +124,11 @@ export const createClass = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: 'Class name is required.' });
     }
 
+    const validationError = await validateClassInput({ maxStudents, teacherId });
+    if (validationError) {
+      return res.status(400).json({ error: 'Validation Error', message: validationError });
+    }
+
     const newClass = await prisma.class.create({
       data: {
         name,
@@ -129,6 +161,11 @@ export const createClass = async (req, res, next) => {
 export const updateClass = async (req, res, next) => {
   try {
     const { name, subject, teacherId, type, meetingUrl, maxStudents, status } = req.body;
+
+    const validationError = await validateClassInput({ maxStudents, teacherId });
+    if (validationError) {
+      return res.status(400).json({ error: 'Validation Error', message: validationError });
+    }
 
     const updatedClass = await prisma.class.update({
       where: { id: req.params.id },

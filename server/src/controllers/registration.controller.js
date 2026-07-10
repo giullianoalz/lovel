@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import prisma from '../config/database.js';
 import { sleep } from '../utils/helpers.js';
 import { invalidate } from '../middleware/cache.js';
@@ -36,6 +37,22 @@ const notifyWaitlistPromotion = async (studentId, className, classId) => {
   } catch (err) {
     console.error('[Registration] Failed to notify waitlist promotion:', err.message);
   }
+};
+
+/**
+ * Locks one or more Class rows for the rest of the transaction so a capacity
+ * check ("enrollments < maxStudents") followed by an insert can't race with
+ * another concurrent registration for the same class — without this, two
+ * families submitting for the last open spot at the same moment could both
+ * read "there's room" and both get enrolled, overbooking the class. Sorted so
+ * two transactions touching the same pair of classes (e.g. one family's
+ * first/second choice swapped with another's) always lock in the same order
+ * and can't deadlock each other.
+ */
+const lockClassRows = async (tx, classIds) => {
+  const ids = [...new Set(classIds.filter(Boolean))].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw`SELECT id FROM classes WHERE id::text IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
 };
 
 /**
@@ -211,7 +228,10 @@ export const submitRegistrationRequest = async (req, res, next) => {
 
     // 1. Transaction to ensure data integrity during resolution
     const result = await prisma.$transaction(async (tx) => {
-      
+      // Lock both candidate classes before reading their capacity — see
+      // lockClassRows for why this is required to avoid overbooking.
+      await lockClassRows(tx, [firstChoiceClassId, secondChoiceClassId]);
+
       // Get class capacities
       const firstClass = await tx.class.findUnique({
         where: { id: firstChoiceClassId },
@@ -477,6 +497,10 @@ export const promoteFromWaitlist = async (req, res, next) => {
     const { classId } = req.params;
 
     const result = await prisma.$transaction(async (tx) => {
+      // Lock the class row so a concurrent registration or a second promote
+      // click can't both see the same freed-up spot and double-enroll into it.
+      await lockClassRows(tx, [classId]);
+
       const classInfo = await tx.class.findUnique({
         where: { id: classId },
         include: { _count: { select: { enrollments: { where: { status: 'active' } } } } }
@@ -898,6 +922,10 @@ export const adminRegisterStudent = async (req, res, next) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // Lock both candidate classes before reading their capacity — see
+      // lockClassRows for why this is required to avoid overbooking.
+      await lockClassRows(tx, [firstChoiceClassId, secondChoiceClassId]);
+
       const firstClass = await tx.class.findUniqueOrThrow({
         where: { id: firstChoiceClassId },
         include: { _count: { select: { enrollments: { where: { status: 'active' } } } } },

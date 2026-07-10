@@ -575,6 +575,11 @@ const BillingPanel = () => {
                       <strong>{reconcile.report.unmatched.length}</strong> line{reconcile.report.unmatched.length !== 1 ? 's' : ''} could not be matched to an invoice (PO #: {reconcile.report.unmatched.map(u => u.poNumber).join(', ')}). Review these manually.
                     </div>
                   )}
+                  {reconcile.report.alreadyReconciled?.length > 0 && (
+                    <div style={{background: '#dbeafe', color: '#1e40af', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '20px', textAlign: 'left'}}>
+                      <strong>{reconcile.report.alreadyReconciled.length}</strong> line{reconcile.report.alreadyReconciled.length !== 1 ? 's' : ''} skipped — already reconciled in a previous submission (PO #: {reconcile.report.alreadyReconciled.map(u => u.poNumber).join(', ')}).
+                    </div>
+                  )}
                   <div className="modal-actions" style={{justifyContent: 'center'}}>
                     <button className="btn-send" onClick={resetReconcile}>Done</button>
                   </div>

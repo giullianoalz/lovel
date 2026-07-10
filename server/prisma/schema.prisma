@@ -430,10 +430,13 @@ model ChatMessage {
   threadId String     @map("thread_id") @db.Uuid
   senderId String?    @map("sender_id") @db.Uuid
   text     String
-  fileUrl  String?    @map("file_url")
-  fileName String?    @map("file_name")
-  fileType String?    @map("file_type") @db.VarChar(100)
-  sentAt   DateTime   @default(now()) @map("sent_at") @db.Timestamptz(6)
+  fileUrl     String?    @map("file_url")
+  fileName    String?    @map("file_name")
+  fileType    String?    @map("file_type") @db.VarChar(100)
+  // Drive is the durable copy — local disk on Render is wiped on every
+  // restart, so the attachment is served from Drive whenever this is set.
+  driveFileId String?    @map("drive_file_id") @db.VarChar(255)
+  sentAt      DateTime   @default(now()) @map("sent_at") @db.Timestamptz(6)
   sender   User?      @relation(fields: [senderId], references: [id])
   thread   ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 

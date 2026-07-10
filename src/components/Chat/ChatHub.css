@@ -329,6 +329,7 @@
   border-radius: 10px;
   margin-bottom: 6px;
   object-fit: cover;
+  cursor: pointer;
 }
 
 .chat-attachment-file {
@@ -337,12 +338,16 @@
   gap: 8px;
   padding: 8px 10px;
   border-radius: 10px;
+  border: none;
   background: rgba(0, 0, 0, 0.06);
   color: inherit;
   text-decoration: none;
   font-size: 13px;
+  font-family: inherit;
   font-weight: 600;
   margin-bottom: 6px;
+  width: 100%;
+  cursor: pointer;
 }
 
 .chat-attachment-file span {
