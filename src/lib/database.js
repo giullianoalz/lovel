@@ -361,8 +361,8 @@ export const database = {
   // Matches each line to the invoice that covers that PO #, accrues amountPaid,
   // marks invoices PAID once fully covered, and records ledger payments.
   // Real money — no mock fallback if the API call fails.
-  reconcileEmaRemittance: async (lines) => {
-    const response = await api.post('/billing/ema/reconcile', { lines });
+  reconcileEmaRemittance: async (lines, { dryRun = false } = {}) => {
+    const response = await api.post('/billing/ema/reconcile', { lines, dryRun });
     return response.data;
   },
 

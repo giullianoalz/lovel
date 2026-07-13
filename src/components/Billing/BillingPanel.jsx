@@ -35,6 +35,7 @@ const BillingPanel = () => {
   const [emaSyncState, setEmaSyncState] = useState({ step: 1, matched: 0, newInvoices: [] });
   const [isReconcileOpen, setIsReconcileOpen] = useState(false);
   const [reconcile, setReconcile] = useState({ step: 1, text: '', lines: [], report: null });
+  const [isParsingPreview, setIsParsingPreview] = useState(false);
   const [newTxForm, setNewTxForm] = useState({ type: 'Payment', amount: '', date: new Date().toISOString().split('T')[0], description: '', studentId: '', paymentMethod: '', invoiceId: '' });
   const [refundModal, setRefundModal] = useState(null); // { invoice, payment, amount, reason }
 
@@ -140,6 +141,13 @@ const BillingPanel = () => {
   const EMA_COL = { PO_NUM: 0, PURCHASE_DATE: 1, STUDENT_NAME: 3, STUDENT_ID: 4, PROVIDER_ID: 6, START_DATE: 7, END_DATE: 8, AMOUNT: 9, INVOICE_NUM: 10 };
   const PROVIDER_ID = '20000720';
 
+  // Backend returns dates as ISO (yyyy-mm-dd); the Step Up CSV uses MM/DD/YYYY.
+  const isoToUsDate = (iso) => {
+    if (!iso) return null;
+    const [y, m, d] = iso.split('-');
+    return `${m}/${d}/${y}`;
+  };
+
   const handleEmaFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -173,13 +181,13 @@ const BillingPanel = () => {
 
         const key = studentId || studentName.toLowerCase();
         if (!groupMap.has(key)) {
-          groupMap.set(key, { key, studentName, studentId, total: 0, rowIndexes: [], poNumbers: [] });
+          groupMap.set(key, { key, studentName, emaStudentId: studentId, total: 0, rowIndexes: [], poNumbers: [], rows: [] });
         }
         const g = groupMap.get(key);
         g.total += amount;
         g.rowIndexes.push(parsedRows.length);
-        if (poNumber) g.poNumbers.push(poNumber);
-        parsedRows.push({ cols, studentName, studentId, amount, key });
+        if (poNumber) { g.poNumbers.push(poNumber); g.rows.push({ poNumber, amount }); }
+        parsedRows.push({ cols, studentName, studentId, amount, poNumber, key });
       }
 
       const groups = Array.from(groupMap.values());
@@ -194,16 +202,29 @@ const BillingPanel = () => {
         const enriched = await database.processEmaBatch(groups);
         const invoiceByKey = new Map(enriched.map(g => [g.key, g]));
 
-        // Rebuild the CSV with the three columns filled in.
+        // Rebuild the CSV with the columns filled in. START/END DATE come from
+        // the actual dated charge behind that row's amount (see backend) —
+        // never from the batch's purchase date, which is not the session date.
+        let unmatchedDateCount = 0;
         const updatedLines = [lines[0], lines[1]];
         for (const row of parsedRows) {
           if (!row) { updatedLines.push(''); continue; }
           const cols = row.cols;
           if (!row.skip && row.key && invoiceByKey.has(row.key)) {
+            const group = invoiceByKey.get(row.key);
+            const sessionDate = row.poNumber ? isoToUsDate(group.rowDates?.[row.poNumber]) : null;
             cols[EMA_COL.PROVIDER_ID] = PROVIDER_ID;
-            cols[EMA_COL.START_DATE] = cols[EMA_COL.PURCHASE_DATE];
-            cols[EMA_COL.END_DATE] = cols[EMA_COL.PURCHASE_DATE];
-            cols[EMA_COL.INVOICE_NUM] = invoiceByKey.get(row.key).invoiceNumber;
+            if (sessionDate) {
+              cols[EMA_COL.START_DATE] = sessionDate;
+              cols[EMA_COL.END_DATE] = sessionDate;
+            } else {
+              // No matching charge found for this amount — leave blank rather
+              // than fabricate a date; the admin must verify and fill it by hand.
+              cols[EMA_COL.START_DATE] = '';
+              cols[EMA_COL.END_DATE] = '';
+              unmatchedDateCount++;
+            }
+            cols[EMA_COL.INVOICE_NUM] = group.invoiceNumber;
           }
           updatedLines.push(cols.join(','));
         }
@@ -211,11 +232,16 @@ const BillingPanel = () => {
         const blob = new Blob([updatedLines.join('\n')], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
 
+        if (unmatchedDateCount > 0) {
+          toast.error(`${unmatchedDateCount} row${unmatchedDateCount !== 1 ? 's' : ''} had no matching charge in the system — their dates were left blank. Fill them in manually before submitting.`);
+        }
+
         setEmaSyncState({
           step: 3,
           matched: enriched.length,
           rowCount: parsedRows.filter(r => r && !r.skip).length,
           groups: enriched,
+          unmatchedDateCount,
           downloadUrl: url,
         });
         await loadBilling();
@@ -261,22 +287,31 @@ const BillingPanel = () => {
     return out;
   };
 
-  const handleParseRemittance = (text) => {
+  const handleParseRemittance = async (text) => {
     const lines = parseRemittance(text);
     if (lines.length === 0) {
       toast.error('No rows found with "PO # + amount". Paste the Step Up remittance lines (e.g. "25670936-1   6/5/2026   Liam Killian   250.00").');
       return;
     }
-    // Annotate each line with the invoice it would match (preview only).
-    const annotated = lines.map(l => {
-      const inv = invoices.find(i =>
-        (i.poNumbers || []).includes(l.poNumber) ||
-        i.id === l.poNumber ||
-        (l.studentName && i.status !== 'Paid' && i.studentName?.toLowerCase().trim() === l.studentName.toLowerCase().trim())
-      );
-      return { ...l, invoiceNumber: inv?.id || null, matched: !!inv };
-    });
-    setReconcile({ step: 2, text, lines: annotated, report: null });
+    // Preview via the same PO#-matching the backend will actually use on
+    // confirm (dryRun: true, no writes) — a client-side guess here previously
+    // always showed "no match" because the loaded invoice list doesn't carry
+    // poNumbers/studentName, which silently diverged from what confirm did.
+    const linesWithIndex = lines.map((l, i) => ({ ...l, _idx: i }));
+    setIsParsingPreview(true);
+    try {
+      const preview = await database.reconcileEmaRemittance(linesWithIndex, { dryRun: true });
+      const statusByIdx = new Map();
+      preview.matched.forEach(l => statusByIdx.set(l._idx, { matched: true, alreadyReconciled: false, invoiceNumber: l.invoiceNumber }));
+      preview.alreadyReconciled.forEach(l => statusByIdx.set(l._idx, { matched: false, alreadyReconciled: true, invoiceNumber: l.invoiceNumber }));
+      preview.unmatched.forEach(l => statusByIdx.set(l._idx, { matched: false, alreadyReconciled: false, invoiceNumber: null }));
+      const annotated = linesWithIndex.map(l => ({ ...l, ...statusByIdx.get(l._idx) }));
+      setReconcile({ step: 2, text, lines: annotated, report: null });
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not preview this remittance. Please try again.');
+    } finally {
+      setIsParsingPreview(false);
+    }
   };
 
   const handleRemittanceFileUpload = (e) => {
@@ -459,13 +494,27 @@ const BillingPanel = () => {
                             )}
                           </td>
                           <td style={{fontWeight: 600, color: 'var(--primary)'}}>{g.invoiceNumber}</td>
-                          <td style={{textAlign: 'center'}}>{g.rowIndexes.length}</td>
+                          <td style={{textAlign: 'center'}}>
+                            {g.rowIndexes.length}
+                            {g.unmatchedRowCount > 0 && (
+                              <span title="No matching charge found in the system for this amount — date left blank" style={{marginLeft: '6px', fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>
+                                {g.unmatchedRowCount} no date
+                              </span>
+                            )}
+                          </td>
                           <td style={{textAlign: 'right', fontWeight: 700}}>${g.total.toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+
+                {emaSyncState.unmatchedDateCount > 0 && (
+                  <div style={{background: '#fef3c7', color: '#92400e', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center', textAlign: 'left'}}>
+                    <AlertCircle size={16} style={{flexShrink: 0}} />
+                    <span><strong>{emaSyncState.unmatchedDateCount}</strong> row{emaSyncState.unmatchedDateCount !== 1 ? 's' : ''} had no matching charge in the system for that amount — their Start/End Date {emaSyncState.unmatchedDateCount !== 1 ? 'were' : 'was'} left blank. Fill {emaSyncState.unmatchedDateCount !== 1 ? 'them' : 'it'} in manually before submitting.</span>
+                  </div>
+                )}
 
                 <div style={{background: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '20px', display: 'flex', gap: '8px', alignItems: 'center', textAlign: 'left'}}>
                   <Check size={16} style={{flexShrink: 0}} />
@@ -515,8 +564,8 @@ const BillingPanel = () => {
                       <FileText size={16} /> Upload CSV
                       <input type="file" accept=".csv,.txt" style={{display: 'none'}} onChange={handleRemittanceFileUpload} />
                     </label>
-                    <button className="btn-send" onClick={() => handleParseRemittance(reconcile.text)} disabled={!reconcile.text.trim()}>
-                      Parse & Preview
+                    <button className="btn-send" onClick={() => handleParseRemittance(reconcile.text)} disabled={!reconcile.text.trim() || isParsingPreview}>
+                      {isParsingPreview ? 'Matching…' : 'Parse & Preview'}
                     </button>
                   </div>
                 </div>
@@ -543,9 +592,9 @@ const BillingPanel = () => {
                             <td style={{fontFamily: 'monospace', fontSize: '12px'}}>{l.poNumber}</td>
                             <td>{l.studentName || '—'}</td>
                             <td>
-                              {l.matched
-                                ? <span style={{fontWeight: 600, color: 'var(--primary)'}}>{l.invoiceNumber}</span>
-                                : <span title="No invoice covers this PO #" style={{fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>no match</span>}
+                              {l.matched && <span style={{fontWeight: 600, color: 'var(--primary)'}}>{l.invoiceNumber}</span>}
+                              {l.alreadyReconciled && <span title="Already applied in a previous reconciliation — will be skipped" style={{fontSize: '11px', color: '#1e40af', background: '#dbeafe', padding: '1px 6px', borderRadius: '6px'}}>already reconciled</span>}
+                              {!l.matched && !l.alreadyReconciled && <span title="No invoice covers this PO #" style={{fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>no match</span>}
                             </td>
                             <td style={{textAlign: 'right', fontWeight: 700}}>${l.amount.toFixed(2)}</td>
                           </tr>

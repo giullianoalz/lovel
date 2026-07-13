@@ -278,8 +278,11 @@ const nextLcNumber = async (tx) => {
 };
 
 // POST /api/billing/ema/generate
-// Body: { groups: [{ studentName, studentId, total, poNumbers: [], lines: [{description, amount}] }] }
-// Assigns one sequential LC-#### invoice per student group and records invoices.
+// Body: { groups: [{ studentName, emaStudentId, total, poNumbers: [], rows: [{poNumber, amount}] }] }
+// Assigns one sequential LC-#### invoice per student group, records invoices,
+// and — for each row — finds the actual dated charge (Transaction) behind
+// that amount so the CSV's START/END DATE can reflect the real session date
+// instead of the batch's purchase date.
 export const generateEmaBatch = async (req, res, next) => {
   try {
     const { groups } = req.body;
@@ -294,44 +297,100 @@ export const generateEmaBatch = async (req, res, next) => {
       for (const g of groups) {
         const invoiceNumber = `LC-${nextNum++}`;
 
-        // Match student by name to attach the family.
-        const student = g.studentName
+        // Step Up's own student ID is stable across submissions — once we've
+        // seen it for a student, it's a far more reliable match than a name
+        // string (typos, "Jr."/"III" suffixes, married-name changes, etc.).
+        const student = g.emaStudentId
           ? await tx.user.findFirst({
-              where: { role: 'STUDENT', fullName: { equals: g.studentName, mode: 'insensitive' } },
-              select: { id: true, familyMembers: { select: { familyId: true }, take: 1 } },
+              where: { role: 'STUDENT', emaStudentId: g.emaStudentId },
+              select: { id: true, emaStudentId: true, familyMembers: { select: { familyId: true }, take: 1 } },
             })
           : null;
-        const familyId = student?.familyMembers?.[0]?.familyId || null;
+
+        const matchedStudent = student || (g.studentName
+          ? await tx.user.findFirst({
+              where: { role: 'STUDENT', fullName: { equals: g.studentName, mode: 'insensitive' } },
+              select: { id: true, emaStudentId: true, familyMembers: { select: { familyId: true }, take: 1 } },
+            })
+          : null);
+
+        // Learn the Step Up ID for next time if we only matched by name.
+        if (matchedStudent && g.emaStudentId && !matchedStudent.emaStudentId) {
+          await tx.user.update({ where: { id: matchedStudent.id }, data: { emaStudentId: g.emaStudentId } }).catch(() => {
+            // A different student already claimed this emaStudentId (data mix-up) — don't crash the whole batch over it.
+          });
+        }
+
+        const familyId = matchedStudent?.familyMembers?.[0]?.familyId || null;
         const total = Number(g.total) || 0;
+
+        // For each row (one Step Up PO# = one session/charge), find the actual
+        // dated charge behind that amount so we can report its real date
+        // instead of guessing. Oldest unconsumed match first (FIFO); once
+        // used, link it to this invoice so a future batch can't reuse it.
+        const rowDates = {};
+        const lineDescriptions = [];
+        // Tracks charges already claimed by an earlier row in this same
+        // student's group — without this, two same-amount sessions (very
+        // common: a student's weekly rate rarely changes) would both match
+        // the first row's charge and get assigned the same date.
+        const usedChargeIds = new Set();
+        if (matchedStudent) {
+          for (const row of g.rows || []) {
+            const amount = Number(row.amount) || 0;
+            const charge = await tx.transaction.findFirst({
+              where: { studentId: matchedStudent.id, type: 'CHARGE', amount, invoiceId: null, id: { notIn: [...usedChargeIds] } },
+              orderBy: { date: 'asc' },
+            });
+            if (charge) {
+              usedChargeIds.add(charge.id);
+              rowDates[row.poNumber] = charge.date.toISOString().split('T')[0];
+              lineDescriptions.push({ description: charge.description || 'EMA session', amount, chargeId: charge.id });
+            } else {
+              rowDates[row.poNumber] = null; // no matching charge — admin must fill this date manually, never guess
+              lineDescriptions.push({ description: 'EMA session (unmatched — verify date manually)', amount, chargeId: null });
+            }
+          }
+        }
 
         const invoice = await tx.invoice.create({
           data: {
             invoiceNumber,
             familyId,
-            studentId: student?.id || null,
+            studentId: matchedStudent?.id || null,
             source: 'EMA',
             poNumbers: g.poNumbers || [],
             subtotal: total,
             totalAmount: total,
             status: 'SENT',
             dateRange: 'EMA Step Up Batch',
-            lines: (g.lines && g.lines.length > 0)
-              ? { create: g.lines.map(l => ({ description: l.description || 'EMA session', amount: Number(l.amount) || 0 })) }
+            lines: lineDescriptions.length > 0
+              ? { create: lineDescriptions.map(l => ({ description: l.description, amount: l.amount })) }
               : undefined,
           },
         });
 
+        // Now that the invoice exists, link the consumed charges to it so
+        // they're excluded from future EMA batches and from the regular
+        // (non-EMA) invoicing flow.
+        const chargeIds = lineDescriptions.map(l => l.chargeId).filter(Boolean);
+        if (chargeIds.length > 0) {
+          await tx.transaction.updateMany({ where: { id: { in: chargeIds } }, data: { invoiceId: invoice.id } });
+        }
+
         // Apply any existing family credit (e.g. from a prior EMA overpayment)
         // to this new invoice automatically.
         if (familyId && total > 0) {
-          await applyAvailableCredit(tx, { familyId, studentId: student?.id || null, invoiceId: invoice.id, invoiceTotal: total });
+          await applyAvailableCredit(tx, { familyId, studentId: matchedStudent?.id || null, invoiceId: invoice.id, invoiceTotal: total });
         }
 
         out.push({
           ...g,
           invoiceNumber: invoice.invoiceNumber,
           familyId,
-          matched: !!student,
+          matched: !!matchedStudent,
+          rowDates,
+          unmatchedRowCount: Object.values(rowDates).filter(d => d === null).length,
         });
       }
       return out;
@@ -343,109 +402,126 @@ export const generateEmaBatch = async (req, res, next) => {
   }
 };
 
+// Shared by the real reconcile and its dry-run preview — `db` is either the
+// plain prisma client (dryRun, read-only) or a `tx` inside a transaction
+// (real run). When dryRun, every write is skipped so the preview can show
+// exactly what WOULD happen without touching any data.
+const runReconciliation = async (db, lines, { dryRun }) => {
+  const r = { matched: [], unmatched: [], alreadyReconciled: [], totalMatched: 0, invoicesPaid: [] };
+  const touched = new Map();
+
+  for (const line of lines) {
+    const amount = Number(line.amount) || 0;
+    const invoice = await db.invoice.findFirst({
+      where: {
+        OR: [
+          line.poNumber ? { poNumbers: { has: line.poNumber } } : undefined,
+          line.poNumber ? { invoiceNumber: line.poNumber } : undefined,
+        ].filter(Boolean),
+      },
+    });
+
+    if (!invoice) { r.unmatched.push(line); continue; }
+
+    // A remittance line already reconciled (e.g. the same CSV/paste
+    // re-submitted by mistake) must not be applied twice — that would
+    // double-pay the invoice and mint duplicate account credit.
+    const alreadyPaid = await db.payment.findFirst({
+      where: {
+        invoiceId: invoice.id,
+        method: 'SCHOLARSHIP_EMA',
+        externalReference: line.poNumber || invoice.invoiceNumber,
+        amount,
+      },
+    });
+    if (alreadyPaid) { r.alreadyReconciled.push({ ...line, invoiceNumber: invoice.invoiceNumber }); continue; }
+
+    // Cap what's applied to THIS invoice at its total — a remittance line
+    // that overpays (common with EMA's block payments) shouldn't inflate
+    // amountPaid past totalAmount; the excess becomes family credit instead.
+    const totalAmount = Number(invoice.totalAmount);
+    const appliedToInvoice = Math.min(amount, Math.max(0, totalAmount - Number(invoice.amountPaid)));
+    const excess = amount - appliedToInvoice;
+    const newPaid = Number(invoice.amountPaid) + appliedToInvoice;
+
+    if (!dryRun) {
+      await db.invoice.update({ where: { id: invoice.id }, data: { amountPaid: newPaid } });
+
+      // Payment records the full amount actually received from the remittance.
+      await db.payment.create({
+        data: {
+          familyId: invoice.familyId,
+          invoiceId: invoice.id,
+          amount,
+          netAmount: amount,
+          method: 'SCHOLARSHIP_EMA',
+          status: 'COMPLETED',
+          externalReference: line.poNumber || invoice.invoiceNumber,
+          notes: `EMA Step Up remittance — ${line.poNumber || invoice.invoiceNumber}`,
+        },
+      });
+
+      if (invoice.familyId) {
+        if (appliedToInvoice > 0) {
+          await db.transaction.create({
+            data: {
+              studentId: invoice.studentId || null,
+              familyId: invoice.familyId,
+              amount: appliedToInvoice,
+              type: 'PAYMENT',
+              description: `EMA Step Up — ${line.poNumber || invoice.invoiceNumber}`,
+              invoiceId: invoice.id,
+            },
+          });
+        }
+        if (excess > 0) {
+          await db.transaction.create({
+            data: {
+              studentId: invoice.studentId || null,
+              familyId: invoice.familyId,
+              amount: excess,
+              type: 'CREDIT',
+              description: `EMA Step Up overpayment — ${line.poNumber || invoice.invoiceNumber} (account credit)`,
+            },
+          });
+        }
+      }
+    }
+
+    r.matched.push({ ...line, invoiceNumber: invoice.invoiceNumber, familyId: invoice.familyId, creditApplied: excess });
+    r.totalMatched += amount;
+    touched.set(invoice.id, { total: totalAmount, paid: newPaid, number: invoice.invoiceNumber });
+  }
+
+  for (const [id, info] of touched) {
+    const status = info.paid >= info.total ? 'PAID' : 'PARTIAL';
+    if (!dryRun) {
+      await db.invoice.update({ where: { id }, data: { status } });
+    }
+    if (status === 'PAID') r.invoicesPaid.push(info.number);
+  }
+
+  return r;
+};
+
 // POST /api/billing/ema/reconcile
-// Body: { lines: [{ poNumber, studentName, amount }] }
+// Body: { lines: [{ poNumber, studentName, amount }], dryRun?: boolean }
 // Matches each remittance line to the invoice covering that PO #, records a
-// scholarship payment, and marks invoices PAID/PARTIAL.
+// scholarship payment, and marks invoices PAID/PARTIAL. With dryRun: true,
+// runs the exact same matching logic read-only — this is what the "preview"
+// step in the reconcile modal calls, so what the admin sees is guaranteed to
+// match what confirming will actually do (previously the preview re-matched
+// client-side against data it didn't have, and always showed "no match").
 export const reconcileEmaRemittance = async (req, res, next) => {
   try {
-    const { lines } = req.body;
+    const { lines, dryRun } = req.body;
     if (!Array.isArray(lines) || lines.length === 0) {
       return res.status(400).json({ message: 'lines array is required.' });
     }
 
-    const report = await prisma.$transaction(async (tx) => {
-      const r = { matched: [], unmatched: [], alreadyReconciled: [], totalMatched: 0, invoicesPaid: [] };
-      const touched = new Map();
-
-      for (const line of lines) {
-        const amount = Number(line.amount) || 0;
-        const invoice = await tx.invoice.findFirst({
-          where: {
-            OR: [
-              line.poNumber ? { poNumbers: { has: line.poNumber } } : undefined,
-              line.poNumber ? { invoiceNumber: line.poNumber } : undefined,
-            ].filter(Boolean),
-          },
-        });
-
-        if (!invoice) { r.unmatched.push(line); continue; }
-
-        // A remittance line already reconciled (e.g. the same CSV/paste
-        // re-submitted by mistake) must not be applied twice — that would
-        // double-pay the invoice and mint duplicate account credit.
-        const alreadyPaid = await tx.payment.findFirst({
-          where: {
-            invoiceId: invoice.id,
-            method: 'SCHOLARSHIP_EMA',
-            externalReference: line.poNumber || invoice.invoiceNumber,
-            amount,
-          },
-        });
-        if (alreadyPaid) { r.alreadyReconciled.push({ ...line, invoiceNumber: invoice.invoiceNumber }); continue; }
-
-        // Cap what's applied to THIS invoice at its total — a remittance line
-        // that overpays (common with EMA's block payments) shouldn't inflate
-        // amountPaid past totalAmount; the excess becomes family credit instead.
-        const totalAmount = Number(invoice.totalAmount);
-        const appliedToInvoice = Math.min(amount, Math.max(0, totalAmount - Number(invoice.amountPaid)));
-        const excess = amount - appliedToInvoice;
-        const newPaid = Number(invoice.amountPaid) + appliedToInvoice;
-        await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid: newPaid } });
-
-        // Payment records the full amount actually received from the remittance.
-        await tx.payment.create({
-          data: {
-            familyId: invoice.familyId,
-            invoiceId: invoice.id,
-            amount,
-            netAmount: amount,
-            method: 'SCHOLARSHIP_EMA',
-            status: 'COMPLETED',
-            externalReference: line.poNumber || invoice.invoiceNumber,
-            notes: `EMA Step Up remittance — ${line.poNumber || invoice.invoiceNumber}`,
-          },
-        });
-
-        if (invoice.familyId) {
-          if (appliedToInvoice > 0) {
-            await tx.transaction.create({
-              data: {
-                studentId: invoice.studentId || null,
-                familyId: invoice.familyId,
-                amount: appliedToInvoice,
-                type: 'PAYMENT',
-                description: `EMA Step Up — ${line.poNumber || invoice.invoiceNumber}`,
-                invoiceId: invoice.id,
-              },
-            });
-          }
-          if (excess > 0) {
-            await tx.transaction.create({
-              data: {
-                studentId: invoice.studentId || null,
-                familyId: invoice.familyId,
-                amount: excess,
-                type: 'CREDIT',
-                description: `EMA Step Up overpayment — ${line.poNumber || invoice.invoiceNumber} (account credit)`,
-              },
-            });
-          }
-        }
-
-        r.matched.push({ ...line, invoiceNumber: invoice.invoiceNumber, familyId: invoice.familyId, creditApplied: excess });
-        r.totalMatched += amount;
-        touched.set(invoice.id, { total: totalAmount, paid: newPaid, number: invoice.invoiceNumber });
-      }
-
-      for (const [id, info] of touched) {
-        const status = info.paid >= info.total ? 'PAID' : 'PARTIAL';
-        await tx.invoice.update({ where: { id }, data: { status } });
-        if (status === 'PAID') r.invoicesPaid.push(info.number);
-      }
-
-      return r;
-    });
+    const report = dryRun
+      ? await runReconciliation(prisma, lines, { dryRun: true })
+      : await prisma.$transaction((tx) => runReconciliation(tx, lines, { dryRun: false }));
 
     res.json(report);
   } catch (error) {

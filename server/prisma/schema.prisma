@@ -22,6 +22,10 @@ model User {
   snackAuthorized       Boolean                   @default(false) @map("snack_authorized")
   snackPunches          Int                       @default(0) @map("snack_punches")
   seashells             Int                       @default(0) @map("prize_points")
+  // Step Up for Students' own internal ID for this student (from the "STUDENT
+  // ID" column of their CSV export) — stable per student across submissions,
+  // so once learned it's a much more reliable EMA match than comparing names.
+  emaStudentId          String?                   @unique @map("ema_student_id") @db.VarChar(50)
   createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   baseSalary            Decimal?                  @map("base_salary") @db.Decimal(10, 2)
