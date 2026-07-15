@@ -1182,8 +1182,6 @@ const CalendarView = () => {
       return d;
     });
   };
-  const goToToday = () => setCurrentDate(new Date());
-
   const headerLabel = view === 'day'
     ? currentDate.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
@@ -1197,7 +1195,6 @@ const CalendarView = () => {
             <button onClick={goToNextPeriod} aria-label="Next"><ChevronRight size={20} /></button>
           </div>
           <h1>{headerLabel}</h1>
-          <button className="view-btn" onClick={goToToday} style={{ marginLeft: 8 }}>Today</button>
           {sessionsLoading && <span className="text-muted" style={{ fontSize: 12, marginLeft: 8 }}>Loading…</span>}
         </div>
 

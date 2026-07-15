@@ -578,6 +578,25 @@
   color: var(--text-main);
 }
 
+/* The three money columns (Charges & Discounts, Payments & Refunds, Balance).
+   Keep amounts on a single line and right-aligned like a ledger — otherwise
+   values such as "($140.00 credit)" wrap and stack on top of each other when
+   the column is narrow. */
+.ledger-table th:nth-child(n + 4),
+.ledger-table td:nth-child(n + 4) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The pill badges live inside a right-aligned cell — nudge them to the right
+   edge so the amount lines up with the Balance column. */
+.ledger-table td:nth-child(n + 4) .tx-charge,
+.ledger-table td:nth-child(n + 4) .tx-discount,
+.ledger-table td:nth-child(n + 4) .tx-payment,
+.ledger-table td:nth-child(n + 4) .tx-refund {
+  display: inline-block;
+}
+
 .tx-date {
   display: flex;
   flex-direction: column;

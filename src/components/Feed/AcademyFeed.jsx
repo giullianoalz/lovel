@@ -191,22 +191,6 @@ const AcademyFeed = () => {
 
       {canPost && composerOpen && (
         <div className="feed-composer">
-          <div className="composer-category-row">
-            {CATEGORIES.map(cat => {
-              const Icon = cat.icon;
-              return (
-                <button
-                  key={cat.value}
-                  className={`composer-cat-chip ${form.category === cat.value ? 'active' : ''}`}
-                  style={{ '--cat-color': cat.color }}
-                  onClick={() => setForm(f => ({ ...f, category: cat.value }))}
-                >
-                  <Icon size={14} /> {cat.label}
-                </button>
-              );
-            })}
-          </div>
-
           <input
             className="composer-title-input"
             placeholder="Headline (e.g. We're moving to a new location!)"
