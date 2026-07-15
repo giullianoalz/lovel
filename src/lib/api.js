@@ -47,7 +47,7 @@ api.interceptors.response.use(
       try {
         localStorage.removeItem('devUserEmail');
         await signOut(auth);
-      } catch (_) {
+      } catch {
         // ignore sign-out errors
       }
       

@@ -57,24 +57,87 @@
   color: var(--text-muted);
 }
 
-.ns-subrow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.ns-details {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.ns-detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ns-detail-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.ns-audience {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ns-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+.ns-chip input {
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.ns-chip-on {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.ns-warn {
+  font-size: 12px;
+  color: #d97706;
+}
+
+.ns-param {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 14px;
   color: var(--text-main);
 }
 
-.ns-minutes-input {
-  width: 64px;
+.ns-param + .ns-param {
+  margin-top: 8px;
+}
+
+.ns-num-input {
+  width: 72px;
   padding: 6px 10px;
   border: 1px solid var(--border-light);
   border-radius: 8px;
   font-size: 14px;
   text-align: center;
+  background: var(--bg-card);
+  color: var(--text-main);
 }
 
 /* Toggle switch */

@@ -1,6 +1,9 @@
 import prisma from '../config/database.js';
 import crypto from 'crypto';
 import stripe from '../config/stripe.js';
+import { invalidate } from '../middleware/cache.js';
+import { sendNotification } from '../jobs/notification.helper.js';
+import { getAdminUserIds } from '../services/notificationConfig.service.js';
 
 // GET /api/portal/teacher — Teacher dashboard (Today's classes, roster, etc)
 export const getTeacherPortal = async (req, res, next) => {
@@ -259,6 +262,70 @@ export const deletePickupAuth = async (req, res, next) => {
   }
 };
 
+// PATCH /api/portal/parent/snack-reloads/:id — Parent approves or rejects a
+// paid snack-punch reload for their child. Approval only authorizes it; the
+// front desk still has to top up + charge (see fulfillReloadRequest).
+export const decideSnackReload = async (req, res, next) => {
+  try {
+    const parentId = req.user.id;
+    const { decision } = req.body;
+
+    if (!['APPROVED', 'REJECTED'].includes(decision)) {
+      return res.status(400).json({ error: 'Bad Request', message: 'decision must be APPROVED or REJECTED.' });
+    }
+
+    const request = await prisma.snackReloadRequest.findUnique({ where: { id: req.params.id } });
+    if (!request || request.status !== 'PENDING') {
+      return res.status(404).json({ error: 'Not Found', message: 'No pending reload request found.' });
+    }
+
+    // The request must belong to a child in one of this parent's families.
+    const parentFamilies = await prisma.familyMember.findMany({
+      where: { userId: parentId },
+      select: { familyId: true },
+    });
+    const familyIds = parentFamilies.map((f) => f.familyId);
+    const childLink = await prisma.familyMember.findFirst({
+      where: { userId: request.studentId, familyId: { in: familyIds } },
+    });
+    if (!childLink) {
+      return res.status(403).json({ error: 'Forbidden', message: 'This request is not for your child.' });
+    }
+
+    await prisma.snackReloadRequest.update({
+      where: { id: request.id },
+      data: { status: decision, decidedById: parentId, decidedAt: new Date() },
+    });
+
+    // Drop the parent's cached portal so the banner disappears immediately.
+    invalidate(`portal:parent:${parentId}`);
+
+    // Let front desk know a reload is now cleared to be topped up + charged.
+    if (decision === 'APPROVED') {
+      const student = await prisma.user.findUnique({
+        where: { id: request.studentId },
+        select: { fullName: true },
+      });
+      const adminIds = await getAdminUserIds();
+      for (const userId of adminIds) {
+        await sendNotification({
+          userId,
+          type: 'SNACK_PUNCHES_DEPLETED',
+          title: `Reload approved — ${student?.fullName || 'a student'}`,
+          message: `A parent approved reloading ${request.punchCount} snack punch(es) for $${Number(request.price).toFixed(2)}. Top up and charge from Front Desk Alerts.`,
+          referenceType: 'snackReload',
+          referenceId: request.id,
+          dedupKey: `snack-reload-approved-${request.id}-${userId}`,
+        });
+      }
+    }
+
+    res.json({ success: true, status: decision });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // GET /api/portal/parent — Parent sees all their children's data
 export const getParentPortal = async (req, res, next) => {
   try {
@@ -320,7 +387,7 @@ export const getParentPortal = async (req, res, next) => {
     }
 
     // Batch all child-data queries in a single Promise.all — O(1) DB round-trips
-    const [enrollments, behaviorCounts, prizeHistories, materials, announcements] = await Promise.all([
+    const [enrollments, behaviorCounts, prizeHistories, materials, announcements, pendingReloads] = await Promise.all([
       prisma.classEnrollment.findMany({
         where: { studentId: { in: studentIds }, status: 'active' },
         include: {
@@ -361,6 +428,10 @@ export const getParentPortal = async (req, res, next) => {
         take: 10,
         include: { author: { select: { fullName: true } } },
       }),
+      prisma.snackReloadRequest.findMany({
+        where: { studentId: { in: studentIds }, status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     // Index results by studentId for O(1) lookups during assembly
@@ -389,6 +460,13 @@ export const getParentPortal = async (req, res, next) => {
       if (materialsByStudent[m.studentId].length < 10) materialsByStudent[m.studentId].push(m);
     }
 
+    // Keep only the newest pending reload request per student (there should only
+    // ever be one open at a time, but be defensive).
+    const reloadByStudent = {};
+    for (const r of pendingReloads) {
+      if (!reloadByStudent[r.studentId]) reloadByStudent[r.studentId] = r;
+    }
+
     // Assemble final response — pure JS, zero additional DB calls
     const children = studentMeta.map(({ user, familyName }) => {
       const studentEnrollments = enrollmentsByStudent[user.id] || [];
@@ -407,6 +485,13 @@ export const getParentPortal = async (req, res, next) => {
         behaviorSummary: behaviorByStudent[user.id] || { warnings: 0, positives: 0 },
         prizeHistory: prizeByStudent[user.id] || [],
         materials: materialsByStudent[user.id] || [],
+        pendingReload: reloadByStudent[user.id]
+          ? {
+              id: reloadByStudent[user.id].id,
+              punchCount: reloadByStudent[user.id].punchCount,
+              price: Number(reloadByStudent[user.id].price),
+            }
+          : null,
       };
     });
 

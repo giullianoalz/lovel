@@ -187,6 +187,35 @@
   padding: 12px 16px; font-size: 13px; color: #dc2626; margin-bottom: 20px;
 }
 
+/* ── Snack reload approval banner ── */
+.pp-reload-banner {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border: 1px solid #fcd34d; border-radius: 16px;
+  padding: 16px 18px; margin-bottom: 20px;
+  box-shadow: 0 4px 16px rgba(217, 119, 6, 0.12);
+  animation: pp-reload-in 0.35s ease;
+}
+@keyframes pp-reload-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.pp-reload-head { display: flex; align-items: flex-start; gap: 12px; }
+.pp-reload-emoji { font-size: 26px; line-height: 1; }
+.pp-reload-head h4 { margin: 0 0 4px; font-size: 15px; font-weight: 700; color: #92400e; }
+.pp-reload-head p  { margin: 0; font-size: 13px; color: #78350f; line-height: 1.45; }
+.pp-reload-head strong { color: #92400e; }
+.pp-reload-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+.pp-reload-approve, .pp-reload-reject {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 600;
+  cursor: pointer; border: 1px solid transparent; transition: all 0.15s ease;
+}
+.pp-reload-approve { background: #d97706; color: white; }
+.pp-reload-approve:hover:not(:disabled) { background: #b45309; transform: translateY(-1px); }
+.pp-reload-reject { background: white; color: #78350f; border-color: #fcd34d; }
+.pp-reload-reject:hover:not(:disabled) { background: #fffbeb; }
+.pp-reload-approve:disabled, .pp-reload-reject:disabled { opacity: 0.6; cursor: not-allowed; }
+
 /* ── Child grid ── */
 .pp-child-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 16px;

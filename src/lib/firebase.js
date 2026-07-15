@@ -23,6 +23,6 @@ export const storage = getStorage(app);
 export let messaging = null;
 try {
   messaging = getMessaging(app);
-} catch (error) {
+} catch {
   console.log("Firebase Messaging not supported in this environment");
 }

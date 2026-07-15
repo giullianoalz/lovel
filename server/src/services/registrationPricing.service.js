@@ -17,7 +17,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
  */
 export const calculateRegistrationBilling = ({ term, groupType, electives = [], ixlPlan = 'NONE' }) => {
   const baseRate = Number(groupType === 'ANCHORED' ? term.anchoredRate : term.regularRate) || 0;
-  const electivesTotal = round2(electives.reduce((sum, e) => sum + (Number(e.price) ?? ELECTIVE_PRICE_DEFAULT), 0));
+  const electivesTotal = round2(electives.reduce((sum, e) => sum + (e.price != null ? Number(e.price) : ELECTIVE_PRICE_DEFAULT), 0));
   const ixlTotal = IXL_PRICES[ixlPlan] ?? 0;
   const totalQuarterly = round2(baseRate + electivesTotal + ixlTotal);
   const depositAmount = round2(totalQuarterly * DEPOSIT_RATE);

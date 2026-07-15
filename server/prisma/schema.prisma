@@ -9,74 +9,77 @@ datasource db {
 }
 
 model User {
-  id                    String                    @id @default(uuid()) @db.Uuid
-  firebaseUid           String                    @unique @map("firebase_uid") @db.VarChar(128)
-  email                 String                    @unique @db.VarChar(255)
-  fullName              String                    @map("full_name") @db.VarChar(255)
-  role                  UserRole
-  phone                 String?                   @db.VarChar(20)
-  avatarUrl             String?                   @map("avatar_url")
-  status                UserStatus                @default(ACTIVE)
-  age                   Int?
-  allergies             String?
-  snackAuthorized       Boolean                   @default(false) @map("snack_authorized")
-  snackPunches          Int                       @default(0) @map("snack_punches")
-  seashells             Int                       @default(0) @map("prize_points")
+  id                     String                    @id @default(uuid()) @db.Uuid
+  firebaseUid            String                    @unique @map("firebase_uid") @db.VarChar(128)
+  email                  String                    @unique @db.VarChar(255)
+  fullName               String                    @map("full_name") @db.VarChar(255)
+  role                   UserRole
+  phone                  String?                   @db.VarChar(20)
+  avatarUrl              String?                   @map("avatar_url")
+  status                 UserStatus                @default(ACTIVE)
+  age                    Int?
+  allergies              String?
+  snackAuthorized        Boolean                   @default(false) @map("snack_authorized")
+  snackPunches           Int                       @default(0) @map("snack_punches")
+  seashells              Int                       @default(0) @map("prize_points")
   // Step Up for Students' own internal ID for this student (from the "STUDENT
   // ID" column of their CSV export) — stable per student across submissions,
   // so once learned it's a much more reliable EMA match than comparing names.
-  emaStudentId          String?                   @unique @map("ema_student_id") @db.VarChar(50)
-  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  baseSalary            Decimal?                  @map("base_salary") @db.Decimal(10, 2)
-  perSessionRate        Decimal?                  @map("per_session_rate") @db.Decimal(10, 2)
-  accommodationNotes    String?                   @map("accommodation_notes")
-  medicalNotes          String?                   @map("medical_notes")
-  authoredAnnouncements Announcement[]
-  attendance            Attendance[]
-  behaviorLogsAsStudent BehaviorLog[]             @relation("StudentBehaviors")
-  behaviorLogsAsTeacher BehaviorLog[]             @relation("TeacherBehaviors")
-  sentMessages          ChatMessage[]
-  chatParticipations    ChatParticipant[]
-  enrollments           ClassEnrollment[]
-  fitReportsAsReviewer  ClassFitReport[]          @relation("ReviewerFitReports")
-  fitReportsAsStudent   ClassFitReport[]          @relation("StudentFitReports")
-  fitReportsAsTeacher   ClassFitReport[]          @relation("TeacherFitReports")
-  taughtClasses         Class[]                   @relation("TeacherClasses")
-  familyMembers         FamilyMember[]
-  marketingSubmissions  MarketingSubmission[]     @relation("TeacherSubmissions")
-  materials             Material[]
-  notifPreferences      NotificationPreference[]
-  notifications         Notification[]
-  recordedPayments      Payment[]                 @relation("RecordedByUser")
-  priorityHolds         PriorityHold[]
-  prizeHistory          PrizeHistory[]
-  registrationReqs      RegistrationRequest[]
-  regAlertsAsReporter   ClassAlert[]              @relation("ReporterAlerts")
-  regAlertsAsResolver   ClassAlert[]              @relation("ResolverAlerts")
-  regAlertsAsStudent    ClassAlert[]              @relation("StudentAlerts")
-  scholarships          ScholarshipDisbursement[]
-  snackPurchases        SnackPurchase[]
-  transactions          Transaction[]
-  waitlistEntries       WaitlistEntry[]
-  fcmToken              String?                   @map("fcm_token")
-  quietHoursStart       String?                   @map("quiet_hours_start") @db.VarChar(10)
-  quietHoursEnd         String?                   @map("quiet_hours_end") @db.VarChar(10)
-  autoResponderMessage  String?                   @map("auto_responder_message")
-  announcementReads     AnnouncementRead[]
-  medicalLogsAsStudent  MedicalLog[]              @relation("StudentMedicalLogs")
-  medicalLogsAsTeacher  MedicalLog[]              @relation("TeacherMedicalLogs")
-  medicalLogsAsReviewer MedicalLog[]              @relation("ReviewerMedicalLogs")
-  lessonPlans           LessonPlan[]              @relation("TeacherLessonPlans")
-  supplyItems           SupplyItem[]
-  timeOffRequests       TimeOffRequest[]
-  spaceReservations     SpaceReservation[]
-  tempPickupAuths       TempPickupAuth[]
-  assignments           Assignment[]              @relation("TeacherAssignments")
-  grades                Grade[]                   @relation("StudentGrades")
-  cancellationsAsStudent   SessionCancellation[]  @relation("StudentCancellations")
-  cancellationsReported    SessionCancellation[]  @relation("CancelledByStaff")
-  cancellationsResolved    SessionCancellation[]  @relation("ResolvedByStaff")
+  emaStudentId           String?                   @unique @map("ema_student_id") @db.VarChar(50)
+  createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  baseSalary             Decimal?                  @map("base_salary") @db.Decimal(10, 2)
+  perSessionRate         Decimal?                  @map("per_session_rate") @db.Decimal(10, 2)
+  accommodationNotes     String?                   @map("accommodation_notes")
+  medicalNotes           String?                   @map("medical_notes")
+  authoredAnnouncements  Announcement[]
+  attendance             Attendance[]
+  behaviorLogsAsStudent  BehaviorLog[]             @relation("StudentBehaviors")
+  behaviorLogsAsTeacher  BehaviorLog[]             @relation("TeacherBehaviors")
+  sentMessages           ChatMessage[]
+  chatParticipations     ChatParticipant[]
+  enrollments            ClassEnrollment[]
+  fitReportsAsReviewer   ClassFitReport[]          @relation("ReviewerFitReports")
+  fitReportsAsStudent    ClassFitReport[]          @relation("StudentFitReports")
+  fitReportsAsTeacher    ClassFitReport[]          @relation("TeacherFitReports")
+  taughtClasses          Class[]                   @relation("TeacherClasses")
+  familyMembers          FamilyMember[]
+  marketingSubmissions   MarketingSubmission[]     @relation("TeacherSubmissions")
+  materials              Material[]
+  notifPreferences       NotificationPreference[]
+  notifications          Notification[]
+  recordedPayments       Payment[]                 @relation("RecordedByUser")
+  priorityHolds          PriorityHold[]
+  prizeHistory           PrizeHistory[]
+  registrationReqs       RegistrationRequest[]
+  regAlertsAsReporter    ClassAlert[]              @relation("ReporterAlerts")
+  regAlertsAsResolver    ClassAlert[]              @relation("ResolverAlerts")
+  regAlertsAsStudent     ClassAlert[]              @relation("StudentAlerts")
+  scholarships           ScholarshipDisbursement[]
+  snackPurchases         SnackPurchase[]
+  transactions           Transaction[]
+  waitlistEntries        WaitlistEntry[]
+  fcmToken               String?                   @map("fcm_token")
+  quietHoursStart        String?                   @map("quiet_hours_start") @db.VarChar(10)
+  quietHoursEnd          String?                   @map("quiet_hours_end") @db.VarChar(10)
+  autoResponderMessage   String?                   @map("auto_responder_message")
+  announcementReads      AnnouncementRead[]
+  medicalLogsAsStudent   MedicalLog[]              @relation("StudentMedicalLogs")
+  medicalLogsAsTeacher   MedicalLog[]              @relation("TeacherMedicalLogs")
+  medicalLogsAsReviewer  MedicalLog[]              @relation("ReviewerMedicalLogs")
+  lessonPlans            LessonPlan[]              @relation("TeacherLessonPlans")
+  supplyItems            SupplyItem[]
+  timeOffRequests        TimeOffRequest[]
+  spaceReservations      SpaceReservation[]
+  tempPickupAuths        TempPickupAuth[]
+  assignments            Assignment[]              @relation("TeacherAssignments")
+  grades                 Grade[]                   @relation("StudentGrades")
+  cancellationsAsStudent SessionCancellation[]     @relation("StudentCancellations")
+  cancellationsReported  SessionCancellation[]     @relation("CancelledByStaff")
+  cancellationsResolved  SessionCancellation[]     @relation("ResolvedByStaff")
+  snackReloadsAsStudent  SnackReloadRequest[]      @relation("SnackReloadStudent")
+  snackReloadsDecided    SnackReloadRequest[]      @relation("SnackReloadDecidedBy")
+  snackReloadsFulfilled  SnackReloadRequest[]      @relation("SnackReloadFulfilledBy")
 
   @@map("users")
 }
@@ -91,6 +94,7 @@ model Family {
   payments     Payment[]
   scholarships ScholarshipDisbursement[]
   transactions Transaction[]
+  snackReloads SnackReloadRequest[]
 
   @@map("families")
 }
@@ -149,20 +153,20 @@ model ClassEnrollment {
 }
 
 model Session {
-  id              String            @id @default(uuid()) @db.Uuid
-  classId         String            @map("class_id") @db.Uuid
-  date            DateTime          @db.Date
-  startTime       DateTime          @map("start_time") @db.Time(6)
-  endTime         DateTime          @map("end_time") @db.Time(6)
-  status          SessionStatus     @default(SCHEDULED)
-  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  id              String                @id @default(uuid()) @db.Uuid
+  classId         String                @map("class_id") @db.Uuid
+  date            DateTime              @db.Date
+  startTime       DateTime              @map("start_time") @db.Time(6)
+  endTime         DateTime              @map("end_time") @db.Time(6)
+  status          SessionStatus         @default(SCHEDULED)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
   behaviorLogs    BehaviorLog[]
   classFitReports ClassFitReport[]
   materials       SessionMaterial[]
   notes           SessionNote[]
   cancellations   SessionCancellation[]
-  class           Class             @relation(fields: [classId], references: [id], onDelete: Cascade)
+  class           Class                 @relation(fields: [classId], references: [id], onDelete: Cascade)
 
   @@index([classId])
   @@index([date])
@@ -272,6 +276,38 @@ model SnackPurchase {
   student     User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@map("snack_purchases")
+}
+
+// A parent-approval request raised the moment a student's snack card hits 0.
+// The parent approves/rejects reloading more (paid) punches; front desk only
+// tops up + charges once the parent has approved. See rewards.controller.js.
+//   PENDING   → created on depletion, awaiting the parent's decision
+//   APPROVED  → parent authorized the reload; visible in the front-desk queue
+//   REJECTED  → parent declined; nothing charged
+//   FULFILLED → front desk added the punches and recorded the CHARGE
+model SnackReloadRequest {
+  id            String    @id @default(uuid()) @db.Uuid
+  studentId     String    @map("student_id") @db.Uuid
+  familyId      String?   @map("family_id") @db.Uuid
+  punchCount    Int       @map("punch_count")
+  price         Decimal   @db.Decimal(10, 2)
+  status        String    @default("PENDING") @db.VarChar(20)
+  triggeredById String?   @map("triggered_by") @db.Uuid
+  decidedById   String?   @map("decided_by") @db.Uuid
+  decidedAt     DateTime? @map("decided_at") @db.Timestamptz(6)
+  fulfilledById String?   @map("fulfilled_by") @db.Uuid
+  fulfilledAt   DateTime? @map("fulfilled_at") @db.Timestamptz(6)
+  transactionId String?   @map("transaction_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  student     User    @relation("SnackReloadStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  family      Family? @relation(fields: [familyId], references: [id])
+  decidedBy   User?   @relation("SnackReloadDecidedBy", fields: [decidedById], references: [id])
+  fulfilledBy User?   @relation("SnackReloadFulfilledBy", fields: [fulfilledById], references: [id])
+
+  @@index([status])
+  @@index([studentId])
+  @@map("snack_reload_requests")
 }
 
 model PrizeHistory {
@@ -430,10 +466,10 @@ model ChatParticipant {
 }
 
 model ChatMessage {
-  id       String     @id @default(uuid()) @db.Uuid
-  threadId String     @map("thread_id") @db.Uuid
-  senderId String?    @map("sender_id") @db.Uuid
-  text     String
+  id          String     @id @default(uuid()) @db.Uuid
+  threadId    String     @map("thread_id") @db.Uuid
+  senderId    String?    @map("sender_id") @db.Uuid
+  text        String
   fileUrl     String?    @map("file_url")
   fileName    String?    @map("file_name")
   fileType    String?    @map("file_type") @db.VarChar(100)
@@ -441,8 +477,8 @@ model ChatMessage {
   // restart, so the attachment is served from Drive whenever this is set.
   driveFileId String?    @map("drive_file_id") @db.VarChar(255)
   sentAt      DateTime   @default(now()) @map("sent_at") @db.Timestamptz(6)
-  sender   User?      @relation(fields: [senderId], references: [id])
-  thread   ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender      User?      @relation(fields: [senderId], references: [id])
+  thread      ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@index([threadId])
   @@index([sentAt])
@@ -471,19 +507,28 @@ model Notification {
   @@map("notifications")
 }
 
-// Single admin-wide row (fixed id) controlling automated push notifications —
-// not per-user preferences (see NotificationPreference below for that, which
-// is separate scaffolding). Lets the front desk tune timing/on-off without a
-// deploy once this needs to change.
-model AcademySettings {
-  id                         String    @id @default(uuid()) @db.Uuid
-  classReminderEnabled       Boolean   @default(true) @map("class_reminder_enabled")
-  classReminderMinutesBefore Int       @default(15) @map("class_reminder_minutes_before")
-  absenceAlertEnabled        Boolean   @default(true) @map("absence_alert_enabled")
-  updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  updatedById                String?   @map("updated_by") @db.Uuid
+// Admin-wide, per-event configuration for the automated notifications the
+// system fires (class reminders, absence alerts, overdue invoices, etc.) — not
+// per-user preferences (see NotificationPreference below for that). One row per
+// event `eventKey`; rows are created lazily the first time an admin saves an
+// override. The canonical event list and defaults live in
+// server/src/config/notificationEvents.js — a missing row means "use defaults".
+//
+//   enabled  — master on/off for the event
+//   audience — which recipient groups get it (e.g. ["PARENTS","ADMINS"])
+//   params   — event-specific tunables as JSON, e.g. { minutesBefore: 15 } for
+//              CLASS_REMINDER or { thresholdCount: 3, windowDays: 30 } for
+//              REPEATED_ABSENCE. Validated against the catalog before saving.
+model NotificationEventConfig {
+  id          String   @id @default(uuid()) @db.Uuid
+  eventKey    String   @unique @map("event_key") @db.VarChar(50)
+  enabled     Boolean  @default(true)
+  audience    String[] @default([])
+  params      Json     @default("{}")
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedById String?  @map("updated_by") @db.Uuid
 
-  @@map("academy_settings")
+  @@map("notification_event_config")
 }
 
 model NotificationPreference {
@@ -502,17 +547,17 @@ model NotificationPreference {
 }
 
 model Announcement {
-  id             String    @id @default(uuid()) @db.Uuid
-  title          String    @db.VarChar(255)
+  id             String              @id @default(uuid()) @db.Uuid
+  title          String              @db.VarChar(255)
   body           String
-  authorId       String?   @map("author_id") @db.Uuid
-  targetAudience String    @default("all") @map("target_audience") @db.VarChar(20)
-  category       String    @default("general") @map("category") @db.VarChar(30)
-  imageUrl       String?   @map("image_url")
-  isPinned       Boolean   @default(false) @map("is_pinned")
-  publishedAt    DateTime  @default(now()) @map("published_at") @db.Timestamptz(6)
-  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
-  author         User?     @relation(fields: [authorId], references: [id])
+  authorId       String?             @map("author_id") @db.Uuid
+  targetAudience String              @default("all") @map("target_audience") @db.VarChar(20)
+  category       String              @default("general") @map("category") @db.VarChar(30)
+  imageUrl       String?             @map("image_url")
+  isPinned       Boolean             @default(false) @map("is_pinned")
+  publishedAt    DateTime            @default(now()) @map("published_at") @db.Timestamptz(6)
+  expiresAt      DateTime?           @map("expires_at") @db.Timestamptz(6)
+  author         User?               @relation(fields: [authorId], references: [id])
   reads          AnnouncementRead[]
   media          AnnouncementMedia[]
 
@@ -558,11 +603,11 @@ model RegistrationTerm {
 }
 
 model Elective {
-  id       String                        @id @default(uuid()) @db.Uuid
-  termId   String                        @map("term_id") @db.Uuid
-  name     String                        @db.VarChar(255)
-  price    Decimal                       @default(130) @db.Decimal(10, 2)
-  term     RegistrationTerm              @relation(fields: [termId], references: [id], onDelete: Cascade)
+  id       String                       @id @default(uuid()) @db.Uuid
+  termId   String                       @map("term_id") @db.Uuid
+  name     String                       @db.VarChar(255)
+  price    Decimal                      @default(130) @db.Decimal(10, 2)
+  term     RegistrationTerm             @relation(fields: [termId], references: [id], onDelete: Cascade)
   requests RegistrationElectiveChoice[]
 
   @@index([termId])
@@ -599,26 +644,26 @@ model PriorityHold {
 }
 
 model RegistrationRequest {
-  id                  String           @id @default(uuid()) @db.Uuid
-  termId              String           @map("term_id") @db.Uuid
-  studentId           String           @map("student_id") @db.Uuid
-  firstChoiceClassId  String           @map("first_choice_class_id") @db.Uuid
-  secondChoiceClassId String?          @map("second_choice_class_id") @db.Uuid
-  status              String           @default("pending") @db.VarChar(50)
-  submittedAt         DateTime         @default(now()) @map("submitted_at") @db.Timestamptz(6)
-  ixlPlan             IxlPlan          @default(NONE) @map("ixl_plan")
-  baseRate            Decimal          @default(0) @map("base_rate") @db.Decimal(10, 2)
-  electivesTotal      Decimal          @default(0) @map("electives_total") @db.Decimal(10, 2)
-  ixlTotal            Decimal          @default(0) @map("ixl_total") @db.Decimal(10, 2)
-  totalQuarterly      Decimal          @default(0) @map("total_quarterly") @db.Decimal(10, 2)
-  depositAmount       Decimal          @default(0) @map("deposit_amount") @db.Decimal(10, 2)
-  depositDueDate      DateTime?        @map("deposit_due_date") @db.Date
-  emailStatus         RegistrationEmailStatus @default(PENDING) @map("email_status")
-  emailSentAt         DateTime?        @map("email_sent_at") @db.Timestamptz(6)
-  firstChoice         Class            @relation("FirstChoice", fields: [firstChoiceClassId], references: [id])
-  secondChoice        Class?           @relation("SecondChoice", fields: [secondChoiceClassId], references: [id])
-  student             User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  term                RegistrationTerm @relation(fields: [termId], references: [id], onDelete: Cascade)
+  id                  String                       @id @default(uuid()) @db.Uuid
+  termId              String                       @map("term_id") @db.Uuid
+  studentId           String                       @map("student_id") @db.Uuid
+  firstChoiceClassId  String                       @map("first_choice_class_id") @db.Uuid
+  secondChoiceClassId String?                      @map("second_choice_class_id") @db.Uuid
+  status              String                       @default("pending") @db.VarChar(50)
+  submittedAt         DateTime                     @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  ixlPlan             IxlPlan                      @default(NONE) @map("ixl_plan")
+  baseRate            Decimal                      @default(0) @map("base_rate") @db.Decimal(10, 2)
+  electivesTotal      Decimal                      @default(0) @map("electives_total") @db.Decimal(10, 2)
+  ixlTotal            Decimal                      @default(0) @map("ixl_total") @db.Decimal(10, 2)
+  totalQuarterly      Decimal                      @default(0) @map("total_quarterly") @db.Decimal(10, 2)
+  depositAmount       Decimal                      @default(0) @map("deposit_amount") @db.Decimal(10, 2)
+  depositDueDate      DateTime?                    @map("deposit_due_date") @db.Date
+  emailStatus         RegistrationEmailStatus      @default(PENDING) @map("email_status")
+  emailSentAt         DateTime?                    @map("email_sent_at") @db.Timestamptz(6)
+  firstChoice         Class                        @relation("FirstChoice", fields: [firstChoiceClassId], references: [id])
+  secondChoice        Class?                       @relation("SecondChoice", fields: [secondChoiceClassId], references: [id])
+  student             User                         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  term                RegistrationTerm             @relation(fields: [termId], references: [id], onDelete: Cascade)
   waitlistEntries     WaitlistEntry[]
   electiveChoices     RegistrationElectiveChoice[]
 
@@ -656,9 +701,9 @@ model BehaviorLog {
   managerNotes     String?          @map("manager_notes")
   parentNotifiedAt DateTime?        @map("parent_notified_at") @db.Timestamptz(6)
   createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  session     Session?         @relation(fields: [sessionId], references: [id])
-  student     User             @relation("StudentBehaviors", fields: [studentId], references: [id], onDelete: Cascade)
-  teacher     User             @relation("TeacherBehaviors", fields: [teacherId], references: [id])
+  session          Session?         @relation(fields: [sessionId], references: [id])
+  student          User             @relation("StudentBehaviors", fields: [studentId], references: [id], onDelete: Cascade)
+  teacher          User             @relation("TeacherBehaviors", fields: [teacherId], references: [id])
 
   @@index([studentId])
   @@index([teacherId])
@@ -907,21 +952,21 @@ model AnnouncementRead {
 }
 
 model MedicalLog {
-  id              String         @id @default(uuid()) @db.Uuid
-  studentId       String         @map("student_id") @db.Uuid
-  teacherId       String         @map("teacher_id") @db.Uuid
-  time            DateTime       @db.Timestamptz(6)
-  place           String         @db.VarChar(255)
-  description     String
-  actionsTaken    String         @map("actions_taken")
-  sentHome        Boolean        @default(false) @map("sent_home")
-  status          MedicalStatus  @default(RECORDED)
-  managerNotes    String?        @map("manager_notes")
-  reviewedById    String?        @map("reviewed_by_id") @db.Uuid
-  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  student         User           @relation("StudentMedicalLogs", fields: [studentId], references: [id], onDelete: Cascade)
-  teacher         User           @relation("TeacherMedicalLogs", fields: [teacherId], references: [id])
-  reviewedBy      User?          @relation("ReviewerMedicalLogs", fields: [reviewedById], references: [id])
+  id           String        @id @default(uuid()) @db.Uuid
+  studentId    String        @map("student_id") @db.Uuid
+  teacherId    String        @map("teacher_id") @db.Uuid
+  time         DateTime      @db.Timestamptz(6)
+  place        String        @db.VarChar(255)
+  description  String
+  actionsTaken String        @map("actions_taken")
+  sentHome     Boolean       @default(false) @map("sent_home")
+  status       MedicalStatus @default(RECORDED)
+  managerNotes String?       @map("manager_notes")
+  reviewedById String?       @map("reviewed_by_id") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  student      User          @relation("StudentMedicalLogs", fields: [studentId], references: [id], onDelete: Cascade)
+  teacher      User          @relation("TeacherMedicalLogs", fields: [teacherId], references: [id])
+  reviewedBy   User?         @relation("ReviewerMedicalLogs", fields: [reviewedById], references: [id])
 
   @@index([studentId])
   @@index([teacherId])
@@ -929,55 +974,55 @@ model MedicalLog {
 }
 
 model LessonPlan {
-  id                   String           @id @default(uuid()) @db.Uuid
-  teacherId            String           @map("teacher_id") @db.Uuid
-  classId              String?          @map("class_id") @db.Uuid
-  weekOf               DateTime         @map("week_of") @db.Date
-  type                 LessonPlanType   @default(DISCOVERY_COVE)
-  mainActivity         String           @map("main_activity")
-  materials            String?
-  safetyNotes          String?          @map("safety_notes")
-  skillConnection      String?          @map("skill_connection")
-  differentiation      String?
-  status               LessonPlanStatus @default(SUBMITTED)
-  managerFeedback      String?          @map("manager_feedback")
-  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  teacher              User             @relation("TeacherLessonPlans", fields: [teacherId], references: [id])
-  class                Class?           @relation(fields: [classId], references: [id])
-  supplyItems          SupplyItem[]
+  id              String           @id @default(uuid()) @db.Uuid
+  teacherId       String           @map("teacher_id") @db.Uuid
+  classId         String?          @map("class_id") @db.Uuid
+  weekOf          DateTime         @map("week_of") @db.Date
+  type            LessonPlanType   @default(DISCOVERY_COVE)
+  mainActivity    String           @map("main_activity")
+  materials       String?
+  safetyNotes     String?          @map("safety_notes")
+  skillConnection String?          @map("skill_connection")
+  differentiation String?
+  status          LessonPlanStatus @default(SUBMITTED)
+  managerFeedback String?          @map("manager_feedback")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  teacher         User             @relation("TeacherLessonPlans", fields: [teacherId], references: [id])
+  class           Class?           @relation(fields: [classId], references: [id])
+  supplyItems     SupplyItem[]
 
   @@index([teacherId])
   @@map("lesson_plans")
 }
 
 model SupplyItem {
-  id           String             @id @default(uuid()) @db.Uuid
-  lessonPlanId String?            @map("lesson_plan_id") @db.Uuid
-  teacherId    String             @map("teacher_id") @db.Uuid
-  itemName     String             @map("item_name") @db.VarChar(255)
-  quantity     Int                @default(1)
-  dayNeeded    String?            @map("day_needed") @db.VarChar(50)
-  status       SupplyStatus       @default(PENDING)
-  cost         Decimal?           @db.Decimal(10, 2)
-  receiptUrl   String?            @map("receipt_url")
-  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  lessonPlan   LessonPlan?        @relation(fields: [lessonPlanId], references: [id])
-  teacher      User               @relation(fields: [teacherId], references: [id])
+  id           String       @id @default(uuid()) @db.Uuid
+  lessonPlanId String?      @map("lesson_plan_id") @db.Uuid
+  teacherId    String       @map("teacher_id") @db.Uuid
+  itemName     String       @map("item_name") @db.VarChar(255)
+  quantity     Int          @default(1)
+  dayNeeded    String?      @map("day_needed") @db.VarChar(50)
+  status       SupplyStatus @default(PENDING)
+  cost         Decimal?     @db.Decimal(10, 2)
+  receiptUrl   String?      @map("receipt_url")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  lessonPlan   LessonPlan?  @relation(fields: [lessonPlanId], references: [id])
+  teacher      User         @relation(fields: [teacherId], references: [id])
 
   @@map("supply_items")
 }
 
 model TimeOffRequest {
-  id             String         @id @default(uuid()) @db.Uuid
-  teacherId      String         @map("teacher_id") @db.Uuid
-  date           DateTime       @db.Date
-  groupId        String?        @map("group_id") @db.Uuid
-  type           TimeOffType    @default(PTO)
-  status         TimeOffStatus  @default(PENDING)
-  reason         String?
-  managerNotes   String?        @map("manager_notes")
-  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  teacher        User           @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  id           String        @id @default(uuid()) @db.Uuid
+  teacherId    String        @map("teacher_id") @db.Uuid
+  date         DateTime      @db.Date
+  groupId      String?       @map("group_id") @db.Uuid
+  type         TimeOffType   @default(PTO)
+  status       TimeOffStatus @default(PENDING)
+  reason       String?
+  managerNotes String?       @map("manager_notes")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  teacher      User          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
 
   @@index([groupId])
   @@map("time_off_requests")
@@ -992,27 +1037,27 @@ model SharedSpace {
 }
 
 model SpaceReservation {
-  id          String      @id @default(uuid()) @db.Uuid
-  spaceId     String      @map("space_id") @db.Uuid
-  userId      String      @map("user_id") @db.Uuid
-  startTime   DateTime    @map("start_time") @db.Timestamptz(6)
-  endTime     DateTime    @map("end_time") @db.Timestamptz(6)
-  purpose     String?
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  space       SharedSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String      @id @default(uuid()) @db.Uuid
+  spaceId   String      @map("space_id") @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  startTime DateTime    @map("start_time") @db.Timestamptz(6)
+  endTime   DateTime    @map("end_time") @db.Timestamptz(6)
+  purpose   String?
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  space     SharedSpace @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("space_reservations")
 }
 
 model TempPickupAuth {
-  id            String   @id @default(uuid()) @db.Uuid
-  parentId      String   @map("parent_id") @db.Uuid
-  pickupPerson  String   @map("pickup_person") @db.VarChar(255)
-  validDate     DateTime @map("valid_date") @db.Date
-  qrCodeHash    String   @unique @map("qr_code_hash") @db.VarChar(255)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  parent        User     @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  id           String   @id @default(uuid()) @db.Uuid
+  parentId     String   @map("parent_id") @db.Uuid
+  pickupPerson String   @map("pickup_person") @db.VarChar(255)
+  validDate    DateTime @map("valid_date") @db.Date
+  qrCodeHash   String   @unique @map("qr_code_hash") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  parent       User     @relation(fields: [parentId], references: [id], onDelete: Cascade)
 
   @@map("temp_pickup_auths")
 }
@@ -1048,23 +1093,23 @@ model Grade {
 }
 
 enum ChatThreadStatus {
-  ACTIVE    @map("active")
-  RESOLVED  @map("resolved")
+  ACTIVE   @map("active")
+  RESOLVED @map("resolved")
 
   @@map("chat_thread_status")
 }
 
 enum MedicalStatus {
-  RECORDED   @map("recorded")
-  REVIEWED   @map("reviewed")
+  RECORDED @map("recorded")
+  REVIEWED @map("reviewed")
 
   @@map("medical_status")
 }
 
 enum BehaviorStatus {
-  RECORDED         @map("recorded")
-  DOWNGRADED       @map("downgraded")
-  SENT_TO_PARENT   @map("sent_to_parent")
+  RECORDED       @map("recorded")
+  DOWNGRADED     @map("downgraded")
+  SENT_TO_PARENT @map("sent_to_parent")
 
   @@map("behavior_status")
 }
@@ -1092,8 +1137,8 @@ enum SupplyStatus {
 }
 
 enum TimeOffType {
-  PTO   @map("pto")
-  SICK  @map("sick")
+  PTO  @map("pto")
+  SICK @map("sick")
 
   @@map("time_off_type")
 }

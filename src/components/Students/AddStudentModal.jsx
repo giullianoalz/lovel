@@ -547,7 +547,7 @@ const AddStudentModal = ({ onClose, onSave, families = [] }) => {
                 {billingProfiles.length > 0 && (
                   <div className="asm-review-billing">
                     <h4>Billing Profiles</h4>
-                    {billingProfiles.map((bp, i) => (
+                    {billingProfiles.map((bp) => (
                       <div key={bp.id} className="asm-review-bp">
                         <span>{TUTORS.find(t => t.id === bp.tutorId)?.name || 'No tutor'}</span>
                         <span>{bp.category || 'No category'}</span>

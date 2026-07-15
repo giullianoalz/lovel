@@ -22,7 +22,7 @@ const fmtTime = (t) =>
 
 /* ============================================================ */
 const TeacherPortal = () => {
-  const { user, role } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('session');
 

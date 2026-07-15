@@ -11,6 +11,7 @@ import {
   deletePickupAuth,
   getParentBilling,
   createPaymentSession,
+  decideSnackReload,
 } from '../controllers/portal.controller.js';
 
 const router = Router();
@@ -35,6 +36,9 @@ router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'),
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);
 router.post('/parent/pickup', authenticate, requireRole('PARENT'), createPickupAuth);
 router.delete('/parent/pickup/:id', authenticate, requireRole('PARENT'), deletePickupAuth);
+
+// Snack-punch reload approval
+router.patch('/parent/snack-reloads/:id', authenticate, requireRole('PARENT'), decideSnackReload);
 
 // Billing & Payments
 router.get('/parent/billing', authenticate, requireRole('PARENT'), getParentBilling);

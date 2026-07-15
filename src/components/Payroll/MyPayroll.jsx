@@ -21,7 +21,7 @@ const MyPayroll = () => {
     try {
       const res = await api.get(`/users/${user.id}/payroll?month=${currentMonth}&year=${currentYear}`);
       setPayrollData(res.data);
-    } catch (err) {
+    } catch {
       setError('Could not load payroll data.');
     } finally {
       setLoading(false);

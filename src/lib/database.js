@@ -384,75 +384,8 @@ export const database = {
     return response.data; // { success, newBalance }
   },
 
-  // --- Conversations ---
-  fetchConversations: async (userId) => {
-    return [
-      { id: '0', name: "Academy Assistant", lastMsg: "How can I help you?", time: "9:00 AM", unread: 0, roles: ["AI Agent", "Support"], isBot: true, isBlocked: mockBlockedUsers.includes('0') },
-      { id: '1', name: "Maria Garcia (Student)", parent: "Elena Garcia", lastMsg: "Tomorrow's lesson is at 4pm?", time: "10:30 AM", unread: 2, roles: ["Student", "Parent"], isBlocked: mockBlockedUsers.includes('1') }
-    ];
-  },
-
-  blockContact: async (threadId) => {
-    if (!mockBlockedUsers.includes(threadId)) {
-      mockBlockedUsers.push(threadId);
-    }
-    return true;
-  },
-
-  unblockContact: async (threadId) => {
-    mockBlockedUsers = mockBlockedUsers.filter(id => id !== threadId);
-    return true;
-  },
-
-  fetchMessages: async (threadId) => {
-    return mockMessages[threadId] || [];
-  },
-
-  sendMessage: async (threadId, text, sender = "Me") => {
-    if (!mockMessages[threadId]) {
-      mockMessages[threadId] = [];
-    }
-
-    const newMessage = {
-      id: Date.now(),
-      sender: sender,
-      text: text,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: sender === "Me" ? "sent" : "received"
-    };
-
-    mockMessages[threadId].push(newMessage);
-
-    // AI Simulation for Assistant thread
-    if (threadId === '0' && sender === "Me") {
-      setTimeout(() => {
-        let responseText = "I'm processing your request. Give me a moment...";
-        const lowerText = text.toLowerCase();
-        
-        if (lowerText.includes("math") || lowerText.includes("class") || lowerText.includes("mate")) {
-          responseText = "I see you're looking for a math class. I found Prof. David Brown is available tomorrow at 4:30 PM. Would you like me to book it for you?";
-        } else if (lowerText.includes("yes") || lowerText.includes("si")) {
-          responseText = "Perfect! The class has been scheduled. I've updated your calendar. Anything else?";
-        } else if (lowerText.includes("bill") || lowerText.includes("invoice") || lowerText.includes("pay")) {
-          responseText = "Your current balance is $125.00 due on April 25. You can view the details in the Billing section. Need help paying it?";
-        }
-
-        const aiMessage = {
-          id: Date.now() + 1,
-          sender: "Assistant",
-          text: responseText,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          type: "received"
-        };
-        mockMessages['0'].push(aiMessage);
-      }, 1500); // Simulate network/AI delay
-    }
-
-    return newMessage;
-  },
-
   // --- Student Specific Dashboard Data ---
-  fetchStudentData: async (studentId) => {
+  fetchStudentData: async () => {
     try {
       const response = await api.get('/dashboard');
       const d = response.data;

@@ -1,5 +1,83 @@
 import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
+import { sendNotification } from '../jobs/notification.helper.js';
+import { invalidate } from '../middleware/cache.js';
+import {
+  getEventConfig,
+  getAdminUserIds,
+  getParentUserIdsForStudents,
+} from '../services/notificationConfig.service.js';
+
+// A student can only have one open reload request at a time.
+const OPEN_RELOAD_STATUSES = ['PENDING', 'APPROVED'];
+
+/**
+ * Raised the moment a snack purchase empties a student's card. Creates a
+ * pending SnackReloadRequest (unless one is already open) and notifies the
+ * parents (and/or admins) so the parent can approve a paid reload. Fully
+ * best-effort: any failure here must never fail the underlying purchase.
+ */
+const maybeCreateReloadRequest = async (studentId, triggeredById) => {
+  try {
+    const config = await getEventConfig('SNACK_PUNCHES_DEPLETED');
+    if (!config?.enabled || config.audience.length === 0) return;
+
+    // Don't stack requests — one open request per student.
+    const existing = await prisma.snackReloadRequest.findFirst({
+      where: { studentId, status: { in: OPEN_RELOAD_STATUSES } },
+    });
+    if (existing) return;
+
+    const student = await prisma.user.findUnique({
+      where: { id: studentId },
+      select: { id: true, fullName: true },
+    });
+    if (!student) return;
+
+    const familyMember = await prisma.familyMember.findFirst({ where: { userId: studentId } });
+    const punchCount = config.params.reloadPunches;
+    const price = config.params.reloadPrice;
+
+    const request = await prisma.snackReloadRequest.create({
+      data: {
+        studentId,
+        familyId: familyMember?.familyId ?? null,
+        punchCount,
+        price,
+        triggeredById: triggeredById ?? null,
+      },
+    });
+
+    // Bust the parents' cached portal (60 s TTL) so the approval banner shows
+    // up on their next load, not up to a minute later — regardless of whether
+    // they're in the notification audience.
+    const parentIds = await getParentUserIdsForStudents([studentId]);
+    parentIds.forEach((id) => invalidate(`portal:parent:${id}`));
+
+    const priceLabel = `$${Number(price).toFixed(2)}`;
+    const recipients = new Set();
+    if (config.audience.includes('PARENTS')) {
+      parentIds.forEach((id) => recipients.add(id));
+    }
+    if (config.audience.includes('ADMINS')) {
+      (await getAdminUserIds()).forEach((id) => recipients.add(id));
+    }
+
+    for (const userId of recipients) {
+      await sendNotification({
+        userId,
+        type: 'SNACK_PUNCHES_DEPLETED',
+        title: `${student.fullName} is out of snack punches`,
+        message: `${student.fullName}'s snack card reached 0. Approve reloading ${punchCount} punch(es) for ${priceLabel}?`,
+        referenceType: 'snackReload',
+        referenceId: request.id,
+        dedupKey: `snack-reload-${request.id}-${userId}`,
+      });
+    }
+  } catch (err) {
+    console.error('[Rewards] maybeCreateReloadRequest failed:', err.message);
+  }
+};
 
 /* ──────────────────────────── SNACK CABINET ──────────────────────────── */
 
@@ -98,7 +176,114 @@ export const purchaseSnack = async (req, res, next) => {
       });
     }
 
+    // Card just hit zero — ask the parent to approve a paid reload (best-effort,
+    // never blocks the purchase response).
+    if (result.newBalance === 0) {
+      await maybeCreateReloadRequest(studentId, req.user?.id);
+    }
+
     res.json({ success: true, newBalance: result.newBalance, snackName: result.snackName });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/rewards/snacks/reload-requests?status=APPROVED
+// Front-desk queue of reload requests. Defaults to parent-approved ones that
+// are waiting to be topped up + charged.
+export const listReloadRequests = async (req, res, next) => {
+  try {
+    const status = req.query.status || 'APPROVED';
+    const requests = await prisma.snackReloadRequest.findMany({
+      where: { status },
+      orderBy: { decidedAt: 'asc' },
+      include: {
+        student: { select: { id: true, fullName: true } },
+        family: { select: { id: true, name: true } },
+      },
+    });
+    res.json({
+      requests: requests.map((r) => ({
+        id: r.id,
+        studentId: r.studentId,
+        studentName: r.student?.fullName || 'Student',
+        familyName: r.family?.name || null,
+        punchCount: r.punchCount,
+        price: Number(r.price),
+        status: r.status,
+        decidedAt: r.decidedAt,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/rewards/snacks/reload-requests/:id/fulfill
+// Adds the approved punches to the student AND records the CHARGE against the
+// family, atomically. Only allowed once the parent has approved.
+export const fulfillReloadRequest = async (req, res, next) => {
+  try {
+    const fulfilledById = req.user.id;
+
+    const request = await prisma.snackReloadRequest.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!request) {
+      return res.status(404).json({ message: 'Reload request not found.' });
+    }
+    if (request.status !== 'APPROVED') {
+      return res.status(409).json({
+        message: `This request is ${request.status.toLowerCase()} — only parent-approved reloads can be fulfilled.`,
+      });
+    }
+
+    // Online-only students can't hold snack punches — refuse the top-up.
+    if (!(await canUseSnackPunches(request.studentId))) {
+      return res.status(403).json({
+        message: 'Snack punches are only available to in-person students.',
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Atomically claim the request first (same idempotency pattern as
+      // resolveCancellation): a double-click, two admins on the same queue, or
+      // a network retry must never add punches or charge the family twice.
+      const claimed = await tx.snackReloadRequest.updateMany({
+        where: { id: request.id, status: 'APPROVED' },
+        data: { status: 'FULFILLED', fulfilledById, fulfilledAt: new Date() },
+      });
+      if (claimed.count === 0) return { alreadyFulfilled: true };
+
+      const student = await tx.user.update({
+        where: { id: request.studentId },
+        data: { snackPunches: { increment: request.punchCount } },
+        select: { snackPunches: true },
+      });
+
+      const transaction = await tx.transaction.create({
+        data: {
+          studentId: request.studentId,
+          familyId: request.familyId,
+          amount: request.price,
+          type: 'CHARGE',
+          description: `Snack punch reload — ${request.punchCount} punch(es)`,
+        },
+      });
+
+      await tx.snackReloadRequest.update({
+        where: { id: request.id },
+        data: { transactionId: transaction.id },
+      });
+
+      return { newBalance: student.snackPunches };
+    });
+
+    if (result.alreadyFulfilled) {
+      return res.status(409).json({ message: 'This reload was already fulfilled.' });
+    }
+
+    res.json({ success: true, newBalance: result.newBalance });
   } catch (error) {
     next(error);
   }

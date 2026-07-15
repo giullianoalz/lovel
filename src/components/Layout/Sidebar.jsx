@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   MessageSquare,
@@ -86,7 +86,6 @@ const Sidebar = () => {
   };
 
   const closeMenu = () => setIsOpen(false);
-  const navigate = useNavigate();
 
   return (
     <>

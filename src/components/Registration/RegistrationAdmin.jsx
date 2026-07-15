@@ -21,7 +21,8 @@ const RegistrationAdmin = () => {
   const [newTermForm, setNewTermForm] = useState({
     name: '',
     earlySameDayStart: '', earlySameDayEnd: '',
-    publicStart: '', publicEnd: ''
+    publicStart: '', publicEnd: '',
+    regularRate: '', anchoredRate: '', depositDueDate: ''
   });
   
   const [showCoveModal, setShowCoveModal] = useState(false);
@@ -256,6 +257,9 @@ const RegistrationAdmin = () => {
     e.preventDefault();
     const orderError = validateWindowOrder(newTermForm);
     if (orderError) return showAlert(orderError, 'Invalid Dates', 'warning');
+    if (!newTermForm.regularRate || !newTermForm.anchoredRate) {
+      return showAlert('Regular Rate and Anchored Rate are required — without them every registration in this term bills at $0.', 'Missing Rates', 'warning');
+    }
     try {
       await api.post('/registration/terms', {
         name: newTermForm.name,
@@ -265,9 +269,12 @@ const RegistrationAdmin = () => {
         window2OpensAt: new Date(newTermForm.earlySameDayEnd).toISOString(),
         window3OpensAt: new Date(newTermForm.publicStart).toISOString(),
         registrationCloses: new Date(newTermForm.publicEnd).toISOString(),
+        regularRate: newTermForm.regularRate,
+        anchoredRate: newTermForm.anchoredRate,
+        depositDueDate: newTermForm.depositDueDate || null,
       });
       setShowNewTermModal(false);
-      setNewTermForm({ name: '', earlySameDayStart: '', earlySameDayEnd: '', publicStart: '', publicEnd: '' });
+      setNewTermForm({ name: '', earlySameDayStart: '', earlySameDayEnd: '', publicStart: '', publicEnd: '', regularRate: '', anchoredRate: '', depositDueDate: '' });
       loadTerms();
       showAlert('Term created successfully.', 'Success', 'info');
     } catch (error) {
@@ -282,7 +289,10 @@ const RegistrationAdmin = () => {
       earlySameDayStart: formatDateForInput(term.window1OpensAt),
       earlySameDayEnd: formatDateForInput(term.window2OpensAt),
       publicStart: formatDateForInput(term.window3OpensAt),
-      publicEnd: formatDateForInput(term.registrationCloses)
+      publicEnd: formatDateForInput(term.registrationCloses),
+      regularRate: term.regularRate ?? '',
+      anchoredRate: term.anchoredRate ?? '',
+      depositDueDate: term.depositDueDate ? formatDateForInput(term.depositDueDate) : '',
     });
     setEditTermModal(true);
   };
@@ -298,6 +308,9 @@ const RegistrationAdmin = () => {
         window2OpensAt: new Date(editTermForm.earlySameDayEnd).toISOString(),
         window3OpensAt: new Date(editTermForm.publicStart).toISOString(),
         registrationCloses: new Date(editTermForm.publicEnd).toISOString(),
+        regularRate: editTermForm.regularRate,
+        anchoredRate: editTermForm.anchoredRate,
+        depositDueDate: editTermForm.depositDueDate || null,
       });
       setEditTermModal(false);
       loadTerms();
@@ -488,10 +501,15 @@ const RegistrationAdmin = () => {
                       {term.name}
                       <span className={`status-badge ${term.status.toLowerCase()}`}>{term.status}</span>
                     </h2>
+                    <p style={{ margin: '4px 0 0', fontSize: '13px', color: (!term.regularRate && !term.anchoredRate) ? '#dc2626' : 'var(--text-muted)' }}>
+                      {(!term.regularRate && !term.anchoredRate)
+                        ? '⚠ No rate set — registrations in this term will bill at $0'
+                        : `Regular: $${Number(term.regularRate).toFixed(2)} · Anchored: $${Number(term.anchoredRate).toFixed(2)}`}
+                    </p>
                   </div>
                   <button className="icon-btn" onClick={() => handleViewConfig(term)}><Settings size={18} /></button>
                 </div>
-                
+
                 <div className="windows-timeline">
                   <div className="window-step">
                     <div className="step-marker"><span className="step-num">1</span></div>
@@ -1061,6 +1079,24 @@ const RegistrationAdmin = () => {
                 </div>
               </div>
 
+              <div className="reg-window-box">
+                <h4>Pricing</h4>
+                <div className="reg-date-row">
+                  <div>
+                    <label className="reg-form-label">Regular Rate ($/quarter)</label>
+                    <input type="number" min="0" step="0.01" required className="form-control" value={editTermForm.regularRate} onChange={(e) => setEditTermForm({...editTermForm, regularRate: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="reg-form-label">Anchored Rate ($/quarter)</label>
+                    <input type="number" min="0" step="0.01" required className="form-control" value={editTermForm.anchoredRate} onChange={(e) => setEditTermForm({...editTermForm, anchoredRate: e.target.value})} />
+                  </div>
+                </div>
+                <div>
+                  <label className="reg-form-label">Deposit Due Date (optional)</label>
+                  <input type="date" className="form-control" value={editTermForm.depositDueDate} onChange={(e) => setEditTermForm({...editTermForm, depositDueDate: e.target.value})} />
+                </div>
+              </div>
+
               <div className="reg-form-actions">
                 <button type="button" className="btn-text" onClick={() => setEditTermModal(false)}>Cancel</button>
                 <button type="submit" className="btn-primary">Save Changes</button>
@@ -1106,6 +1142,24 @@ const RegistrationAdmin = () => {
                 <div className="reg-date-row">
                   <input type="date" required className="form-control" value={newTermForm.publicStart} onChange={(e) => setNewTermForm({...newTermForm, publicStart: e.target.value})} />
                   <input type="date" required className="form-control" value={newTermForm.publicEnd} onChange={(e) => setNewTermForm({...newTermForm, publicEnd: e.target.value})} />
+                </div>
+              </div>
+
+              <div className="reg-window-box">
+                <h4>Pricing</h4>
+                <div className="reg-date-row">
+                  <div>
+                    <label className="reg-form-label">Regular Rate ($/quarter)</label>
+                    <input type="number" min="0" step="0.01" required className="form-control" placeholder="e.g. 900" value={newTermForm.regularRate} onChange={(e) => setNewTermForm({...newTermForm, regularRate: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="reg-form-label">Anchored Rate ($/quarter)</label>
+                    <input type="number" min="0" step="0.01" required className="form-control" placeholder="e.g. 750" value={newTermForm.anchoredRate} onChange={(e) => setNewTermForm({...newTermForm, anchoredRate: e.target.value})} />
+                  </div>
+                </div>
+                <div>
+                  <label className="reg-form-label">Deposit Due Date (optional)</label>
+                  <input type="date" className="form-control" value={newTermForm.depositDueDate} onChange={(e) => setNewTermForm({...newTermForm, depositDueDate: e.target.value})} />
                 </div>
               </div>
 

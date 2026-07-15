@@ -1,6 +1,5 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../config/database.js';
-import { sleep } from '../utils/helpers.js';
 import { invalidate } from '../middleware/cache.js';
 import { calculateRegistrationBilling } from '../services/registrationPricing.service.js';
 import { sendRegistrationBillingEmail } from '../services/email.service.js';
@@ -74,10 +73,26 @@ const validateWindowOrder = ({ window1OpensAt, window2OpensAt, window3OpensAt, r
  */
 export const createTerm = async (req, res, next) => {
   try {
-    const { name, startDate, endDate, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses } = req.body;
+    const { name, startDate, endDate, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses, regularRate, anchoredRate, depositDueDate } = req.body;
 
     const orderError = validateWindowOrder({ window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses });
     if (orderError) return res.status(400).json({ message: orderError });
+
+    // Both rates are required at creation time — a term with no rate would
+    // silently bill every registration in it at $0 (RegistrationTerm.regularRate
+    // defaults to 0), which nobody would notice until a parent saw a $0 total.
+    if (regularRate === undefined || regularRate === null || regularRate === '') {
+      return res.status(400).json({ message: 'regularRate is required.' });
+    }
+    if (anchoredRate === undefined || anchoredRate === null || anchoredRate === '') {
+      return res.status(400).json({ message: 'anchoredRate is required.' });
+    }
+    if (isNaN(Number(regularRate)) || Number(regularRate) < 0) {
+      return res.status(400).json({ message: 'regularRate must be a non-negative number.' });
+    }
+    if (isNaN(Number(anchoredRate)) || Number(anchoredRate) < 0) {
+      return res.status(400).json({ message: 'anchoredRate must be a non-negative number.' });
+    }
 
     // 1. Create the Term
     const term = await prisma.registrationTerm.create({
@@ -89,6 +104,9 @@ export const createTerm = async (req, res, next) => {
         window2OpensAt: new Date(window2OpensAt),
         window3OpensAt: new Date(window3OpensAt),
         registrationCloses: new Date(registrationCloses),
+        regularRate: Number(regularRate),
+        anchoredRate: Number(anchoredRate),
+        depositDueDate: depositDueDate ? new Date(depositDueDate) : null,
         status: 'UPCOMING',
       },
     });
@@ -627,10 +645,17 @@ export const getTermElectives = async (req, res, next) => {
 export const updateTerm = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses } = req.body;
+    const { name, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses, regularRate, anchoredRate, depositDueDate } = req.body;
 
     const orderError = validateWindowOrder({ window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses });
     if (orderError) return res.status(400).json({ message: orderError });
+
+    if (regularRate !== undefined && (isNaN(Number(regularRate)) || Number(regularRate) < 0)) {
+      return res.status(400).json({ message: 'regularRate must be a non-negative number.' });
+    }
+    if (anchoredRate !== undefined && (isNaN(Number(anchoredRate)) || Number(anchoredRate) < 0)) {
+      return res.status(400).json({ message: 'anchoredRate must be a non-negative number.' });
+    }
 
     const term = await prisma.registrationTerm.update({
       where: { id },
@@ -639,7 +664,10 @@ export const updateTerm = async (req, res, next) => {
         window1OpensAt: new Date(window1OpensAt),
         window2OpensAt: new Date(window2OpensAt),
         window3OpensAt: new Date(window3OpensAt),
-        registrationCloses: new Date(registrationCloses)
+        registrationCloses: new Date(registrationCloses),
+        ...(regularRate !== undefined && { regularRate: Number(regularRate) }),
+        ...(anchoredRate !== undefined && { anchoredRate: Number(anchoredRate) }),
+        ...(depositDueDate !== undefined && { depositDueDate: depositDueDate ? new Date(depositDueDate) : null }),
       }
     });
     invalidate('registration:terms');

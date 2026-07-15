@@ -16,7 +16,7 @@ async function main() {
   }
 
   // 1. Thread: Admin & Teacher
-  const thread1 = await prisma.chatThread.create({
+  await prisma.chatThread.create({
     data: {
       participants: {
         create: [
@@ -40,7 +40,7 @@ async function main() {
   });
 
   // 2. Thread: Admin & Parent
-  const thread2 = await prisma.chatThread.create({
+  await prisma.chatThread.create({
     data: {
       participants: {
         create: [
@@ -64,7 +64,7 @@ async function main() {
   });
 
   // 3. System Bot Thread for Admin
-  const botThread = await prisma.chatThread.create({
+  await prisma.chatThread.create({
     data: {
       isBot: true,
       name: 'System Assistant',

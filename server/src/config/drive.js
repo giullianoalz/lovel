@@ -1,6 +1,5 @@
 import { google } from 'googleapis';
 import fs from 'fs';
-import path from 'path';
 
 // Parse Google Drive credentials from environment variables
 const getDriveAuth = () => {

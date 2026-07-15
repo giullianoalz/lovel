@@ -190,16 +190,6 @@ const ClassSession = () => {
     }));
   };
 
-  const selectAllPresent = () => {
-    const newSelection = {};
-    students.forEach(s => {
-      if (attendance[s.id] === 'present') {
-        newSelection[s.id] = true;
-      }
-    });
-    setSelectedForPrize(newSelection);
-  };
-
   const handleAwardPoints = async () => {
     const idsToAward = Object.keys(selectedForPrize).filter(id => selectedForPrize[id]);
     if (idsToAward.length === 0 || !prizePoints || !prizeReason) return;

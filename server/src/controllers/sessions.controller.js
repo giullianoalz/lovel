@@ -1,7 +1,11 @@
 import prisma from '../config/database.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { sendNotification } from '../jobs/notification.helper.js';
-import { getAcademySettings } from '../services/settings.service.js';
+import {
+  getEventConfig,
+  getAdminUserIds,
+  getParentUserIdsForStudents,
+} from '../services/notificationConfig.service.js';
 
 // A student cancelling with less than this many hours' notice triggers a
 // suggested (not automatic) 50% charge that the admin must review.
@@ -251,12 +255,13 @@ export const updateAttendance = async (req, res, next) => {
   }
 };
 
-// Notifies each absent student's parent(s), respecting the admin's
-// absenceAlertEnabled toggle. dedupKey is per session+student so re-saving
-// the same attendance sheet (e.g. adding a note afterward) never re-notifies.
+// Notifies the configured audience when a student is marked absent, respecting
+// the admin's per-event ABSENCE config (on/off + audience). dedupKey is per
+// session+student+recipient so re-saving the same attendance sheet (e.g. adding
+// a note afterward) never re-notifies.
 const notifyParentsOfAbsence = async (sessionId, studentIds) => {
-  const settings = await getAcademySettings();
-  if (!settings.absenceAlertEnabled) return;
+  const config = await getEventConfig('ABSENCE');
+  if (!config?.enabled || config.audience.length === 0) return;
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -264,26 +269,30 @@ const notifyParentsOfAbsence = async (sessionId, studentIds) => {
   });
   if (!session) return;
 
-  const familyMembers = await prisma.familyMember.findMany({
+  const students = await prisma.familyMember.findMany({
     where: { userId: { in: studentIds } },
-    select: { familyId: true, userId: true, user: { select: { fullName: true } } },
+    select: { userId: true, user: { select: { fullName: true } } },
   });
 
-  for (const studentFM of familyMembers) {
-    const parents = await prisma.familyMember.findMany({
-      where: { familyId: studentFM.familyId, user: { role: 'PARENT' } },
-      select: { userId: true },
-    });
+  // Admins are the same for every student in this batch, so resolve once.
+  const adminIds = config.audience.includes('ADMINS') ? await getAdminUserIds() : [];
 
-    for (const parent of parents) {
+  for (const studentFM of students) {
+    const recipients = new Set(adminIds);
+    if (config.audience.includes('PARENTS')) {
+      const parentIds = await getParentUserIdsForStudents([studentFM.userId]);
+      parentIds.forEach((id) => recipients.add(id));
+    }
+
+    for (const userId of recipients) {
       await sendNotification({
-        userId: parent.userId,
+        userId,
         type: 'ABSENCE',
         title: `${studentFM.user.fullName} was marked absent`,
         message: `${studentFM.user.fullName} was marked absent from ${session.class.name} today.`,
         referenceType: 'session',
         referenceId: sessionId,
-        dedupKey: `absence-${sessionId}-${studentFM.userId}`,
+        dedupKey: `absence-${sessionId}-${studentFM.userId}-${userId}`,
       });
     }
   }

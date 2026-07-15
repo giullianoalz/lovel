@@ -1,7 +1,11 @@
 import cron from 'node-cron';
 import prisma from '../config/database.js';
 import { sendNotification } from './notification.helper.js';
-import { getAcademySettings } from '../services/settings.service.js';
+import {
+  getEventConfig,
+  getAdminUserIds,
+  getParentUserIdsForStudents,
+} from '../services/notificationConfig.service.js';
 
 /**
  * Scheduled background jobs for the Academy Management System.
@@ -51,20 +55,33 @@ const checkOverdueInvoices = async () => {
 
     console.log(`[CRON] Found ${overdue.length} overdue invoice(s).`);
 
+    // Marking invoices OVERDUE is an accounting state that must happen even if
+    // the alert is switched off; only the notifications are gated by config.
+    const config = await getEventConfig('PAYMENT_OVERDUE');
+    const notify = config?.enabled && config.audience.length > 0;
+    const adminIds = notify && config.audience.includes('ADMINS') ? await getAdminUserIds() : [];
+    const todayStr = new Date().toISOString().split('T')[0];
+
     for (const invoice of overdue) {
       const daysOverdue = Math.floor((Date.now() - new Date(invoice.dueDate)) / 86_400_000);
-      const recipients = invoice.family?.members?.map((m) => m.user) || [];
 
-      for (const parent of recipients) {
-        await sendNotification({
-          userId: parent.id,
-          type: 'PAYMENT_OVERDUE',
-          title: `Invoice ${invoice.invoiceNumber} is overdue`,
-          message: `Your invoice of $${Number(invoice.totalAmount).toFixed(2)} was due ${daysOverdue} day(s) ago. Please make a payment as soon as possible.`,
-          referenceType: 'invoice',
-          referenceId: invoice.id,
-          dedupKey: `overdue-invoice-${invoice.id}-${new Date().toISOString().split('T')[0]}`,
-        });
+      if (notify) {
+        const recipients = new Set(adminIds);
+        if (config.audience.includes('PARENTS')) {
+          (invoice.family?.members || []).forEach((m) => m.user && recipients.add(m.user.id));
+        }
+
+        for (const userId of recipients) {
+          await sendNotification({
+            userId,
+            type: 'PAYMENT_OVERDUE',
+            title: `Invoice ${invoice.invoiceNumber} is overdue`,
+            message: `Invoice ${invoice.invoiceNumber} of $${Number(invoice.totalAmount).toFixed(2)} was due ${daysOverdue} day(s) ago.`,
+            referenceType: 'invoice',
+            referenceId: invoice.id,
+            dedupKey: `overdue-invoice-${invoice.id}-${todayStr}`,
+          });
+        }
       }
 
       // Mark invoice as OVERDUE in DB
@@ -87,11 +104,16 @@ const checkOverdueInvoices = async () => {
 const checkRepeatedAbsences = async () => {
   console.log('[CRON] Checking repeated absences…');
   try {
+    const config = await getEventConfig('REPEATED_ABSENCE');
+    if (!config?.enabled || config.audience.length === 0) return;
+
+    const { thresholdCount, windowDays } = config.params;
+
     const since = new Date();
-    since.setDate(since.getDate() - 30);
+    since.setDate(since.getDate() - windowDays);
     since.setHours(0, 0, 0, 0);
 
-    // Count absences per student in the past 30 days
+    // Count absences per student within the configured window
     const absences = await prisma.attendance.groupBy({
       by: ['studentId'],
       where: {
@@ -99,7 +121,7 @@ const checkRepeatedAbsences = async () => {
         checkedAt: { gte: since },
       },
       _count: { id: true },
-      having: { id: { _count: { gte: 3 } } },
+      having: { id: { _count: { gte: thresholdCount } } },
     });
 
     if (absences.length === 0) {
@@ -107,11 +129,8 @@ const checkRepeatedAbsences = async () => {
       return;
     }
 
-    // Find the admin(s) to notify
-    const admins = await prisma.user.findMany({
-      where: { role: 'ADMIN', status: 'ACTIVE' },
-      select: { id: true },
-    });
+    const adminIds = config.audience.includes('ADMINS') ? await getAdminUserIds() : [];
+    const todayStr = new Date().toISOString().split('T')[0];
 
     for (const row of absences) {
       const student = await prisma.user.findUnique({
@@ -121,14 +140,18 @@ const checkRepeatedAbsences = async () => {
       if (!student) continue;
 
       const count = row._count.id;
-      const todayStr = new Date().toISOString().split('T')[0];
+      const recipients = new Set(adminIds);
+      if (config.audience.includes('PARENTS')) {
+        const parentIds = await getParentUserIdsForStudents([student.id]);
+        parentIds.forEach((id) => recipients.add(id));
+      }
 
-      for (const admin of admins) {
+      for (const userId of recipients) {
         await sendNotification({
-          userId: admin.id,
+          userId,
           type: 'REPEATED_ABSENCE',
           title: `Repeated absences — ${student.fullName}`,
-          message: `${student.fullName} has missed ${count} session(s) in the last 30 days.`,
+          message: `${student.fullName} has missed ${count} session(s) in the last ${windowDays} days.`,
           referenceType: 'student',
           referenceId: student.id,
           dedupKey: `repeated-absence-${student.id}-${todayStr}`,
@@ -150,12 +173,17 @@ const checkRepeatedAbsences = async () => {
 const checkLowSnackPunches = async () => {
   console.log('[CRON] Checking low snack punches…');
   try {
+    const config = await getEventConfig('LOW_SNACK_PUNCHES');
+    if (!config?.enabled || config.audience.length === 0) return;
+
+    const { thresholdPunches } = config.params;
+
     const lowPunch = await prisma.user.findMany({
       where: {
         role: 'STUDENT',
         status: 'ACTIVE',
         snackAuthorized: true,
-        snackPunches: { lte: 2 }, // 2 or fewer punches
+        snackPunches: { lte: thresholdPunches },
       },
       select: { id: true, fullName: true, snackPunches: true },
     });
@@ -165,24 +193,41 @@ const checkLowSnackPunches = async () => {
       return;
     }
 
-    const admins = await prisma.user.findMany({
-      where: { role: 'ADMIN', status: 'ACTIVE' },
-      select: { id: true },
-    });
-
-    const names = lowPunch.map((s) => `${s.fullName} (${s.snackPunches} punches)`).join(', ');
     const todayStr = new Date().toISOString().split('T')[0];
 
-    for (const admin of admins) {
-      await sendNotification({
-        userId: admin.id,
-        type: 'LOW_SNACK_PUNCHES',
-        title: `${lowPunch.length} student(s) have low snack punches`,
-        message: `The following students need a snack punch top-up: ${names}.`,
-        referenceType: 'snack',
-        referenceId: null,
-        dedupKey: `low-snack-${todayStr}`,
-      });
+    // Admins get a single roll-up listing every low student.
+    if (config.audience.includes('ADMINS')) {
+      const adminIds = await getAdminUserIds();
+      const names = lowPunch.map((s) => `${s.fullName} (${s.snackPunches} punches)`).join(', ');
+      for (const userId of adminIds) {
+        await sendNotification({
+          userId,
+          type: 'LOW_SNACK_PUNCHES',
+          title: `${lowPunch.length} student(s) have low snack punches`,
+          message: `The following students need a snack punch top-up: ${names}.`,
+          referenceType: 'snack',
+          referenceId: null,
+          dedupKey: `low-snack-${todayStr}`,
+        });
+      }
+    }
+
+    // Parents get a message about their own child only — never the full roster.
+    if (config.audience.includes('PARENTS')) {
+      for (const student of lowPunch) {
+        const parentIds = await getParentUserIdsForStudents([student.id]);
+        for (const userId of parentIds) {
+          await sendNotification({
+            userId,
+            type: 'LOW_SNACK_PUNCHES',
+            title: `${student.fullName} is low on snack punches`,
+            message: `${student.fullName} has ${student.snackPunches} snack punch(es) left. Consider topping up.`,
+            referenceType: 'snack',
+            referenceId: student.id,
+            dedupKey: `low-snack-${student.id}-${todayStr}`,
+          });
+        }
+      }
     }
 
     console.log(`[CRON] Low-snack alert sent for ${lowPunch.length} student(s).`);
@@ -202,10 +247,13 @@ const checkLowSnackPunches = async () => {
 // ─────────────────────────────────────────────────────────────
 const sendClassStartingSoonReminders = async () => {
   try {
-    const settings = await getAcademySettings();
-    if (!settings.classReminderEnabled) return;
+    const config = await getEventConfig('CLASS_REMINDER');
+    if (!config?.enabled || config.audience.length === 0) return;
 
-    const minutesBefore = settings.classReminderMinutesBefore;
+    const minutesBefore = config.params.minutesBefore;
+    const notifyAdmins = config.audience.includes('ADMINS');
+    const notifyParents = config.audience.includes('PARENTS');
+    const adminIds = notifyAdmins ? await getAdminUserIds() : [];
     const now = new Date();
     const todayDateOnly = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
@@ -238,28 +286,23 @@ const sendClassStartingSoonReminders = async () => {
       const studentIds = session.class.enrollments.map((e) => e.studentId);
       if (studentIds.length === 0) continue;
 
-      const familyMembers = await prisma.familyMember.findMany({
-        where: { userId: { in: studentIds } },
-        select: { familyId: true },
-      });
-      const familyIds = [...new Set(familyMembers.map((f) => f.familyId))];
-      if (familyIds.length === 0) continue;
-
-      const parents = await prisma.familyMember.findMany({
-        where: { familyId: { in: familyIds }, user: { role: 'PARENT' } },
-        select: { userId: true },
-      });
+      const recipients = new Set(adminIds);
+      if (notifyParents) {
+        const parentIds = await getParentUserIdsForStudents(studentIds);
+        parentIds.forEach((id) => recipients.add(id));
+      }
+      if (recipients.size === 0) continue;
 
       const roundedMinutes = Math.max(1, Math.round(minutesUntilStart));
-      for (const parent of parents) {
+      for (const userId of recipients) {
         await sendNotification({
-          userId: parent.userId,
+          userId,
           type: 'CLASS_REMINDER',
           title: `${session.class.name} starts soon`,
           message: `Class starts in about ${roundedMinutes} minute(s).`,
           referenceType: 'session',
           referenceId: session.id,
-          dedupKey: `class-reminder-${session.id}-${parent.userId}`,
+          dedupKey: `class-reminder-${session.id}-${userId}`,
         });
       }
     }

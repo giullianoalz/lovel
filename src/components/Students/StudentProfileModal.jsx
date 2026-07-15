@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
@@ -14,9 +14,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   // inside the app so families can't be solicited directly outside of it.
   const isTeacher = role === 'TEACHER';
   const [student, setStudent] = useState(initialStudent);
-  const [snackCabinet, setSnackCabinet] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [purchasing, setPurchasing] = useState(false);
+  const [, setLoading] = useState(true);
   const [showCabinet, setShowCabinet] = useState(false);
   const [materialSearch, setMaterialSearch] = useState('');
 
@@ -42,7 +40,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
       }
       toast.success(`${reportType === 'medical' ? 'Medical' : 'Behavior'} report submitted`);
       setReportType(null);
-    } catch (err) {
+    } catch {
       toast.error('Error submitting report');
     }
     setReportSubmitting(false);

@@ -427,6 +427,7 @@ const ParentPortal = () => {
   const [regLoading, setRegLoading] = useState(false);
   const [regError, setRegError]     = useState(null);
   const [regSubmitting, setRegSubmitting] = useState(null);
+  const [reloadSubmitting, setReloadSubmitting] = useState(null);
   const navigate = useNavigate();
 
   const handleCopy = (id, value) => {
@@ -526,6 +527,24 @@ const ParentPortal = () => {
       await api.delete(`/portal/parent/pickup/${id}`);
       setPickupAuths(prev => prev.filter(a => a.id !== id));
     } catch (err) { console.error(err); }
+  };
+
+  const handleReloadDecision = async (childId, requestId, decision) => {
+    setReloadSubmitting(requestId);
+    try {
+      await api.patch(`/portal/parent/snack-reloads/${requestId}`, { decision });
+      // Clear the banner locally so the child card updates immediately.
+      setData(prev => prev && {
+        ...prev,
+        children: prev.children.map(c =>
+          c.id === childId ? { ...c, pendingReload: null } : c
+        ),
+      });
+    } catch (err) {
+      setError(err.userMessage || err.response?.data?.message || 'Could not submit your decision.');
+    } finally {
+      setReloadSubmitting(null);
+    }
   };
 
   const handlePay = async (invoiceId) => {
@@ -664,6 +683,40 @@ const ParentPortal = () => {
                     <AlertTriangle size={15} />
                     {child.allergies && <span><strong>Allergies:</strong> {child.allergies}</span>}
                     {child.medicalNotes && <span><strong>Medical:</strong> {child.medicalNotes}</span>}
+                  </div>
+                )}
+
+                {/* Snack card reached 0 — parent must approve a paid reload */}
+                {child.pendingReload && (
+                  <div className="pp-reload-banner">
+                    <div className="pp-reload-head">
+                      <span className="pp-reload-emoji">🍪</span>
+                      <div>
+                        <h4>{child.fullName?.split(' ')[0]} ran out of snack punches</h4>
+                        <p>
+                          Approve reloading <strong>{child.pendingReload.punchCount} punches</strong> for{' '}
+                          <strong>${child.pendingReload.price.toFixed(2)}</strong>? This will be charged to your account.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="pp-reload-actions">
+                      <button
+                        className="pp-reload-reject"
+                        disabled={reloadSubmitting === child.pendingReload.id}
+                        onClick={() => handleReloadDecision(child.id, child.pendingReload.id, 'REJECTED')}
+                      >
+                        <X size={15} /> Not now
+                      </button>
+                      <button
+                        className="pp-reload-approve"
+                        disabled={reloadSubmitting === child.pendingReload.id}
+                        onClick={() => handleReloadDecision(child.id, child.pendingReload.id, 'APPROVED')}
+                      >
+                        {reloadSubmitting === child.pendingReload.id
+                          ? 'Submitting...'
+                          : <><CheckCircle size={15} /> Approve reload</>}
+                      </button>
+                    </div>
                   </div>
                 )}
 

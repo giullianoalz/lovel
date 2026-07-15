@@ -23,7 +23,7 @@ const BehaviorTracker = () => {
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [total, setTotal] = useState(0);
+  const [, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [students, setStudents] = useState([]);
@@ -100,7 +100,7 @@ const BehaviorTracker = () => {
       setReviewLog(null);
       await loadLogs();
       toast.success(status === 'SENT_TO_PARENT' ? 'Sent to parent' : 'Incident downgraded');
-    } catch (error) {
+    } catch {
       toast.error('Could not update the incident.');
     }
     setReviewSubmitting(false);

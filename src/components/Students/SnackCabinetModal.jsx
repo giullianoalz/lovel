@@ -16,7 +16,7 @@ const SnackCabinetModal = ({
   const [purchasing, setPurchasing] = useState(false);
   
   // Cabinet Management State
-  const [isManagingCabinet, setIsManagingCabinet] = useState(mode === 'manage');
+  const [isManagingCabinet] = useState(mode === 'manage');
   const [isAddingSnack, setIsAddingSnack] = useState(false);
   const [newSnackForm, setNewSnackForm] = useState({ name: '', cost: '', image: '' });
   const fileInputRef = useRef(null);
@@ -65,6 +65,9 @@ const SnackCabinetModal = ({
     try {
       const result = await database.purchaseSnack(student.id, snack.id);
       if (result && result.success) {
+        if (result.newBalance === 0) {
+          toast.info('Snack card is empty — the parent was asked to approve a reload.');
+        }
         onUpdate(result, snack);
         onClose();
       }

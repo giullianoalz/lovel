@@ -14,7 +14,7 @@ async function main() {
   // =============================================
   // 1. PAYMENT SETTINGS (singleton)
   // =============================================
-  const paymentSettings = await prisma.paymentSettings.upsert({
+  await prisma.paymentSettings.upsert({
     where: { id: '00000000-0000-0000-0000-000000000001' },
     update: {},
     create: {

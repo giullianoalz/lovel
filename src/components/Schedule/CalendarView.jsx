@@ -3,24 +3,49 @@ import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Vi
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../Layout/ToastProvider';
 import './CalendarView.css';
 
-const MOCK_EVENTS = [
-  { id: 1, title: 'Morning COVE: Math & Language Arts', subject: 'math', time: '10:00 AM - 12:50 PM', dayOffset: 0, type: 'Morning COVE', teacher: 'Prof. David Brown', students: 12, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor'], notes: '1 hr math, 1 hr language arts, 50 min lunch/social.', materials: [] },
-  { id: 2, title: 'Learn & Play (Ages 5-7)', subject: 'arts', time: '1:00 PM - 2:00 PM', dayOffset: 0, type: 'Elective Class', teacher: 'Prof. Sarah Jenkins', students: 8, studentList: ['Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson'], notes: 'Hands-on elective nurturing natural curiosity.', materials: [] },
-  { id: 3, title: 'Minecraft IRL (Ages 8-12)', subject: 'science', time: '1:00 PM - 2:00 PM', dayOffset: 0, type: 'Elective Class', teacher: 'Prof. Mark Wilson', students: 10, studentList: ['Maria Garcia', 'John Doe', 'William Garcia', 'Mason Taylor', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'Lucas Davis'], notes: 'STEAM course without screens.', materials: [] },
-  { id: 4, title: 'Afternoon COVE: Financial Literacy', subject: 'math', time: '2:10 PM - 5:00 PM', dayOffset: 0, type: 'Afternoon COVE', teacher: 'Prof. Elena Rodriguez', students: 15, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor', 'Mia Anderson', 'Ethan Thomas', 'Charlotte Jackson'], notes: 'Budgeting, saving, investing.', materials: [] },
-  { id: 5, title: 'Morning COVE: Math & Science', subject: 'science', time: '10:00 AM - 12:50 PM', dayOffset: 1, type: 'Morning COVE', teacher: 'Prof. David Brown', students: 14, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor', 'Mia Anderson', 'Ethan Thomas'], notes: '1 hr math, 1 hr science, 50 min lunch/social.', materials: [] },
-  { id: 6, title: 'Logic & Puzzles (Ages 8+)', subject: 'math', time: '1:00 PM - 2:00 PM', dayOffset: 1, type: 'Elective Class', teacher: 'Prof. Mark Wilson', students: 10, studentList: ['Maria Garcia', 'John Doe', 'William Garcia', 'Mason Taylor', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'Lucas Davis'], notes: 'Strategy games, riddles, team challenges.', materials: [] },
-  { id: 7, title: 'Afternoon COVE: LA & Social Studies', subject: 'languages', time: '2:10 PM - 5:00 PM', dayOffset: 1, type: 'Afternoon COVE', teacher: 'Prof. Sarah Jenkins', students: 12, studentList: ['Maria Garcia', 'John Doe', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor'], notes: '1 hr LA, 1 hr social studies, 50 min snack/social.', materials: [] },
-  { id: 8, title: '1-on-1 Tutoring', subject: 'languages', time: '12:00 PM - 1:00 PM', dayOffset: 0, type: 'Tutoring', teacher: 'Prof. Elena Rodriguez', students: 1, studentList: ['Sofia Ramirez'], notes: 'Private reading session.', materials: [] }
-];
-
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SUBJECT_KEYS = ['math', 'science', 'languages', 'arts'];
+const DAY_NAME_TO_NUM = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
 
-const AVAILABLE_STUDENTS = [
-  'Maria Garcia', 'John Doe', 'Sofia Ramirez', 'Emma Smith', 'Liam Johnson', 'Olivia Williams', 'Noah Brown', 'Ava Jones', 'William Garcia', 'Sophia Martinez', 'Lucas Davis', 'Isabella Wilson', 'Mason Taylor', 'Mia Anderson', 'Ethan Thomas', 'Charlotte Jackson', 'Amelia White', 'Harper Lee'
-];
+const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Prisma stores Session.startTime/endTime as a bare TIME value on a 1970-01-01
+// placeholder date — always read it back with the UTC getters, never local ones.
+const formatTimeOfDay = (isoTimeStr) => {
+  const d = new Date(isoTimeStr);
+  let h = d.getUTCHours();
+  const m = d.getUTCMinutes();
+  const period = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, '0')} ${period}`;
+};
+
+const to24h = (tStr) => {
+  const [t, p] = tStr.trim().split(' ');
+  let [h, m] = t.split(':').map(Number);
+  if (p === 'PM' && h !== 12) h += 12;
+  if (p === 'AM' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
+const timeRangeToStartEnd = (rangeStr) => {
+  const [startStr, endStr] = rangeStr.split(' - ');
+  return { startTime: to24h(startStr), endTime: to24h(endStr) };
+};
+
+const addMinutesToTime = (hhmm, minutes) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+};
+
+const subjectClass = (subject) => {
+  const s = (subject || '').toLowerCase();
+  return SUBJECT_KEYS.find(k => s.includes(k)) || 'math';
+};
 
 const formatDateUS = (dateStr) => {
   if (!dateStr) return '';
@@ -29,47 +54,6 @@ const formatDateUS = (dateStr) => {
   const [y, m, d] = parts;
   return `${m}/${d}/${y}`;
 };
-
-const QUICK_SELECT_GROUPS = [
-  {
-    category: 'Students',
-    options: ['Active Students (383)', 'Trial Students (37)']
-  },
-  {
-    category: 'Tara Sanford',
-    options: ['Active & Trial Students (209)']
-  },
-  {
-    category: 'Erica Hoffman',
-    options: ['Active & Trial Students (388)']
-  },
-  {
-    category: 'Group Tags',
-    options: [
-      'Fall 2025 (105)',
-      'Fall Online 2025 (28)',
-      'Friday 12 pm online Minecraft Social (6)',
-      'Homeschool Families (130)',
-      'Love Camp (140)',
-      'Love Learning FL LLC (227)'
-    ]
-  }
-];
-
-const TUTOR_GROUPS = [
-  {
-    category: 'Status',
-    options: ['Active Tutors (4)', 'Inactive Tutors (1)']
-  },
-  {
-    category: 'Departments',
-    options: ['Math Department', 'Science Department', 'Language Department']
-  }
-];
-
-const AVAILABLE_TUTORS = [
-  'Prof. David Brown', 'Prof. Sarah Jenkins', 'Prof. Mark Wilson', 'Prof. Elena Rodriguez'
-];
 
 const CATEGORY_GROUPS = [
   {
@@ -177,10 +161,14 @@ const MultiDatePicker = ({ selectedDates, onChange }) => {
 
 const CalendarView = () => {
   const { role } = useAuth();
+  const toast = useToast();
   const canAddEvents = role === 'ADMIN';
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [localEvents, setLocalEvents] = useState(MOCK_EVENTS);
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [classesList, setClassesList] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editNotes, setEditNotes] = useState('');
@@ -282,9 +270,6 @@ const CalendarView = () => {
   const attendeeSectionRef = useRef(null);
   const addEventRef = useRef(null);
   
-  const [miniCalDate, setMiniCalDate] = useState(new Date());
-  const handleMiniCalPrev = () => setMiniCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-  const handleMiniCalNext = () => setMiniCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
   const [newEventForm, setNewEventForm] = useState({
     // New Top-Level Fields
@@ -308,14 +293,14 @@ const CalendarView = () => {
     classDates: [],
     
     // Standard Date/Time (for Class or 1-time Tutoring)
-    date: '2026-04-28',
+    date: toISODate(new Date()),
     time: '14:30',
     duration: 60,
     price: '',
     billingFrequency: 'Per Class', // 'Per Class', 'Weekly', 'Start of Cycle'
-    
+
     // Legacy / Shared
-    tutor: 'Prof. David Brown',
+    tutor: '',
     hasSubstitute: false,
     substituteTutor: '',
     students: [],
@@ -440,7 +425,115 @@ const CalendarView = () => {
       setAllStudents(data);
     };
     loadStudents();
+
+    database.fetchTeachers().then(setTeachers);
+    api.get('/classes?limit=200').then(r => setClassesList(r.data.classes || [])).catch(() => setClassesList([]));
   }, []);
+
+  // The visible date range for the current view — this is what actually gets
+  // fetched from the server. Month view fetches the full 42-cell grid (including
+  // the leading/trailing days from adjacent months that are shown) so nothing
+  // in the visible grid silently comes up empty.
+  const getVisibleRange = (viewMode, date) => {
+    if (viewMode === 'day') {
+      const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      return { start: d, end: d };
+    }
+    if (viewMode === 'week') {
+      const start = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
+      const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+      return { start, end };
+    }
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const start = new Date(year, month, 1 - firstDay);
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 41);
+    return { start, end };
+  };
+
+  const loadSessions = async (viewMode, date) => {
+    setSessionsLoading(true);
+    try {
+      const { start, end } = getVisibleRange(viewMode, date);
+      const res = await api.get(`/sessions?startDate=${toISODate(start)}&endDate=${toISODate(end)}`);
+      setSessions(res.data.sessions || []);
+    } catch (error) {
+      console.error('Error loading sessions:', error);
+      setSessions([]);
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  // Real sessions for the visible range — refetched whenever the view or the
+  // navigated-to date changes (this is what makes the nav arrows/Day view
+  // actually show different classes instead of the same fixed mock data).
+  useEffect(() => {
+    loadSessions(view, currentDate);
+  }, [view, currentDate]);
+
+  const reloadClasses = async () => {
+    try {
+      const res = await api.get('/classes?limit=200');
+      setClassesList(res.data.classes || []);
+    } catch { /* keep previous list on failure */ }
+  };
+
+  const classesById = React.useMemo(() => {
+    const map = {};
+    classesList.forEach(c => { map[c.id] = c; });
+    return map;
+  }, [classesList]);
+
+  // Maps a real Session (+ its Class) into the flat "event" shape the rest of
+  // this component's render/drag/edit logic already expects.
+  const mappedEvents = React.useMemo(() => {
+    return sessions
+      .filter(s => s.status !== 'CANCELLED')
+      .map(s => {
+        const classInfo = classesById[s.classId] || {};
+        const teacherName = classInfo.teacher?.fullName;
+        return {
+          id: s.id,
+          classId: s.classId,
+          title: s.class?.name || classInfo.name || 'Class',
+          subject: subjectClass(s.class?.subject || classInfo.subject),
+          time: `${formatTimeOfDay(s.startTime)} - ${formatTimeOfDay(s.endTime)}`,
+          dateStr: new Date(s.date).toISOString().split('T')[0],
+          type: (s.class?.type || classInfo.type) === 'VIRTUAL' ? 'Virtual' : 'In-Person',
+          teacher: teacherName || 'Unassigned',
+          teacherId: classInfo.teacherId || classInfo.teacher?.id || null,
+          students: classInfo._count?.enrollments ?? 0,
+          studentList: null, // lazily loaded when the event is opened
+          studentIds: [],
+          notes: s.notes?.[0]?.notes || '',
+          materials: (s.materials || []).map(m => ({ name: m.name, url: m.fileUrl })),
+          meetingUrl: s.class?.meetingUrl || classInfo.meetingUrl || '',
+          status: s.status,
+        };
+      });
+  }, [sessions, classesById]);
+
+  const quickSelectGroups = React.useMemo(() => ([
+    {
+      category: 'Students',
+      options: [
+        `Active Students (${allStudents.filter(s => s.status === 'Active').length})`,
+        `Trial Students (${allStudents.filter(s => s.status === 'Trial').length})`,
+      ],
+    },
+  ]), [allStudents]);
+
+  const tutorGroups = React.useMemo(() => ([
+    {
+      category: 'Status',
+      options: [
+        `Active Tutors (${teachers.filter(t => t.status === 'Active').length})`,
+        `Inactive Tutors (${teachers.filter(t => t.status !== 'Active').length})`,
+      ],
+    },
+  ]), [teachers]);
 
   // Click away listener for search popover and inner dropdowns
   useEffect(() => {
@@ -608,8 +701,8 @@ const CalendarView = () => {
   };
 
   const getFilteredEvents = () => {
-    let filtered = localEvents;
-    
+    let filtered = mappedEvents;
+
     // Filter by Categories
     if (searchForm.categories.length > 0) {
       filtered = filtered.filter(e => 
@@ -639,73 +732,127 @@ const CalendarView = () => {
 
   const events = getFilteredEvents();
 
-  const handleEventClick = (event) => {
+  const handleEventClick = async (event) => {
     setSelectedEvent(event);
     setEditNotes(event.notes || '');
     setIsEditing(false);
     setIsEditingEvent(false);
     setRosterSearch('');
+
+    // The tile only carries lightweight info — fetch the class roster and the
+    // session's full notes/materials the moment it's actually opened.
+    try {
+      const [classRes, sessionRes] = await Promise.all([
+        api.get(`/classes/${event.classId}`),
+        api.get(`/sessions/${event.id}`),
+      ]);
+      const cls = classRes.data.class;
+      const sess = sessionRes.data.session;
+      const studentIds = (cls.enrollments || []).map(en => ({ id: en.student.id, name: en.student.fullName }));
+      setSelectedEvent(prev => (prev && prev.id === event.id) ? {
+        ...prev,
+        studentList: studentIds.map(s => s.name),
+        studentIds,
+        notes: sess.notes?.[0]?.notes || '',
+        materials: (sess.materials || []).map(m => ({ name: m.name, url: m.fileUrl })),
+        meetingUrl: cls.meetingUrl || prev.meetingUrl,
+      } : prev);
+    } catch (error) {
+      console.error('Error loading session detail:', error);
+    }
   };
 
   const handleStartEditEvent = () => {
     setEditEventForm({
       title: selectedEvent.title,
-      type: selectedEvent.type,
       subject: selectedEvent.subject,
-      teacher: selectedEvent.teacher,
+      teacherId: selectedEvent.teacherId || '',
       time: selectedEvent.time,
-      studentList: [...(selectedEvent.studentList || [])]
+      studentList: [...(selectedEvent.studentIds || [])],
     });
     setIsEditingEvent(true);
     setRosterSearch('');
   };
 
-  const handleSaveEventEdit = () => {
-    const updated = {
-      ...selectedEvent,
-      title: editEventForm.title,
-      type: editEventForm.type,
-      subject: editEventForm.subject,
-      teacher: editEventForm.teacher,
-      time: editEventForm.time,
-      studentList: editEventForm.studentList,
-      students: editEventForm.studentList.length
-    };
-    setLocalEvents(prev => prev.map(e => e.id === selectedEvent.id ? updated : e));
-    setSelectedEvent(updated);
-    setIsEditingEvent(false);
+  const handleSaveEventEdit = async () => {
+    try {
+      await api.put(`/classes/${selectedEvent.classId}`, {
+        name: editEventForm.title,
+        subject: editEventForm.subject,
+        teacherId: editEventForm.teacherId || undefined,
+      });
+      const { startTime, endTime } = timeRangeToStartEnd(editEventForm.time);
+      await api.put(`/sessions/${selectedEvent.id}`, { startTime, endTime });
+
+      const newTeacher = teachers.find(t => t.id === editEventForm.teacherId);
+      const updated = {
+        ...selectedEvent,
+        title: editEventForm.title,
+        subject: editEventForm.subject,
+        teacher: newTeacher ? newTeacher.name : selectedEvent.teacher,
+        teacherId: editEventForm.teacherId,
+        time: editEventForm.time,
+        studentList: editEventForm.studentList.map(s => s.name),
+        studentIds: editEventForm.studentList,
+        students: editEventForm.studentList.length,
+      };
+      setSelectedEvent(updated);
+      setIsEditingEvent(false);
+      reloadClasses();
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not save these changes.');
+    }
   };
 
-  const handleAddStudentToRoster = (name) => {
-    if (!editEventForm.studentList.includes(name)) {
-      setEditEventForm(prev => ({ ...prev, studentList: [...prev.studentList, name] }));
+  const handleAddStudentToRoster = async (student) => {
+    if (editEventForm.studentList.some(s => s.id === student.id)) { setRosterSearch(''); return; }
+    try {
+      await api.post(`/classes/${selectedEvent.classId}/enrollments`, { studentId: student.id });
+      setEditEventForm(prev => ({ ...prev, studentList: [...prev.studentList, student] }));
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not add this student to the class.');
     }
     setRosterSearch('');
   };
 
-  const handleRemoveStudentFromRoster = (name) => {
-    setEditEventForm(prev => ({ ...prev, studentList: prev.studentList.filter(s => s !== name) }));
+  const handleRemoveStudentFromRoster = async (student) => {
+    try {
+      await api.delete(`/classes/${selectedEvent.classId}/enrollments/${student.id}`);
+      setEditEventForm(prev => ({ ...prev, studentList: prev.studentList.filter(s => s.id !== student.id) }));
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not remove this student from the class.');
+    }
   };
 
   const handleSaveNotes = async () => {
     setSaving(true);
     await database.saveClassNotes(selectedEvent.id, editNotes, selectedEvent.materials);
-    setLocalEvents(prev => prev.map(e => e.id === selectedEvent.id ? { ...e, notes: editNotes } : e));
     setSelectedEvent(prev => ({ ...prev, notes: editNotes }));
+    loadSessions(view, currentDate);
     setSaving(false);
     setIsEditing(false);
   };
 
+  // "Delete" cancels the session server-side (status: CANCELLED) rather than
+  // erasing it — there's no hard-delete endpoint, and a cancelled session still
+  // needs to exist for payroll/attendance history to make sense.
   const confirmDeleteEvent = (event) => {
     setAppAlert({
       isOpen: true,
-      title: 'Delete Event?',
-      message: `Are you sure you want to delete "${event.title}"? This action cannot be undone.`,
+      title: 'Cancel this session?',
+      message: `This marks "${event.title}" on ${event.dateStr} as cancelled. It disappears from the calendar but stays in the system's records — it won't be paid out or counted.`,
       type: 'danger',
-      onConfirm: () => {
-        setLocalEvents(prev => prev.filter(e => e.id !== event.id));
-        setSelectedEvent(null);
-        setAppAlert({ isOpen: false });
+      onConfirm: async () => {
+        try {
+          await api.put(`/sessions/${event.id}`, { status: 'CANCELLED' });
+          setSelectedEvent(null);
+          setAppAlert({ isOpen: false });
+          loadSessions(view, currentDate);
+        } catch (error) {
+          setAppAlert({ isOpen: false });
+          toast.error(error.response?.data?.message || 'Could not cancel this session.');
+        }
       }
     });
   };
@@ -720,38 +867,81 @@ const CalendarView = () => {
     setIsEditingLink(true);
   };
 
-  const handleSaveLink = () => {
+  const handleSaveLink = async () => {
     if (!selectedEvent) return;
-    setLocalEvents(prev => prev.map(e => 
-      e.id === selectedEvent.id 
-        ? { ...e, meetingUrl: editLink, type: editLink ? 'Virtual' : 'In-Person' } 
-        : e
-    ));
-    setSelectedEvent(prev => ({ 
-      ...prev, 
-      meetingUrl: editLink,
-      type: editLink ? 'Virtual' : 'In-Person'
-    }));
+    try {
+      await api.put(`/classes/${selectedEvent.classId}`, { meetingUrl: editLink });
+      setSelectedEvent(prev => ({ ...prev, meetingUrl: editLink }));
+      reloadClasses();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not save the meeting link.');
+    }
     setIsEditingLink(false);
   };
 
-  const handleSaveNewEvent = () => {
-    const attendeesNames = newEventForm.students.map(s => s.name).join(', ');
-    const newEvent = {
-      id: Date.now(),
-      title: attendeesNames ? `${newEventForm.eventType} with ${attendeesNames}` : newEventForm.eventType,
-      subject: newEventForm.category.toLowerCase().includes('math') ? 'math' : 'science', // simplified
-      time: `${newEventForm.time} - ${newEventForm.duration}m`, // rough mock format
-      dayOffset: 0, // mock adding to today
-      type: newEventForm.category,
-      teacher: newEventForm.tutor,
-      students: newEventForm.students.length,
-      notes: newEventForm.description,
-      materials: []
-    };
-    
-    setLocalEvents(prev => [...prev, newEvent]);
-    setActiveModal(null);
+  // Creates a real Class (if needed) plus its Session(s) — a Session can't
+  // exist without a Class behind it, so "adding an event" always creates one.
+  const handleSaveNewEvent = async () => {
+    try {
+      const tutor = teachers.find(t => t.id === newEventForm.tutor);
+      const isVirtual = (newEventForm.category || '').toLowerCase().includes('online') || (newEventForm.category || '').toLowerCase().includes('virtual');
+      const attendeeIds = newEventForm.students.filter(s => allStudents.some(as => as.id === s.id));
+
+      const classRes = await api.post('/classes', {
+        name: newEventForm.title || newEventForm.category || 'New Class',
+        subject: subjectClass(newEventForm.title),
+        teacherId: tutor?.id,
+        type: isVirtual ? 'VIRTUAL' : 'IN_PERSON',
+        maxStudents: Math.max(attendeeIds.length, 10),
+      });
+      const classId = classRes.data.class.id;
+
+      for (const student of attendeeIds) {
+        await api.post(`/classes/${classId}/enrollments`, { studentId: student.id }).catch(() => {});
+      }
+
+      const duration = parseInt(newEventForm.duration) || 60;
+
+      if (newEventForm.topLevelType === 'Tutoring' && newEventForm.tutoringRecurrence === '1 time') {
+        await api.post('/sessions', {
+          classId,
+          date: newEventForm.date,
+          startTime: newEventForm.time,
+          endTime: addMinutesToTime(newEventForm.time, duration),
+        });
+      } else if (newEventForm.topLevelType === 'Tutoring') {
+        const endDate = newEventForm.noEndDate
+          ? toISODate(new Date(new Date().setFullYear(new Date().getFullYear() + 1)))
+          : newEventForm.repeatUntil;
+        for (const row of newEventForm.scheduleDays) {
+          const rowDuration = parseInt(row.duration) || 60;
+          await api.post('/sessions/bulk', {
+            classId,
+            startDate: toISODate(new Date()),
+            endDate,
+            weekdays: [DAY_NAME_TO_NUM[row.day]],
+            startTime: row.time,
+            endTime: addMinutesToTime(row.time, rowDuration),
+          });
+        }
+      } else {
+        const dates = newEventForm.classDates.length ? newEventForm.classDates : [newEventForm.date];
+        for (const dateStr of dates) {
+          await api.post('/sessions', {
+            classId,
+            date: dateStr,
+            startTime: newEventForm.time,
+            endTime: addMinutesToTime(newEventForm.time, duration),
+          });
+        }
+      }
+
+      setActiveModal(null);
+      reloadClasses();
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not create this event.');
+    }
   };
 
   const getDurationMins = (timeStr) => {
@@ -810,65 +1000,65 @@ const CalendarView = () => {
     e.dataTransfer.setData('offsetY', (e.clientY - rect.top).toString());
   };
 
-  const handleDropOnWeekDay = (e, newDayOffset) => {
+  // Dropping a session onto a different day/time updates its real date and/or
+  // time via PUT /sessions/:id — targetDate is an actual Date, not a mock offset.
+  const handleDropOnWeekDay = async (e, targetDate) => {
     e.preventDefault();
     const eventId = e.dataTransfer.getData('eventId');
     const offsetY = parseFloat(e.dataTransfer.getData('offsetY') || '0');
-    
-    if (eventId) {
-      const container = e.currentTarget.querySelector('.timeline-container') || e.currentTarget;
-      let newTimeRange = null;
-      
-      if (container && container.classList.contains('timeline-container')) {
-         const containerRect = container.getBoundingClientRect();
-         const dropY = e.clientY - containerRect.top;
-         const eventItem = localEvents.find(ev => ev.id.toString() === eventId);
-         if (eventItem) {
-           newTimeRange = calculateNewTimeRange(eventItem.time, dropY, offsetY);
-         }
-      }
+    if (!eventId) return;
 
-      setLocalEvents(prev => prev.map(ev => {
-        if (ev.id.toString() === eventId) {
-          return { 
-            ...ev, 
-            dayOffset: newDayOffset,
-            ...(newTimeRange ? { time: newTimeRange } : {})
-          };
-        }
-        return ev;
-      }));
+    const eventItem = events.find(ev => ev.id.toString() === eventId);
+    if (!eventItem) return;
+
+    const payload = { date: toISODate(targetDate) };
+    const container = e.currentTarget.querySelector('.timeline-container') || e.currentTarget;
+    if (container && container.classList.contains('timeline-container')) {
+      const containerRect = container.getBoundingClientRect();
+      const dropY = e.clientY - containerRect.top;
+      const newTimeRange = calculateNewTimeRange(eventItem.time, dropY, offsetY);
+      Object.assign(payload, timeRangeToStartEnd(newTimeRange));
+    }
+
+    try {
+      await api.put(`/sessions/${eventItem.id}`, payload);
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not reschedule this session.');
     }
   };
 
-  const handleDropOnTeacher = (e, newTeacher) => {
+  // Dropping onto a different teacher's column reassigns the whole class to
+  // that teacher (there's no per-session substitute field) — a real, if
+  // broader, effect worth knowing about before dragging one across columns.
+  const handleDropOnTeacher = async (e, newTeacherLabel) => {
     e.preventDefault();
     const eventId = e.dataTransfer.getData('eventId');
     const offsetY = parseFloat(e.dataTransfer.getData('offsetY') || '0');
-    
-    if (eventId) {
-      const container = e.currentTarget.querySelector('.timeline-container') || e.currentTarget;
-      let newTimeRange = null;
-      
-      if (container && container.classList.contains('timeline-container')) {
-         const containerRect = container.getBoundingClientRect();
-         const dropY = e.clientY - containerRect.top;
-         const eventItem = localEvents.find(ev => ev.id.toString() === eventId);
-         if (eventItem) {
-           newTimeRange = calculateNewTimeRange(eventItem.time, dropY, offsetY);
-         }
-      }
+    if (!eventId) return;
 
-      setLocalEvents(prev => prev.map(ev => {
-        if (ev.id.toString() === eventId) {
-          return { 
-            ...ev, 
-            teacher: newTeacher,
-            ...(newTimeRange ? { time: newTimeRange } : {})
-          };
-        }
-        return ev;
-      }));
+    const eventItem = events.find(ev => ev.id.toString() === eventId);
+    const newTeacher = teachers.find(t => t.name === newTeacherLabel);
+    if (!eventItem || !newTeacher) return;
+
+    const sessionPayload = {};
+    const container = e.currentTarget.querySelector('.timeline-container') || e.currentTarget;
+    if (container && container.classList.contains('timeline-container')) {
+      const containerRect = container.getBoundingClientRect();
+      const dropY = e.clientY - containerRect.top;
+      const newTimeRange = calculateNewTimeRange(eventItem.time, dropY, offsetY);
+      Object.assign(sessionPayload, timeRangeToStartEnd(newTimeRange));
+    }
+
+    try {
+      await api.put(`/classes/${eventItem.classId}`, { teacherId: newTeacher.id });
+      if (Object.keys(sessionPayload).length > 0) {
+        await api.put(`/sessions/${eventItem.id}`, sessionPayload);
+      }
+      reloadClasses();
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not reassign this session.');
     }
   };
 
@@ -883,7 +1073,6 @@ const CalendarView = () => {
   };
 
   const weekDates = getWeekDates();
-  const todayNum = currentDate.getDate();
 
   // Helper for Month View Grid (42 cells to cover all weekday offsets)
   const getMonthDays = () => {
@@ -920,23 +1109,96 @@ const CalendarView = () => {
     return { top: `${topPix}px`, height: `${heightPix}px` };
   };
 
-  const dayEventsList = events.filter(e => e.dayOffset === 0);
+  // Two sessions at the same time in the same column used to render on top of
+  // each other pixel-for-pixel (only the last one in the DOM was visible or
+  // clickable). This groups overlapping events and gives each one a side-by-side
+  // slot, like Google Calendar, instead of stacking them.
+  const layoutOverlaps = (columnEvents) => {
+    const withRange = columnEvents.map(e => {
+      const start = parseTimeToPix(e.time) / PIXELS_PER_MINUTE;
+      return { e, start, end: start + getDurationMins(e.time) };
+    }).sort((a, b) => a.start - b.start);
+
+    const layout = new Map();
+    let cluster = [];
+    let clusterEnd = -Infinity;
+
+    const flushCluster = () => {
+      if (cluster.length === 0) return;
+      const columnEnds = []; // end time of the last event placed in each column
+      cluster.forEach(item => {
+        let col = columnEnds.findIndex(end => item.start >= end);
+        if (col === -1) { col = columnEnds.length; columnEnds.push(item.end); }
+        else { columnEnds[col] = item.end; }
+        item.col = col;
+      });
+      const totalCols = columnEnds.length;
+      cluster.forEach(item => layout.set(item.e.id, { col: item.col, cols: totalCols }));
+      cluster = [];
+      clusterEnd = -Infinity;
+    };
+
+    withRange.forEach(item => {
+      if (cluster.length > 0 && item.start >= clusterEnd) flushCluster();
+      cluster.push(item);
+      clusterEnd = Math.max(clusterEnd, item.end);
+    });
+    flushCluster();
+
+    return layout;
+  };
+
+  const getOverlapStyles = (event, layout) => {
+    const { col, cols } = layout.get(event.id) || { col: 0, cols: 1 };
+    if (cols <= 1) return {};
+    return {
+      left: `calc(${(col * 100) / cols}% + 3px)`,
+      width: `calc(${100 / cols}% - 6px)`,
+      right: 'auto',
+    };
+  };
+
+  const dayEventsList = events.filter(e => e.dateStr === toISODate(currentDate));
   const uniqueTeachers = [...new Set(events.map(e => e.teacher))].sort();
 
-  const miniCalYear = miniCalDate.getFullYear();
-  const miniCalMonth = miniCalDate.getMonth();
-  const miniCalFirstDay = new Date(miniCalYear, miniCalMonth, 1).getDay();
-  const miniCalDaysInMonth = new Date(miniCalYear, miniCalMonth + 1, 0).getDate();
+  // Moves currentDate by one unit of whatever's currently in view — this is
+  // what the header's ◀ ▶ arrows call; each change re-fetches sessions via
+  // the [view, currentDate] effect above.
+  const goToPrevPeriod = () => {
+    setCurrentDate(prev => {
+      const d = new Date(prev);
+      if (view === 'day') d.setDate(d.getDate() - 1);
+      else if (view === 'week') d.setDate(d.getDate() - 7);
+      else d.setMonth(d.getMonth() - 1);
+      return d;
+    });
+  };
+  const goToNextPeriod = () => {
+    setCurrentDate(prev => {
+      const d = new Date(prev);
+      if (view === 'day') d.setDate(d.getDate() + 1);
+      else if (view === 'week') d.setDate(d.getDate() + 7);
+      else d.setMonth(d.getMonth() + 1);
+      return d;
+    });
+  };
+  const goToToday = () => setCurrentDate(new Date());
+
+  const headerLabel = view === 'day'
+    ? currentDate.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    : currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
   return (
     <div className="calendar-container">
       <div className="calendar-header">
         <div className="calendar-title">
           <div className="nav-arrows">
-            <button><ChevronLeft size={20} /></button>
-            <button><ChevronRight size={20} /></button>
+            <button onClick={goToPrevPeriod} aria-label="Previous"><ChevronLeft size={20} /></button>
+            <button onClick={goToNextPeriod} aria-label="Next"><ChevronRight size={20} /></button>
           </div>
-          <h1>{currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })}</h1>
+          <h1>{headerLabel}</h1>
+          <button className="view-btn" onClick={goToToday} style={{ marginLeft: 8 }}>Today</button>
+          {sessionsLoading && <span className="text-muted" style={{ fontSize: 12, marginLeft: 8 }}>Loading…</span>}
         </div>
 
         <div className="calendar-actions">
@@ -1021,7 +1283,7 @@ const CalendarView = () => {
                       <div className="category-dropdown-menu" style={{ top: 'calc(100% + 4px)', left: 0, right: 0 }}>
                         {studentDropdownMode === 'quick' && searchForm.studentSearchText === '' ? (
                           // Render Grouped Quick Select when not typing
-                          QUICK_SELECT_GROUPS.map(group => (
+                          quickSelectGroups.map(group => (
                             <div key={group.category}>
                               <div style={{ padding: '8px 16px', fontWeight: 'bold', fontSize: '13px', color: '#334155', pointerEvents: 'none' }}>
                                 {group.category}
@@ -1040,12 +1302,13 @@ const CalendarView = () => {
                           ))
                         ) : (
                           // Render standard individual text search otherwise
-                          AVAILABLE_STUDENTS
+                          allStudents
+                            .map(s => s.name)
                             .filter(s => !searchForm.students.includes(s))
                             .filter(s => s.toLowerCase().includes(searchForm.studentSearchText.toLowerCase()))
                             .map(student => (
-                            <div 
-                              key={student} 
+                            <div
+                              key={student}
                               className="category-option"
                               onClick={() => addStudent(student)}
                             >
@@ -1102,7 +1365,7 @@ const CalendarView = () => {
                       <div className="category-dropdown-menu" style={{ top: 'calc(100% + 4px)', left: 0, right: 0 }}>
                         {tutorDropdownMode === 'quick' && searchForm.tutorSearchText === '' ? (
                           // Render Grouped Quick Select when not typing
-                          TUTOR_GROUPS.map(group => (
+                          tutorGroups.map(group => (
                             <div key={group.category}>
                               <div style={{ padding: '8px 16px', fontWeight: 'bold', fontSize: '13px', color: '#334155', pointerEvents: 'none' }}>
                                 {group.category}
@@ -1120,8 +1383,8 @@ const CalendarView = () => {
                             </div>
                           ))
                         ) : (
-                          AVAILABLE_TUTORS
-                            .map(t => ({ raw: t, clean: t.replace('Prof. ', '') }))
+                          teachers
+                            .map(t => ({ raw: t.name, clean: t.name.replace('Prof. ', '') }))
                             .filter(t => !searchForm.tutors.includes(t.clean))
                             .filter(t => t.raw.toLowerCase().includes(searchForm.tutorSearchText.toLowerCase()))
                             .map(tutorObj => (
@@ -1372,17 +1635,16 @@ const CalendarView = () => {
                 </div>
 
               {weekDates.map((date, idx) => {
-                const isToday = date.getDate() === todayNum;
-                // Simple mock mapping: offset 0 is Mon, 1 is Tue... 
-                // Usually we'd map via actual date matching
-                const dayEvents = events.filter(e => e.dayOffset === idx);
+                const isToday = toISODate(date) === toISODate(new Date());
+                const dayEvents = events.filter(e => e.dateStr === toISODate(date));
+                const dayLayout = layoutOverlaps(dayEvents);
 
                 return (
-                  <div 
-                    key={idx} 
+                  <div
+                    key={idx}
                     className="instructor-col"
                     onDragOver={e => e.preventDefault()}
-                    onDrop={e => handleDropOnWeekDay(e, idx)}
+                    onDrop={e => handleDropOnWeekDay(e, date)}
                   >
                     <div className={`instructor-header ${isToday ? 'today' : ''}`} style={{ flexDirection: 'column', gap: 0, justifyContent: 'center', padding: '8px' }}>
                       <span className="day-name" style={{ fontSize: '11px', textTransform: 'uppercase', color: isToday ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 700 }}>{WEEK_DAYS[idx]}</span>
@@ -1397,10 +1659,10 @@ const CalendarView = () => {
                        
                        {/* Events */}
                        {dayEvents.map(e => (
-                         <div 
-                           key={e.id} 
+                         <div
+                           key={e.id}
                            className={`positioned-event ${e.subject}`}
-                           style={{...getPositionStyles(e.time), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
+                           style={{...getPositionStyles(e.time), ...getOverlapStyles(e, dayLayout), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
                            title={`${e.title} · ${e.time} · ${e.teacher}`}
                            draggable={role === 'ADMIN'}
                            onDragStart={(evt) => handleDragStart(evt, e)}
@@ -1444,6 +1706,7 @@ const CalendarView = () => {
                 {/* Instructors Columns */}
                 {uniqueTeachers.map(teacher => {
                   const teacherEvents = dayEventsList.filter(e => e.teacher === teacher);
+                  const teacherLayout = layoutOverlaps(teacherEvents);
                   return (
                     <div 
                       key={teacher} 
@@ -1464,10 +1727,10 @@ const CalendarView = () => {
                          
                          {/* Events */}
                          {teacherEvents.map(e => (
-                           <div 
-                             key={e.id} 
+                           <div
+                             key={e.id}
                              className={`positioned-event ${e.subject}`}
-                             style={{...getPositionStyles(e.time), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
+                             style={{...getPositionStyles(e.time), ...getOverlapStyles(e, teacherLayout), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
                              draggable={role === 'ADMIN'}
                              onDragStart={(evt) => handleDragStart(evt, e)}
                              onClick={() => handleEventClick(e)}
@@ -1500,17 +1763,16 @@ const CalendarView = () => {
               {monthCells.map((_, idx) => {
                 const dayNum = idx - startOffset + 1;
                 const isCurrentMonth = dayNum > 0 && dayNum <= daysInMonth;
-                const isToday = isCurrentMonth && dayNum === todayNum;
-                
-                // Spreading dummy events around the month for visual demonstration
-                const dayEvents = isCurrentMonth ? events.filter(e => e.dayOffset === (dayNum % 7)) : [];
+                const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), dayNum);
+                const isToday = isCurrentMonth && toISODate(cellDate) === toISODate(new Date());
+                const dayEvents = isCurrentMonth ? events.filter(e => e.dateStr === toISODate(cellDate)) : [];
 
                 return (
-                  <div 
-                    key={idx} 
+                  <div
+                    key={idx}
                     className={`month-cell ${!isCurrentMonth ? 'inactive' : ''} ${isToday ? 'today' : ''}`}
                     onDragOver={e => e.preventDefault()}
-                    onDrop={e => handleDropOnWeekDay(e, dayNum % 7)}
+                    onDrop={e => handleDropOnWeekDay(e, cellDate)}
                   >
                     {isCurrentMonth && (
                       <>
@@ -1525,6 +1787,7 @@ const CalendarView = () => {
                               title={`${e.time} - ${e.title}`}
                               draggable={role === 'ADMIN'}
                               onDragStart={(evt) => handleDragStart(evt, e)}
+                              onClick={() => handleEventClick(e)}
                               style={{ cursor: role === 'ADMIN' ? 'grab' : 'pointer' }}
                             >
                                <div className="dot"></div>
@@ -1626,21 +1889,22 @@ const CalendarView = () => {
                   <>
                     <div className="meta-item">
                       <User size={16} />
-                      <select 
-                        className="form-control" 
-                        value={editEventForm.teacher} 
-                        onChange={e => setEditEventForm(prev => ({ ...prev, teacher: e.target.value }))}
+                      <select
+                        className="form-control"
+                        value={editEventForm.teacherId}
+                        onChange={e => setEditEventForm(prev => ({ ...prev, teacherId: e.target.value }))}
                         style={{ flex: 1, height: '34px', fontSize: '13px' }}
                       >
-                        {AVAILABLE_TUTORS.map(t => <option key={t} value={t}>{t}</option>)}
+                        <option value="">Unassigned</option>
+                        {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                     </div>
                     <div className="meta-item">
                       <Clock size={16} />
-                      <input 
-                        type="text" 
-                        className="form-control" 
-                        value={editEventForm.time} 
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={editEventForm.time}
                         onChange={e => setEditEventForm(prev => ({ ...prev, time: e.target.value }))}
                         style={{ flex: 1, height: '34px', fontSize: '13px' }}
                         placeholder="e.g. 10:00 AM - 12:50 PM"
@@ -1648,17 +1912,16 @@ const CalendarView = () => {
                     </div>
                     <div className="meta-item">
                       <Settings size={16} />
-                      <select 
-                        className="form-control" 
-                        value={editEventForm.type} 
-                        onChange={e => setEditEventForm(prev => ({ ...prev, type: e.target.value }))}
+                      <select
+                        className="form-control"
+                        value={editEventForm.subject}
+                        onChange={e => setEditEventForm(prev => ({ ...prev, subject: e.target.value }))}
                         style={{ flex: 1, height: '34px', fontSize: '13px' }}
                       >
-                        <option value="Morning COVE">Morning COVE</option>
-                        <option value="Afternoon COVE">Afternoon COVE</option>
-                        <option value="Elective Class">Elective Class</option>
-                        <option value="Tutoring">Tutoring</option>
-                        <option value="Event">Event</option>
+                        <option value="math">Math</option>
+                        <option value="science">Science</option>
+                        <option value="languages">Languages</option>
+                        <option value="arts">Arts</option>
                       </select>
                     </div>
                   </>
@@ -1733,15 +1996,15 @@ const CalendarView = () => {
                         />
                         {rosterSearch && (
                           <div className="roster-search-dropdown">
-                            {AVAILABLE_STUDENTS
-                              .filter(s => s.toLowerCase().includes(rosterSearch.toLowerCase()) && !editEventForm.studentList.includes(s))
+                            {allStudents
+                              .filter(s => s.name.toLowerCase().includes(rosterSearch.toLowerCase()) && !editEventForm.studentList.some(x => x.id === s.id))
                               .map(s => (
-                                <button key={s} className="roster-search-option" onClick={() => handleAddStudentToRoster(s)}>
-                                  <UserPlus size={14} /> {s}
+                                <button key={s.id} className="roster-search-option" onClick={() => handleAddStudentToRoster(s)}>
+                                  <UserPlus size={14} /> {s.name}
                                 </button>
                               ))
                             }
-                            {AVAILABLE_STUDENTS.filter(s => s.toLowerCase().includes(rosterSearch.toLowerCase()) && !editEventForm.studentList.includes(s)).length === 0 && (
+                            {allStudents.filter(s => s.name.toLowerCase().includes(rosterSearch.toLowerCase()) && !editEventForm.studentList.some(x => x.id === s.id)).length === 0 && (
                               <div className="roster-search-option" style={{ color: '#94a3b8', cursor: 'default' }}>No students found</div>
                             )}
                           </div>
@@ -1749,11 +2012,11 @@ const CalendarView = () => {
                       </div>
                     </div>
                     <div className="roster-student-list">
-                      {editEventForm.studentList.map((name, i) => (
-                        <div key={i} className="roster-student-item">
-                          <div className="roster-student-avatar">{name[0]}</div>
-                          <span>{name}</span>
-                          <button className="roster-remove-btn" onClick={() => handleRemoveStudentFromRoster(name)} title="Remove student">
+                      {editEventForm.studentList.map((student) => (
+                        <div key={student.id} className="roster-student-item">
+                          <div className="roster-student-avatar">{student.name[0]}</div>
+                          <span>{student.name}</span>
+                          <button className="roster-remove-btn" onClick={() => handleRemoveStudentFromRoster(student)} title="Remove student">
                             <UserMinus size={14} />
                           </button>
                         </div>
@@ -1769,6 +2032,8 @@ const CalendarView = () => {
                           <span>{name}</span>
                         </div>
                       ))
+                    ) : selectedEvent.studentList === null ? (
+                      <p className="text-muted" style={{ padding: '8px 0' }}>Loading roster…</p>
                     ) : (
                       <p className="text-muted" style={{ padding: '8px 0' }}>No students enrolled in this class.</p>
                     )}
@@ -1958,7 +2223,7 @@ const CalendarView = () => {
                         </div>
 
                         <label style={{ fontSize: '13px', fontWeight: 600 }}>Schedule</label>
-                        {newEventForm.scheduleDays.map((dayObj, index) => (
+                        {newEventForm.scheduleDays.map((dayObj) => (
                           <div key={dayObj.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                             <select className="form-control" style={{ flex: 1, minWidth: '100px' }} value={dayObj.day} onChange={e => updateScheduleDay(dayObj.id, 'day', e.target.value)}>
                               <option value="Monday">Monday</option>
@@ -2110,20 +2375,9 @@ const CalendarView = () => {
                 <div className="form-group">
                   <label>Tutor</label>
                   <select className="form-control" value={newEventForm.tutor} onChange={e => setNewEventForm({...newEventForm, tutor: e.target.value})}>
-                    {AVAILABLE_TUTORS.map(t => <option key={t}>{t}</option>)}
+                    <option value="">Select tutor...</option>
+                    {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
-                  
-                  <label className="checkbox-label mt-8" style={{ marginTop: '8px' }}>
-                    <input type="checkbox" checked={newEventForm.hasSubstitute} onChange={e => setNewEventForm({...newEventForm, hasSubstitute: e.target.checked})} /> Add substitute tutor
-                  </label>
-                  {newEventForm.hasSubstitute && (
-                    <div style={{ marginTop: '8px' }}>
-                      <select className="form-control" value={newEventForm.substituteTutor} onChange={e => setNewEventForm({...newEventForm, substituteTutor: e.target.value})}>
-                        <option value="">Select Substitute...</option>
-                        {AVAILABLE_TUTORS.map(t => <option key={t}>{t}</option>)}
-                      </select>
-                    </div>
-                  )}
                 </div>
 
                 <div className="form-group mt-8" ref={attendeeSectionRef} style={{ position: 'relative' }}>
@@ -2171,19 +2425,20 @@ const CalendarView = () => {
                   {isAttendeeDropdownOpen && (
                     <div className="category-dropdown-menu" style={{ top: '100%', left: 0, right: 0, maxHeight: '200px', overflowY: 'auto', zIndex: 100 }}>
                       {attendeeDropdownMode === 'quick' && !attendeeSearchText ? (
-                        QUICK_SELECT_GROUPS.map(group => (
+                        quickSelectGroups.map(group => (
                           <div key={group.category}>
                             <div style={{ padding: '8px 16px', fontWeight: 'bold', fontSize: '13px', color: '#334155', pointerEvents: 'none' }}>
                               {group.category}
                             </div>
                             {group.options.map(opt => (
-                              <div 
+                              <div
                                 key={opt}
                                 className="category-option"
                                 style={{ paddingLeft: '24px' }}
                                 onClick={() => {
-                                  // Simply add a mock student object for the group name
-                                  addAttendee({ id: opt, name: opt });
+                                  const wantsActive = opt.startsWith('Active');
+                                  const statusWanted = wantsActive ? 'Active' : 'Trial';
+                                  allStudents.filter(s => s.status === statusWanted).forEach(addAttendee);
                                   setIsAttendeeDropdownOpen(false);
                                 }}
                               >

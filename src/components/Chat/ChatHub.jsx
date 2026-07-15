@@ -438,7 +438,7 @@ const ChatHub = () => {
                   {thread.unread > 0 && <span className="unread-badge">{thread.unread}</span>}
                 </div>
                 <div className="thread-roles">
-                  {(thread.roles || []).map(role => (
+                  {[...new Set(thread.roles || [])].map(role => (
                     <span key={role} className={`role-tag ${role.replace(' ','').toLowerCase()}`}>{role}</span>
                   ))}
                 </div>

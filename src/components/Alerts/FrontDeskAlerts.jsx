@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign } from 'lucide-react';
+import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign, Cookie } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import api from '../../lib/api';
@@ -19,7 +19,6 @@ const ALERT_TYPES = {
 const FrontDeskAlerts = () => {
   const [alerts, setAlerts] = useState([]);
   const [historyAlerts, setHistoryAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
   const socketRef = useRef(null);
   const navigate = useNavigate();
@@ -31,8 +30,11 @@ const FrontDeskAlerts = () => {
   const [resolveAmount, setResolveAmount] = useState('');
   const [resolveSubmitting, setResolveSubmitting] = useState(false);
 
+  /* Snack reload queue (parent-approved, awaiting top-up + charge) */
+  const [reloads, setReloads] = useState([]);
+  const [reloadFulfilling, setReloadFulfilling] = useState(null);
+
   const loadAlerts = async (status = 'active') => {
-    setLoading(true);
     try {
       const response = await api.get('/alerts', { params: { status } });
       if (status === 'active') {
@@ -43,7 +45,6 @@ const FrontDeskAlerts = () => {
     } catch (error) {
       console.error('Error loading alerts:', error);
     }
-    setLoading(false);
   };
 
   const loadCancellations = async () => {
@@ -55,10 +56,32 @@ const FrontDeskAlerts = () => {
     }
   };
 
+  const loadReloads = async () => {
+    try {
+      const response = await api.get('/rewards/snacks/reload-requests', { params: { status: 'APPROVED' } });
+      setReloads(response.data.requests);
+    } catch (error) {
+      console.error('Error loading snack reload requests:', error);
+    }
+  };
+
+  const handleFulfillReload = async (id) => {
+    setReloadFulfilling(id);
+    try {
+      await api.post(`/rewards/snacks/reload-requests/${id}/fulfill`);
+      setReloads(prev => prev.filter(r => r.id !== id));
+    } catch (error) {
+      console.error('Error fulfilling snack reload:', error);
+    } finally {
+      setReloadFulfilling(null);
+    }
+  };
+
   useEffect(() => {
     loadAlerts('active');
     loadAlerts('resolved');
     loadCancellations();
+    loadReloads();
 
     // Connect to Socket.IO for real-time alerts
     socketRef.current = io(SOCKET_URL);
@@ -192,6 +215,39 @@ const FrontDeskAlerts = () => {
                 {c.reason && <p className="cancellation-reason">"{c.reason}"</p>}
                 <button className="cancellation-resolve-btn" onClick={() => openResolveModal(c)}>
                   <DollarSign size={14} /> Decide Charge
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Snack reload queue — parent-approved, awaiting top-up + charge */}
+      {reloads.length > 0 && (
+        <div className="cancellation-queue">
+          <h2 className="cancellation-queue-title"><Cookie size={16} /> Snack Reloads Approved ({reloads.length})</h2>
+          <div className="cancellation-queue-grid">
+            {reloads.map(r => (
+              <div key={r.id} className="cancellation-card">
+                <div className="cancellation-card-top">
+                  <button
+                    className="alert-student-name-link"
+                    onClick={() => navigate(`/students?highlight=${r.studentId}`)}
+                  >
+                    {r.studentName}
+                    <ExternalLink size={12} />
+                  </button>
+                  <span className="cancellation-suggested-badge">{r.punchCount} punches · ${r.price.toFixed(2)}</span>
+                </div>
+                <p className="cancellation-meta">
+                  Parent approved a paid reload{r.familyName ? ` · ${r.familyName}` : ''}
+                </p>
+                <button
+                  className="cancellation-resolve-btn"
+                  disabled={reloadFulfilling === r.id}
+                  onClick={() => handleFulfillReload(r.id)}
+                >
+                  <DollarSign size={14} /> {reloadFulfilling === r.id ? 'Processing...' : 'Reload & charge'}
                 </button>
               </div>
             ))}
