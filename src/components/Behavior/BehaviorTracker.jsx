@@ -251,7 +251,7 @@ const BehaviorTracker = () => {
                       <td>
                         {log.type !== 'POSITIVE' && (
                           <span className={`behavior-status-badge ${(log.status || 'RECORDED').toLowerCase()}`}>
-                            {(log.status || 'RECORDED').replace('_', ' ')}
+                            {(log.status || 'RECORDED').replace(/_/g, ' ')}
                           </span>
                         )}
                       </td>
@@ -391,7 +391,7 @@ const BehaviorTracker = () => {
 
               {reviewLog.status && reviewLog.status !== 'RECORDED' && (
                 <p className="text-muted" style={{ fontSize: 12 }}>
-                  Current status: <strong>{reviewLog.status.replace('_', ' ')}</strong>
+                  Current status: <strong>{reviewLog.status.replace(/_/g, ' ')}</strong>
                 </p>
               )}
             </div>

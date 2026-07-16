@@ -49,18 +49,41 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const isLowBalance = student.snackPunches < 7;
   const isNegative = student.snackPunches < 0;
 
-  /* Hydrate the full student record by id when the modal is opened with a
-     partial object (e.g. the minimal roster object from the Teacher Portal). */
+  /* Always hydrate the full student record by id when the modal opens — the
+     roster objects passed in (from StudentsList or the Teacher Portal) never
+     carry snack/prize history, only placeholder empty arrays, so there's no
+     reliable "is this already complete" signal to check for. Uses the
+     per-student detail endpoint (not the paginated list, which only returns
+     counts) so snack/prize history actually populate. */
   useEffect(() => {
     let cancelled = false;
-    const isPartial = !initialStudent?.snackHistory || !initialStudent?.materials || initialStudent?.status === undefined;
-    if (!initialStudent?.id || !isPartial) { setLoading(false); return; }
+    if (!initialStudent?.id) { setLoading(false); return; }
     setLoading(true);
     (async () => {
       try {
-        const all = await database.fetchStudents();
-        const full = all.find(s => s.id === initialStudent.id);
-        if (full && !cancelled) setStudent(prev => ({ ...prev, ...full }));
+        const res = await api.get(`/students/${initialStudent.id}`);
+        const full = res.data?.student;
+        if (full && !cancelled) {
+          setStudent(prev => ({
+            ...prev,
+            ...full,
+            name: full.fullName,
+            status: full.status?.charAt(0).toUpperCase() + full.status?.slice(1).toLowerCase(),
+            snackHistory: (full.snackPurchases || []).map(p => ({
+              id: p.id,
+              date: p.purchasedAt,
+              snackName: p.snack?.name || 'Snack',
+              cost: p.punchesUsed,
+            })),
+            seashellHistory: (full.prizeHistory || []).map(p => ({
+              id: p.id,
+              date: p.createdAt,
+              reason: p.reason,
+              type: p.type?.toLowerCase(),
+              points: p.points,
+            })),
+          }));
+        }
       } catch (e) {
         console.error('Could not hydrate student profile:', e);
       } finally {
