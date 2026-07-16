@@ -21,10 +21,20 @@
   --border-light: #e5e7eb;  /* Gray-200 */
   --shadow-sm: 0 4px 15px rgba(0, 0, 0, 0.03);
   --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 18px 45px rgba(6, 78, 59, 0.10);
   --radius-md: 12px;
   --radius-lg: 16px;
-  
+
   --status-controlled: #10b981; /* Emerald-500 for supervision */
+
+  /* ── Motion system ─────────────────────────────────────────
+     Shared easing + duration tokens so every surface animates
+     with the same rhythm instead of ad-hoc `all 0.2s ease`. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);   /* decelerate — default for UI */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* gentle overshoot for pops */
+  --dur-fast: 0.15s;
+  --dur: 0.25s;
+  --dur-slow: 0.4s;
 }
 
 * {
@@ -33,22 +43,96 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Kill the momentary horizontal jitter some mobile pages cause without
+     breaking position:sticky (clip, unlike hidden, creates no scroll box). */
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Smooth in-page jumps, but never fight a user who asked for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: var(--bg-main);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* No grey flash on tap for touch devices */
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: clip;
+}
+
+/* Media never blows out its container on small screens */
+img, svg, video, canvas {
+  max-width: 100%;
 }
 
 button {
   cursor: pointer;
   font-family: inherit;
-  transition: all 0.2s ease;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out),
+              background-color var(--dur) var(--ease-out),
+              color var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              opacity var(--dur) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
 }
 
-input, textarea {
+/* Universal press feedback — every button gives a tiny nudge back */
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input, textarea, select {
   font-family: inherit;
   outline: none;
+}
+
+/* Keyboard focus is visible everywhere; mouse/touch focus stays quiet. */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: rgba(21, 128, 61, 0.18);
+  color: var(--text-main);
+}
+
+/* ── Branded scrollbars — subtle, consistent across every scroll area ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background var(--dur) var(--ease-out);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: content-box;
 }
 
 /* Hide number spinners */
@@ -66,16 +150,20 @@ input[type="number"] {
   border-radius: var(--radius-md);
   border: 1px solid var(--border-light);
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s ease;
+  transition: box-shadow var(--dur) var(--ease-out),
+              transform var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out);
 }
 
 .premium-card:hover {
   box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
 }
 
 .glass {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
@@ -94,17 +182,56 @@ input[type="number"] {
   padding: 40px;
 }
 
+/* Content routes fade+rise in on mount so navigating between screens feels
+   like a soft crossfade rather than a hard swap. Screens with their own
+   entrance animation simply override this on their root element. */
+.content > * {
+  animation: pageEnter var(--dur-slow) var(--ease-out);
+}
+
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Reusable entrance utilities for future components */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.anim-fade-up { animation: fadeInUp var(--dur-slow) var(--ease-out) both; }
+.anim-pop-in  { animation: popIn var(--dur) var(--ease-spring) both; }
+
 @media (max-width: 1100px) {
   .app-container {
     flex-direction: column;
   }
-  
+
   .content {
     margin-left: 0;
-    padding-top: 64px; 
+    padding-top: 64px;
   }
 
   .module-placeholder {
     padding: 20px;
+  }
+}
+
+/* ── Accessibility: honor reduced-motion app-wide ──────────────────
+   This app leans heavily on entrance animations, pulses and shimmers.
+   For users who ask the OS for less motion, collapse them to near-instant
+   so nothing flashes or slides. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

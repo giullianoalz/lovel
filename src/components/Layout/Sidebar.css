@@ -79,19 +79,33 @@
   color: var(--text-muted);
   border-radius: 10px;
   margin-bottom: 4px;
-  transition: all 0.2s ease;
+  transition: background-color var(--dur) var(--ease-out),
+              color var(--dur) var(--ease-out),
+              transform var(--dur) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out);
   font-weight: 500;
+}
+
+.nav-item svg {
+  flex-shrink: 0;
+  transition: transform var(--dur) var(--ease-spring);
 }
 
 .nav-item:hover {
   background: var(--primary-light);
   color: var(--primary);
+  transform: translateX(3px);
+}
+
+.nav-item:hover svg {
+  transform: scale(1.12);
 }
 
 .nav-item.active {
   background: var(--primary);
   color: var(--text-inverse);
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+  /* Brand-green glow (was a leftover indigo rgba that clashed with the theme) */
+  box-shadow: 0 6px 16px rgba(21, 128, 61, 0.28);
 }
 
 /* Quiet Hours */
@@ -272,12 +286,17 @@
   }
   
   .mobile-toggle {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     position: absolute;
-    left: 16px;
+    left: 8px;
     right: auto;
     border: none;
     box-shadow: none;
+    /* 44px hit area for comfortable thumb tapping (icon size unchanged) */
+    min-width: 44px;
+    min-height: 44px;
     padding: 4px;
     background: transparent;
     color: var(--text-main);
@@ -298,6 +317,9 @@
     background: transparent;
     border: none;
     color: var(--text-main);
+    /* Match the 44px minimum tap target of the menu button */
+    min-width: 44px;
+    min-height: 44px;
     padding: 4px;
     cursor: pointer;
     display: flex;
