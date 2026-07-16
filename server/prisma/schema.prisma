@@ -399,13 +399,46 @@ model Payment {
   recordedById          String?                   @map("recorded_by") @db.Uuid
   paidAt                DateTime?                 @map("paid_at") @db.Timestamptz(6)
   createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Wave accounting sync: set once the payment has been pushed to Wave as an
+  // income money-transaction. waveTransactionId is Wave's transaction id; the
+  // presence of waveSyncedAt is what makes a re-sync skip this payment.
+  waveTransactionId     String?                   @map("wave_transaction_id") @db.VarChar(255)
+  waveSyncedAt          DateTime?                 @map("wave_synced_at") @db.Timestamptz(6)
   family                Family?                   @relation(fields: [familyId], references: [id])
   invoice               Invoice?                  @relation(fields: [invoiceId], references: [id])
   recordedBy            User?                     @relation("RecordedByUser", fields: [recordedById], references: [id])
   scholarships          ScholarshipDisbursement[]
   transactions          Transaction[]
 
+  @@index([waveSyncedAt])
   @@map("payments")
+}
+
+/// Single-row OAuth connection to the academy's Wave accounting business.
+/// Stores encrypted access/refresh tokens plus the mapping of which Wave
+/// accounts recorded income should be deposited into (anchor) and categorised
+/// under (income). A missing row means "Wave is not connected".
+model WaveConnection {
+  id                 String    @id @default(uuid()) @db.Uuid
+  // Wave business the tokens belong to.
+  businessId         String?   @map("business_id") @db.VarChar(255)
+  businessName       String?   @map("business_name") @db.VarChar(255)
+  // AES-GCM encrypted OAuth tokens — never returned to the client.
+  accessToken        String?   @map("access_token")
+  refreshToken       String?   @map("refresh_token")
+  tokenExpiresAt     DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  scope              String?   @db.VarChar(255)
+  // Account mapping for income transactions (chosen by the admin post-connect).
+  anchorAccountId    String?   @map("anchor_account_id") @db.VarChar(255)
+  anchorAccountName  String?   @map("anchor_account_name") @db.VarChar(255)
+  incomeAccountId    String?   @map("income_account_id") @db.VarChar(255)
+  incomeAccountName  String?   @map("income_account_name") @db.VarChar(255)
+  connectedById      String?   @map("connected_by") @db.Uuid
+  connectedAt        DateTime? @map("connected_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("wave_connection")
 }
 
 model ScholarshipDisbursement {
