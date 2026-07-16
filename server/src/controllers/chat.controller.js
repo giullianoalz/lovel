@@ -368,9 +368,21 @@ export const getMessages = async (req, res, next) => {
         text: msg.text,
         ...formatAttachment(msg),
         time: msg.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        sentAt: msg.sentAt,
         type: isMe ? 'sent' : 'received'
       };
     });
+
+    // Read-receipt anchor: the point up to which EVERY other participant has read.
+    // A message I sent shows "Seen" once this is >= its sentAt. Null (someone
+    // hasn't opened the thread yet) means my messages aren't seen yet.
+    const others = await prisma.chatParticipant.findMany({
+      where: { threadId, userId: { not: userId } },
+      select: { lastReadAt: true },
+    });
+    const othersLastReadAt = others.length && others.every(o => o.lastReadAt)
+      ? new Date(Math.min(...others.map(o => o.lastReadAt.getTime())))
+      : null;
 
     // Opening the thread marks everything up to now as read for this user.
     await prisma.chatParticipant.update({
@@ -378,7 +390,12 @@ export const getMessages = async (req, res, next) => {
       data: { lastReadAt: new Date() },
     });
 
-    res.json({ messages: formattedMessages });
+    // Tell the other participant(s) in real time so their sent messages flip to
+    // "Seen" without a refresh.
+    const io = req.app.get('io');
+    if (io) io.to(threadId).emit('messages_read', { threadId, userId, readAt: new Date() });
+
+    res.json({ messages: formattedMessages, othersLastReadAt });
   } catch (error) {
     next(error);
   }
@@ -437,6 +454,7 @@ export const sendMessage = async (req, res, next) => {
       text: newMessage.text,
       ...formatAttachment(newMessage),
       time: newMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sentAt: newMessage.sentAt,
       type: 'received' // from the perspective of others
     };
 
@@ -740,12 +758,50 @@ export const resolveThread = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden', message: 'Not a participant' });
     }
 
+    // Toggle-able: defaults to RESOLVED, but accepts ACTIVE so a thread resolved
+    // by mistake can be reopened from the same control.
+    const target = req.body?.status === 'ACTIVE' ? 'ACTIVE' : 'RESOLVED';
+
     const updatedThread = await prisma.chatThread.update({
       where: { id: threadId },
-      data: { status: 'RESOLVED' }
+      data: { status: target }
     });
 
-    res.json({ message: 'Thread resolved', thread: updatedThread });
+    res.json({ message: `Thread ${target === 'ACTIVE' ? 'reopened' : 'resolved'}`, thread: updatedThread });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/chat/:threadId/unread
+// Re-flag a thread as unread ("reply later"): rewinds my lastReadAt to just
+// before the most recent message from someone else, so its unread badge returns.
+export const markThreadUnread = async (req, res, next) => {
+  try {
+    const { threadId } = req.params;
+    const userId = req.user.id;
+
+    const participant = await prisma.chatParticipant.findUnique({
+      where: { threadId_userId: { threadId, userId } },
+    });
+    if (!participant) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Not a participant' });
+    }
+
+    const lastIncoming = await prisma.chatMessage.findFirst({
+      where: { threadId, senderId: { not: userId } },
+      orderBy: { sentAt: 'desc' },
+      select: { sentAt: true },
+    });
+    // Nothing from anyone else to mark unread.
+    if (!lastIncoming) return res.json({ unread: 0 });
+
+    await prisma.chatParticipant.update({
+      where: { id: participant.id },
+      data: { lastReadAt: new Date(lastIncoming.sentAt.getTime() - 1) },
+    });
+
+    res.json({ unread: 1 });
   } catch (error) {
     next(error);
   }

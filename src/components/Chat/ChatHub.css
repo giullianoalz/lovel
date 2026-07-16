@@ -322,6 +322,20 @@
   opacity: 0.7;
 }
 
+/* WhatsApp-style read receipt on sent messages */
+.msg-receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.msg-receipt.seen {
+  color: #8fd3ff; /* light blue reads as "seen" on the primary-coloured bubble */
+  font-weight: 700;
+}
+
 .chat-attachment-image {
   display: block;
   max-width: 220px;

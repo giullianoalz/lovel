@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft, FileText, Download } from 'lucide-react';
+import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft, FileText, Download, CheckCircle2, Check, CheckCheck, MailOpen } from 'lucide-react';
 import io from 'socket.io-client';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -22,6 +22,9 @@ const ChatHub = () => {
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
   const [messages, setMessages] = useState({});
+  // Per-thread read-receipt anchor: how far the OTHER participant(s) have read.
+  // A sent message shows "Seen" when this timestamp >= its sentAt.
+  const [threadReadAt, setThreadReadAt] = useState({}); // { [threadId]: ISO string }
   const [searchQuery, setSearchQuery] = useState('');
   const [typingThreads, setTypingThreads] = useState({});
   const [threadFilter, setThreadFilter] = useState('active'); // 'active' | 'resolved'
@@ -62,6 +65,13 @@ const ChatHub = () => {
     
     socketRef.current.on('assistant_typing', (data) => {
       setTypingThreads(prev => ({ ...prev, [data.threadId]: true }));
+    });
+
+    // Another participant opened the thread → advance our "seen" marker so our
+    // sent messages flip to Seen live. Ignore our own read events.
+    socketRef.current.on('messages_read', ({ threadId, userId: readerId, readAt }) => {
+      if (readerId === user?.id) return;
+      setThreadReadAt(prev => ({ ...prev, [threadId]: readAt }));
     });
 
     socketRef.current.on('receive_message', (data) => {
@@ -120,6 +130,7 @@ const ChatHub = () => {
           ...prev,
           [activeChat]: response.data.messages
         }));
+        setThreadReadAt(prev => ({ ...prev, [activeChat]: response.data.othersLastReadAt || null }));
 
         // The server just marked this thread read (see getMessages) — reflect that locally.
         setChatThreads(prev => prev.map(t => t.id === activeChat ? { ...t, unread: 0 } : t));
@@ -158,6 +169,21 @@ const ChatHub = () => {
       await loadThreads();
     } catch (error) {
       console.error("Error toggling block status:", error);
+    }
+  };
+
+  // "Reply later": re-flag this thread as unread and return to the list so its
+  // unread badge stays visible as a reminder.
+  const handleMarkUnread = async (threadId) => {
+    setIsHeaderMenuOpen(false);
+    try {
+      const res = await api.put(`/chat/${threadId}/unread`);
+      const unread = res.data?.unread ?? 1;
+      setChatThreads(prev => prev.map(t => t.id === threadId ? { ...t, unread } : t));
+      setActiveChat(null);
+      setIsMobileChatOpen(false);
+    } catch (error) {
+      console.error("Error marking thread unread:", error);
     }
   };
 
@@ -293,11 +319,11 @@ const ChatHub = () => {
     } catch (err) { console.error('Error downloading attachment:', err); }
   };
 
-  const handleResolveThread = async (threadId) => {
+  const handleSetThreadStatus = async (threadId, status) => {
     try {
-      await api.put(`/chat/${threadId}/resolve`);
-      setChatThreads(prev => prev.map(t => t.id === threadId ? { ...t, status: 'RESOLVED' } : t));
-    } catch (err) { console.error('Error resolving thread:', err); }
+      await api.put(`/chat/${threadId}/resolve`, { status });
+      setChatThreads(prev => prev.map(t => t.id === threadId ? { ...t, status } : t));
+    } catch (err) { console.error('Error updating thread status:', err); }
   };
 
   const handleNewMessage = async (type) => {
@@ -379,7 +405,7 @@ const ChatHub = () => {
       <div className="chat-list-panel">
         <div className="panel-header">
           <div className="hub-title-row">
-            <h1>Communication Hub</h1>
+            <h1>Chat Hub</h1>
             <Shield size={18} className="supervision-icon" title="Supervised environment" />
           </div>
           <div className="search-box">
@@ -474,32 +500,56 @@ const ChatHub = () => {
                 </div>
               </div>
               
-              <div style={{ position: 'relative' }}>
-                <button className="icon-btn" onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}>
-                  <MoreVertical size={20} />
-                </button>
-                {isHeaderMenuOpen && (
-                  <div style={{ position: 'absolute', right: 0, top: '100%', background: 'white', border: '1px solid var(--border-light)', borderRadius: '8px', boxShadow: 'var(--shadow-md)', zIndex: 100, minWidth: '150px', padding: '8px 0' }}>
+              <div className="chat-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* Resolve / Reopen is a visible header action (was buried in the ⋮ menu) */}
+                {!currentChatData.isBot && (
+                  currentChatData.status === 'RESOLVED' ? (
                     <button
-                      onClick={handleBlockToggle}
-                      style={{ width: '100%', textAlign: 'left', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: currentChatData.isBlocked ? 'var(--text-main)' : '#dc2626', fontSize: '14px', fontWeight: '500' }}
-                      onMouseEnter={(e) => e.target.style.background = '#f1f5f9'}
-                      onMouseLeave={(e) => e.target.style.background = 'none'}
+                      className="chat-status-btn resolved"
+                      onClick={() => handleSetThreadStatus(activeChat, 'ACTIVE')}
+                      title="Reopen this conversation"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'color-mix(in srgb, #16a34a 12%, transparent)', color: '#16a34a', border: '1px solid color-mix(in srgb, #16a34a 30%, transparent)', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
                     >
-                      {currentChatData.isBlocked ? "Unblock Contact" : "Block Contact"}
+                      <CheckCircle2 size={15} /> Resolved
                     </button>
-                    {currentChatData.status !== 'RESOLVED' && (
+                  ) : (
+                    <button
+                      className="chat-status-btn"
+                      onClick={() => handleSetThreadStatus(activeChat, 'RESOLVED')}
+                      title="Mark this conversation as resolved"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      <CheckCircle2 size={15} /> Resolve
+                    </button>
+                  )
+                )}
+                <div style={{ position: 'relative' }}>
+                  <button className="icon-btn" onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}>
+                    <MoreVertical size={20} />
+                  </button>
+                  {isHeaderMenuOpen && (
+                    <div style={{ position: 'absolute', right: 0, top: '100%', background: 'white', border: '1px solid var(--border-light)', borderRadius: '8px', boxShadow: 'var(--shadow-md)', zIndex: 100, minWidth: '150px', padding: '8px 0' }}>
                       <button
-                        onClick={() => { handleResolveThread(activeChat); setIsHeaderMenuOpen(false); }}
-                        style={{ width: '100%', textAlign: 'left', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: '#16a34a', fontSize: '14px', fontWeight: '500' }}
+                        onClick={handleBlockToggle}
+                        style={{ width: '100%', textAlign: 'left', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: currentChatData.isBlocked ? 'var(--text-main)' : '#dc2626', fontSize: '14px', fontWeight: '500' }}
                         onMouseEnter={(e) => e.target.style.background = '#f1f5f9'}
                         onMouseLeave={(e) => e.target.style.background = 'none'}
                       >
-                        Mark as Resolved
+                        {currentChatData.isBlocked ? "Unblock Contact" : "Block Contact"}
                       </button>
-                    )}
-                  </div>
-                )}
+                      {!currentChatData.isBot && (
+                        <button
+                          onClick={() => handleMarkUnread(activeChat)}
+                          style={{ width: '100%', textAlign: 'left', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-main)', fontSize: '14px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+                        >
+                          <MailOpen size={15} /> Mark as unread
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -541,7 +591,14 @@ const ChatHub = () => {
                       )
                     )}
                     {msg.text}
-                    <span className="msg-time">{msg.time}</span>
+                    <span className="msg-time">
+                      {msg.time}
+                      {msg.type === 'sent' && !currentChatData?.isBot && (
+                        (threadReadAt[activeChat] && msg.sentAt && new Date(msg.sentAt) <= new Date(threadReadAt[activeChat]))
+                          ? <span className="msg-receipt seen" title="Seen"><CheckCheck size={13} /> Visto</span>
+                          : <span className="msg-receipt" title="Sent"><Check size={13} /></span>
+                      )}
+                    </span>
                   </div>
                 </div>
                 );

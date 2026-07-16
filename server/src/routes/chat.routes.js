@@ -13,6 +13,7 @@ import {
   blockContact,
   createGroupThread,
   resolveThread,
+  markThreadUnread,
   getMyChildrensTeachers
 } from '../controllers/chat.controller.js';
 
@@ -69,5 +70,8 @@ router.post('/group', authenticate, createGroupThread);
 
 // PUT /api/chat/:threadId/resolve — Resolve a thread
 router.put('/:threadId/resolve', authenticate, resolveThread);
+
+// PUT /api/chat/:threadId/unread — Re-flag a thread as unread (reply later)
+router.put('/:threadId/unread', authenticate, markThreadUnread);
 
 export default router;
