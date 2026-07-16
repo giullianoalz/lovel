@@ -180,6 +180,14 @@ io.on('connection', (socket) => {
     console.log(`[Socket.IO] ${socket.id} joined room: ${room}`);
   });
 
+  // Every signed-in user joins their own room so the server can push
+  // notifications (chat messages, alerts, etc.) straight to them regardless
+  // of which screen they currently have open.
+  socket.on('join_user', (userId) => {
+    if (!userId) return;
+    socket.join(`user_${userId}`);
+  });
+
   // Admin/front-desk users auto-join the admin_room for real-time alerts
   socket.on('join_admin', () => {
     socket.join('admin_room');

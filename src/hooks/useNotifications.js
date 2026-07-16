@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../lib/api';
+import { getSocket } from '../lib/socket';
+import { useAuth } from '../context/AuthContext';
 
 const LS_READ  = 'notif_read_ids';
 const LS_LATER = 'notif_later_ids';
@@ -7,18 +9,16 @@ const loadSet  = (key) => { try { return new Set(JSON.parse(localStorage.getItem
 const saveSet  = (key, set) => localStorage.setItem(key, JSON.stringify([...set]));
 
 export const useNotifications = (role) => {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [readIds,  setReadIds]  = useState(() => loadSet(LS_READ));
   const [laterIds, setLaterIds] = useState(() => loadSet(LS_LATER));
 
-  useEffect(() => {
-    // Every signed-in role gets a bell (Facebook-style): parents/students see
-    // their own personal notifications + the announcements targeted at them.
+  // Two feeds share the bell: broadcast announcements and per-user in-app
+  // notifications (behavior reports, alerts, medical incidents, chat, etc.).
+  // allSettled so one failing endpoint doesn't wipe the other out.
+  const refresh = useCallback(() => {
     if (!role) return;
-
-    // Two feeds share the bell: broadcast announcements and per-user in-app
-    // notifications (behavior reports, alerts, medical incidents, billing, etc.).
-    // allSettled so one failing endpoint doesn't wipe the other out.
     Promise.allSettled([
       api.get('/announcements'),
       api.get('/notifications'),
@@ -51,6 +51,24 @@ export const useNotifications = (role) => {
       setNotifications(merged);
     });
   }, [role]);
+
+  useEffect(() => {
+    // Every signed-in role gets a bell (Facebook-style): parents/students see
+    // their own personal notifications + the announcements targeted at them.
+    refresh();
+  }, [refresh]);
+
+  // Live push: join this user's personal Socket.IO room so the bell updates
+  // the instant a notification is created server-side (e.g. a new chat
+  // message), without waiting for a page navigation/remount to re-fetch.
+  useEffect(() => {
+    if (!role || !user?.id) return;
+    const socket = getSocket();
+    socket.emit('join_user', user.id);
+    const handleLive = () => refresh();
+    socket.on('notification', handleLive);
+    return () => socket.off('notification', handleLive);
+  }, [role, user?.id, refresh]);
 
   // An item is read if the server says so or the user marked it read locally.
   const isReadItem = (n) => n.serverRead || readIds.has(n.id);

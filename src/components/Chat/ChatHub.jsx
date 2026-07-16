@@ -1,15 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft, FileText, Download, CheckCircle2, Check, CheckCheck, MailOpen } from 'lucide-react';
-import io from 'socket.io-client';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
+import { getSocket, SOCKET_URL } from '../../lib/socket';
 import ProtectedImage from '../Layout/ProtectedImage';
 import './ChatHub.css';
 
-const configuredApiUrl = import.meta.env.VITE_API_URL;
-const SOCKET_URL = (!configuredApiUrl || configuredApiUrl === 'http://localhost:4000/api')
-  ? `http://${window.location.hostname}:4000`
-  : configuredApiUrl.replace(/\/api\/?$/, '');
 const MEDIA_BASE = SOCKET_URL;
 
 const ChatHub = () => {
@@ -40,6 +36,11 @@ const ChatHub = () => {
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  // The socket listeners below are wired up once (mount-only effect) so they
+  // need a ref, not the `activeChat` state value, to know which thread is
+  // currently open — otherwise they'd always see the value from mount time.
+  const activeChatRef = useRef(null);
+  useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
   const loadThreads = async () => {
     try {
@@ -59,10 +60,11 @@ const ChatHub = () => {
 
   useEffect(() => {
     loadThreads();
-    
-    // Initialize socket connection
-    socketRef.current = io(SOCKET_URL);
-    
+
+    // Share the app-wide socket (also used by the notification bell) instead
+    // of opening a second connection — keeps a single set of rooms per tab.
+    socketRef.current = getSocket();
+
     socketRef.current.on('assistant_typing', (data) => {
       setTypingThreads(prev => ({ ...prev, [data.threadId]: true }));
     });
@@ -94,22 +96,31 @@ const ChatHub = () => {
       });
       
       const previewText = message.text || (message.fileName ? `📎 ${message.fileName}` : 'Attachment');
-      setChatThreads(prevThreads =>
-        prevThreads.map(t =>
-          t.id === threadId
-            ? { ...t, lastMsg: previewText, time: message.time, unread: (activeChat === threadId ? 0 : (t.unread || 0) + 1) }
-            : t
-        )
-      );
-      if (activeChat === threadId) {
+      setChatThreads(prevThreads => {
+        // Bump the thread with the new message to the top of the list, like
+        // any real messaging app — otherwise it stays buried under older
+        // conversations until the next full reload.
+        const touched = prevThreads.find(t => t.id === threadId);
+        if (!touched) return prevThreads;
+        const updated = {
+          ...touched,
+          lastMsg: previewText,
+          time: message.time,
+          unread: activeChatRef.current === threadId ? 0 : (touched.unread || 0) + 1,
+        };
+        return [updated, ...prevThreads.filter(t => t.id !== threadId)];
+      });
+      if (activeChatRef.current === threadId) {
         scrollToBottom();
       }
     });
 
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
+      // Keep the shared socket connected (the notification bell relies on
+      // it too) — just stop this component from reacting to its events.
+      socketRef.current?.off('assistant_typing');
+      socketRef.current?.off('messages_read');
+      socketRef.current?.off('receive_message');
     };
   }, []);
 

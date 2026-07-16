@@ -4,6 +4,7 @@ import prisma from '../config/database.js';
 import { generateAssistantReply } from '../services/ai.service.js';
 import { findContactInfo } from '../utils/contentFilter.js';
 import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
+import { sendNotification } from '../jobs/notification.helper.js';
 
 const CHAT_UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'chat');
 
@@ -12,6 +13,46 @@ const formatAttachment = (msg) => ({
   fileName: msg.fileName || null,
   fileType: msg.fileType || null,
 });
+
+// Push a "new message" notification (bell + live badge) to every other
+// participant in the thread — this is what makes the chat feel like a real
+// social-app inbox instead of only updating for whoever already has the
+// thread open. Skipped for the 1:1 AI Assistant thread (no other human).
+async function notifyOtherParticipants({ io, threadId, senderId, senderName, preview, isBot, messageId }) {
+  if (isBot) return;
+  try {
+    const others = await prisma.chatParticipant.findMany({
+      where: { threadId, userId: { not: senderId } },
+      select: { userId: true },
+    });
+    const title = `New message from ${senderName}`;
+    await Promise.all(others.map(({ userId: recipientId }) =>
+      sendNotification({
+        userId: recipientId,
+        type: 'chat_message',
+        title,
+        message: preview,
+        referenceType: 'chat_thread',
+        referenceId: threadId,
+        dedupKey: `chat-message:${messageId}:${recipientId}`,
+      })
+    ));
+    if (io) {
+      others.forEach(({ userId: recipientId }) => {
+        io.to(`user_${recipientId}`).emit('notification', {
+          type: 'chat_message',
+          title,
+          message: preview,
+          referenceType: 'chat_thread',
+          referenceId: threadId,
+          createdAt: new Date(),
+        });
+      });
+    }
+  } catch (err) {
+    console.error('Chat notification failed:', err.message);
+  }
+}
 
 /** Returns true if `now` (HH:MM, local) falls within a quiet-hours window that may wrap midnight. */
 function isWithinQuietHours(start, end, now = new Date()) {
@@ -470,6 +511,18 @@ export const sendMessage = async (req, res, next) => {
     // Respond immediately with the user's message so the UI never waits on the AI.
     res.status(201).json({ message: formattedMessage });
 
+    // Fire the "new message" bell notification for anyone not currently in
+    // this thread's room — doesn't block the response.
+    notifyOtherParticipants({
+      io,
+      threadId,
+      senderId: userId,
+      senderName: newMessage.sender.fullName,
+      preview: newMessage.text?.slice(0, 140) || '📎 Attachment',
+      isBot: participant.thread.isBot,
+      messageId: newMessage.id,
+    });
+
     // Quiet Hours: if any other participant (a teacher) has quiet hours active right
     // now, send their auto-response once per thread per day and flag the manager if
     // the teacher hasn't replied within 1 business day.
@@ -670,6 +723,16 @@ export const uploadAttachment = async (req, res, next) => {
     }
 
     res.status(201).json({ message: formattedMessage });
+
+    notifyOtherParticipants({
+      io,
+      threadId,
+      senderId: userId,
+      senderName: newMessage.sender.fullName,
+      preview: `📎 ${newMessage.fileName || 'Attachment'}`,
+      isBot: participant.thread.isBot,
+      messageId: newMessage.id,
+    });
   } catch (error) {
     next(error);
   }
