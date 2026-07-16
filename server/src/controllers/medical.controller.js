@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { notifyAdmins, sendNotification } from '../jobs/notification.helper.js';
 
 export const createMedicalLog = async (req, res, next) => {
   try {
@@ -29,13 +30,15 @@ export const createMedicalLog = async (req, res, next) => {
       },
     });
 
-    // Send push notification to management
-    import('../utils/pushNotifications.js').then(({ broadcastToManagement }) => {
-      broadcastToManagement(
-        'Medical Incident Report',
-        `${log.teacher.fullName} reported a medical incident involving ${log.student.fullName}.`,
-        { type: 'MEDICAL' }
-      );
+    // Durable in-app notification for admins (+ FCM push), so a medical incident
+    // reliably reaches the front desk's notifications inbox.
+    notifyAdmins({
+      type: 'MEDICAL',
+      title: log.sentHome ? '🚑 Medical Incident — Sent Home' : '🚑 Medical Incident Report',
+      message: `${log.teacher.fullName} reported a medical incident involving ${log.student.fullName}.`,
+      referenceType: 'medicalLog',
+      referenceId: log.id,
+      io: req.app.get('io'),
     });
 
     res.status(201).json({ log });
@@ -109,15 +112,16 @@ export const updateMedicalLog = async (req, res, next) => {
         select: { family: { select: { members: { where: { role: 'PARENT' }, select: { userId: true } } } } }
       });
       const parentIds = familyMembers.flatMap(f => f.family.members.map(m => m.userId));
-      
-      import('../utils/pushNotifications.js').then(({ sendPushNotification }) => {
-        sendPushNotification(
-          parentIds,
-          'Medical Incident Report',
-          `An incident involving ${log.student.fullName} has been recorded. Notes: ${managerNotes || 'Please contact management.'}`,
-          { logId: log.id }
-        );
-      });
+
+      // Persist a Notification (+ FCM push) per parent so it shows in their bell.
+      await Promise.all(parentIds.map(userId => sendNotification({
+        userId,
+        type: 'MEDICAL',
+        title: 'Medical Incident Report',
+        message: `An incident involving ${log.student.fullName} has been recorded. Notes: ${managerNotes || 'Please contact management.'}`,
+        referenceType: 'medicalLog',
+        referenceId: log.id,
+      })));
     }
 
     res.json({ log });

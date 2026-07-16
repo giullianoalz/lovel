@@ -1,5 +1,6 @@
 import prisma from '../config/database.js';
 import { broadcastToStaff, broadcastToManagement } from '../utils/pushNotifications.js';
+import { notifyAdmins } from '../jobs/notification.helper.js';
 
 // POST /api/alerts — Teacher triggers a class alert (Student out, Class support, Medic)
 export const createAlert = async (req, res, next) => {
@@ -56,6 +57,18 @@ export const createAlert = async (req, res, next) => {
         { alertId: alert.id }
       );
     }
+
+    // Durable in-app notification for admins so the emergency alert also lands in
+    // the notifications inbox, not only as an ephemeral FCM push / socket event.
+    notifyAdmins({
+      type: 'ALERT',
+      title: `Alert: ${alertType}`,
+      message: `${alert.reportedBy.fullName} raised a "${alertType}" alert${
+        alert.student ? ` for ${alert.student.fullName}` : ''
+      }.${alert.reason ? ` Reason: ${alert.reason}` : ''}`,
+      referenceType: 'classAlert',
+      referenceId: alert.id,
+    });
 
     res.status(201).json({ alert });
   } catch (error) {

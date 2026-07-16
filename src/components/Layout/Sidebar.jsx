@@ -22,6 +22,7 @@ import {
   Heart,
   BookOpen,
   Megaphone,
+  Plug,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { requestAndSaveFcmToken, listenForForegroundMessages } from '../../lib/fcm';
@@ -101,7 +102,7 @@ const Sidebar = () => {
           className="mobile-logo"
         />
         
-        {(role === 'ADMIN' || role === 'TEACHER') && (
+        {role && (
           <div style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', zIndex: 200 }}>
             <button ref={bellRef} className="global-notif-bell" onClick={() => setIsNotifOpen(p => !p)}
               aria-label={notif.unreadCount > 0 ? `Notifications, ${notif.unreadCount} unread` : 'Notifications'}
@@ -130,7 +131,7 @@ const Sidebar = () => {
         </div>
 
         {/* Desktop bell — pinned to the top-right corner of the sidebar */}
-        {(role === 'ADMIN' || role === 'TEACHER') && (
+        {role && (
           <div className="sidebar-notif-anchor desk-only">
             <button ref={bellRef} className="sidebar-bell-btn" onClick={() => setIsNotifOpen(p => !p)} aria-label="Notifications">
               <Bell size={18} />
@@ -241,6 +242,12 @@ const Sidebar = () => {
                 <NavLink to="/settings/notifications" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                   <Bell size={20} />
                   <span>Notification Settings</span>
+                </NavLink>
+              )}
+              {role === 'ADMIN' && (
+                <NavLink to="/settings/integrations" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+                  <Plug size={20} />
+                  <span>Integrations</span>
                 </NavLink>
               )}
             </div>

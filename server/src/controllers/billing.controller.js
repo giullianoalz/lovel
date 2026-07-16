@@ -2,6 +2,7 @@ import prisma from '../config/database.js';
 import stripe from '../config/stripe.js';
 import { applyAvailableCredit } from '../services/billingCredit.service.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
+import { notifyAdmins } from '../jobs/notification.helper.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -622,6 +623,14 @@ export const refundPayment = async (req, res, next) => {
           `Stripe refund ${stripeRefundId} for payment ${payment.id} (${payment.familyId || 'unknown family'}) succeeded, but recording it in the ledger failed. Check the payment and Stripe dashboard manually.`,
           { paymentId: payment.id, stripeRefundId }
         );
+        // Durable copy for the admin bell — this is a must-not-miss reconciliation task.
+        await notifyAdmins({
+          type: 'BILLING',
+          title: 'Refund needs manual reconciliation',
+          message: `Stripe refund ${stripeRefundId} for payment ${payment.id} (${payment.familyId || 'unknown family'}) succeeded, but recording it in the ledger failed. Check the payment and Stripe dashboard manually.`,
+          referenceType: 'payment',
+          referenceId: payment.id,
+        });
         return res.status(500).json({
           error: 'Stripe refund succeeded but the ledger update failed. Management has been alerted — do not retry this refund.',
           stripeRefundId,

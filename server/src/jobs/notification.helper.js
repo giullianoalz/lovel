@@ -1,5 +1,6 @@
 import prisma from '../config/database.js';
 import { sendPushNotification } from '../utils/pushNotifications.js';
+import { getAdminUserIds } from '../services/notificationConfig.service.js';
 
 /**
  * Creates a persistent in-app Notification row (deduplicated) and optionally
@@ -62,5 +63,55 @@ export const sendNotification = async ({
   } catch (err) {
     // Notifications should never crash the main flow
     console.error(`[Notification] Failed to send to userId=${userId}:`, err.message);
+  }
+};
+
+/**
+ * Persist an in-app notification (+ FCM push) for every active admin / front-desk
+ * user. Use this for staff-facing events — behavior reports, class alerts, medical
+ * incidents — so the alert survives in the notifications inbox even when no admin
+ * is on the alerts screen and no device token is registered.
+ *
+ * Optionally emits a Socket.IO `notification` event to `admin_room` so any admin
+ * currently connected sees it in real time.
+ *
+ * @param {object} opts
+ * @param {string} opts.type
+ * @param {string} opts.title
+ * @param {string} opts.message
+ * @param {string} [opts.referenceType]
+ * @param {string|null} [opts.referenceId]
+ * @param {string} [opts.dedupKey]
+ * @param {import('socket.io').Server} [opts.io] - if provided, emits to admin_room
+ */
+export const notifyAdmins = async ({
+  type,
+  title,
+  message,
+  referenceType = null,
+  referenceId = null,
+  dedupKey = null,
+  io = null,
+}) => {
+  try {
+    const adminIds = await getAdminUserIds();
+    await Promise.all(
+      adminIds.map((userId) =>
+        sendNotification({ userId, type, title, message, referenceType, referenceId, dedupKey }),
+      ),
+    );
+
+    if (io) {
+      io.to('admin_room').emit('notification', {
+        type,
+        title,
+        message,
+        referenceType,
+        referenceId,
+        createdAt: new Date(),
+      });
+    }
+  } catch (err) {
+    console.error('[Notification] notifyAdmins failed:', err.message);
   }
 };

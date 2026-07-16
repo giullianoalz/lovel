@@ -38,6 +38,8 @@ import rewardsRoutes from './routes/rewards.routes.js';
 import importRoutes from './routes/import.routes.js';
 import paymentsRoutes from './routes/payments.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
+import notificationsRoutes from './routes/notifications.routes.js';
+import integrationsRoutes from './routes/integrations.routes.js';
 import { startCronJobs } from './jobs/cron.jobs.js';
 
 const app = express();
@@ -163,9 +165,8 @@ app.use('/api/portal', portalRoutes);
 app.use('/api/assignments', assignmentsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/announcements', announcementsRoutes);
-
-// app.use('/api/notifications', notificationsRoutes);
-// app.use('/api/announcements', announcementsRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/integrations', integrationsRoutes);
 
 // ===========================================
 // Socket.IO Connection

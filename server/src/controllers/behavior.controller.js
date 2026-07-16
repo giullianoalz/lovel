@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { notifyAdmins, sendNotification } from '../jobs/notification.helper.js';
 
 // POST /api/behavior — Log a behavior entry
 export const createBehaviorLog = async (req, res, next) => {
@@ -39,17 +40,24 @@ export const createBehaviorLog = async (req, res, next) => {
       )
     );
 
-    // Send push notification to management
-    import('../utils/pushNotifications.js').then(({ broadcastToManagement }) => {
-      broadcastToManagement(
-        'New Behavior Report',
-        `${logs[0].teacher.fullName} reported a behavior incident involving ${logs.length} student(s).`,
-        { type: 'BEHAVIOR' }
-      );
+    const io = req.app.get('io');
+    const studentNames = logs.map(l => l.student.fullName).join(', ');
+    const isSevere = (severity || 'MINOR') === 'SEVERE';
+
+    // Persist a durable in-app notification for every admin (+ FCM push). This is
+    // what makes the report show up in the notifications inbox even when no admin
+    // is on the alerts screen and no device token is registered — previously it
+    // only lived in the Behavior list.
+    notifyAdmins({
+      type: 'BEHAVIOR',
+      title: isSevere ? '🚨 Severe Behavior Report' : 'New Behavior Report',
+      message: `${logs[0].teacher.fullName} reported a ${category.toLowerCase()} incident involving ${studentNames}.`,
+      referenceType: 'behaviorLog',
+      referenceId: logs[0].id,
+      io,
     });
 
     // Emit real-time notification to admins
-    const io = req.app.get('io');
     if (io) {
       io.to('admin_room').emit('behavior_logged', {
         id: logs[0].id,
@@ -171,15 +179,17 @@ export const updateBehaviorStatus = async (req, res, next) => {
         select: { family: { select: { members: { where: { role: 'PARENT' }, select: { userId: true } } } } }
       });
       const parentIds = familyMembers.flatMap(f => f.family.members.map(m => m.userId));
-      
-      import('../utils/pushNotifications.js').then(({ sendPushNotification }) => {
-        sendPushNotification(
-          parentIds,
-          'Behavior Incident Report',
-          `An incident involving ${log.student.fullName} has been recorded.`,
-          { logId: log.id }
-        );
-      });
+
+      // Persist a Notification (+ FCM push) per parent so it lands in their bell,
+      // not just as an ephemeral push.
+      await Promise.all(parentIds.map(userId => sendNotification({
+        userId,
+        type: 'BEHAVIOR',
+        title: 'Behavior Incident Report',
+        message: `An incident involving ${log.student.fullName} has been recorded.`,
+        referenceType: 'behaviorLog',
+        referenceId: log.id,
+      })));
     }
 
     res.json({ log });

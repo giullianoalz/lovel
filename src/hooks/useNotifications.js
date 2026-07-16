@@ -12,24 +12,62 @@ export const useNotifications = (role) => {
   const [laterIds, setLaterIds] = useState(() => loadSet(LS_LATER));
 
   useEffect(() => {
-    if (role !== 'ADMIN' && role !== 'TEACHER') return;
-    api.get('/announcements').then(res => {
-      const items = (res.data.announcements || []).slice(0, 50).map(a => ({
-        id: a.id,
-        title: a.title,
-        body: a.body || '',
-        author: a.author?.fullName || 'Academy',
-        time: new Date(a.createdAt),
-        isRead: a.isRead,
-      }));
-      setNotifications(items);
-    }).catch(() => {});
+    // Every signed-in role gets a bell (Facebook-style): parents/students see
+    // their own personal notifications + the announcements targeted at them.
+    if (!role) return;
+
+    // Two feeds share the bell: broadcast announcements and per-user in-app
+    // notifications (behavior reports, alerts, medical incidents, billing, etc.).
+    // allSettled so one failing endpoint doesn't wipe the other out.
+    Promise.allSettled([
+      api.get('/announcements'),
+      api.get('/notifications'),
+    ]).then(([annRes, notifRes]) => {
+      const announcements = annRes.status === 'fulfilled'
+        ? (annRes.value.data.announcements || []).slice(0, 50).map(a => ({
+            id: a.id,
+            source: 'announcement',
+            title: a.title,
+            body: a.body || '',
+            author: a.author?.fullName || 'Academy',
+            time: new Date(a.createdAt),
+            serverRead: !!a.isRead,
+          }))
+        : [];
+
+      const inApp = notifRes.status === 'fulfilled'
+        ? (notifRes.value.data.notifications || []).slice(0, 50).map(n => ({
+            id: n.id,
+            source: 'notification',
+            title: n.title,
+            body: n.message || '',
+            author: 'Academy',
+            time: new Date(n.createdAt),
+            serverRead: !!n.isRead,
+          }))
+        : [];
+
+      const merged = [...announcements, ...inApp].sort((a, b) => b.time - a.time);
+      setNotifications(merged);
+    });
   }, [role]);
 
-  const inboxItems   = notifications.filter(n => !readIds.has(n.id) && !laterIds.has(n.id));
-  const laterItems   = notifications.filter(n => laterIds.has(n.id));
-  const archiveItems = notifications.filter(n => readIds.has(n.id));
+  // An item is read if the server says so or the user marked it read locally.
+  const isReadItem = (n) => n.serverRead || readIds.has(n.id);
+
+  const inboxItems   = notifications.filter(n => !isReadItem(n) && !laterIds.has(n.id));
+  const laterItems   = notifications.filter(n => laterIds.has(n.id) && !isReadItem(n));
+  const archiveItems = notifications.filter(n => isReadItem(n));
   const unreadCount  = inboxItems.length;
+
+  // Route the read call to the right backend for this item's source.
+  const persistRead = (item) => {
+    if (!item) return Promise.resolve();
+    const url = item.source === 'notification'
+      ? `/notifications/${item.id}/read`
+      : `/announcements/${item.id}/read`;
+    return api.post(url).catch(() => { /* noop */ });
+  };
 
   const markRead = async (id, e) => {
     e?.stopPropagation();
@@ -37,7 +75,7 @@ export const useNotifications = (role) => {
     const nextLater = new Set(laterIds); nextLater.delete(id);
     setReadIds(nextRead);   saveSet(LS_READ, nextRead);
     setLaterIds(nextLater); saveSet(LS_LATER, nextLater);
-    try { await api.post(`/announcements/${id}/read`); } catch { /* noop */ }
+    await persistRead(notifications.find(n => n.id === id));
   };
 
   const markLater = (id, e) => {
@@ -62,7 +100,7 @@ export const useNotifications = (role) => {
     inboxItems.forEach(n => { nextRead.add(n.id); nextLater.delete(n.id); });
     setReadIds(nextRead);   saveSet(LS_READ, nextRead);
     setLaterIds(nextLater); saveSet(LS_LATER, nextLater);
-    try { await Promise.all(inboxItems.map(n => api.post(`/announcements/${n.id}/read`))); } catch { /* noop */ }
+    try { await Promise.all(inboxItems.map(persistRead)); } catch { /* noop */ }
   };
 
   return { inboxItems, laterItems, archiveItems, unreadCount, markRead, markLater, restoreToInbox, markAllRead };

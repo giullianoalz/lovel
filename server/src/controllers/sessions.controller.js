@@ -1,6 +1,6 @@
 import prisma from '../config/database.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
-import { sendNotification } from '../jobs/notification.helper.js';
+import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 import {
   getEventConfig,
   getAdminUserIds,
@@ -484,6 +484,14 @@ export const cancelStudentSession = async (req, res, next) => {
         `${cancellation.student.fullName} cancelled ${session.class.name} with less than 48h notice — decide how much to charge (suggested ${LATE_CANCELLATION_SUGGESTED_PERCENT}%).`,
         { cancellationId: cancellation.id }
       );
+      // Durable copy for the admin bell (the FCM push + socket event above are ephemeral).
+      await notifyAdmins({
+        type: 'CANCELLATION',
+        title: 'Cancellation needs a decision',
+        message: `${cancellation.student.fullName} cancelled ${session.class.name} with less than 48h notice — decide how much to charge (suggested ${LATE_CANCELLATION_SUGGESTED_PERCENT}%).`,
+        referenceType: 'sessionCancellation',
+        referenceId: cancellation.id,
+      });
     }
 
     res.status(201).json({ cancellation, autoResolved });
