@@ -15,7 +15,7 @@ const messaging = firebase.messaging();
 // Shows a system notification when a push arrives while the app is in the background/closed.
 messaging.onBackgroundMessage((payload) => {
   const { title, body } = payload.notification || {};
-  self.registration.showNotification(title || 'Love Learning Academy', {
+  self.registration.showNotification(title || 'Love Learning Explorers', {
     body: body || '',
     icon: '/favicon.svg',
     data: payload.data,

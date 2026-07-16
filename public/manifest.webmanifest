@@ -1,5 +1,5 @@
 {
-  "name": "Love Learning Academy",
+  "name": "Love Learning Explorers",
   "short_name": "Love Learning",
   "description": "Love Learning Explorers — classes, attendance, billing, and family communication.",
   "start_url": "/",
@@ -35,7 +35,7 @@
       "sizes": "512x512",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Love Learning Academy Dashboard"
+      "label": "Love Learning Explorers Dashboard"
     }
   ]
 }

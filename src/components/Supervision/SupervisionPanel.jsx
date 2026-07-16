@@ -198,7 +198,7 @@ const SupervisionPanel = () => {
       <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:40px;color:#1e293b;max-width:800px;margin:0 auto;}
       @media print{body{padding:20px;}}</style></head><body>
       <div style="text-align:center;margin-bottom:30px;">
-        <h1 style="margin:0;font-size:22px;color:#166534;">Love Learning Academy</h1>
+        <h1 style="margin:0;font-size:22px;color:#166534;">Love Learning Explorers</h1>
         <h2 style="margin:6px 0;font-size:18px;color:#334155;">${classGroup.class?.name || 'Class'}</h2>
         <p style="color:#64748b;font-size:13px;">Session History Report — Generated ${new Date().toLocaleDateString()}</p>
       </div>
