@@ -603,6 +603,12 @@
 .agenda-event.languages{ background: #fee2e2; border-left-color: #ef4444; }
 .agenda-event.arts     { background: #f3e8ff; border-left-color: #a855f7; }
 
+/* Staff-only entries (time off / shared-space bookings) merged in read-only */
+.agenda-event.pto, .agenda-event.meeting { cursor: default; }
+.agenda-event.pto:hover, .agenda-event.meeting:hover { transform: none; box-shadow: none; }
+.agenda-event.pto      { background: #fecdd3; border-left-color: #e11d48; color: #881337; }
+.agenda-event.meeting  { background: #ede9fe; border-left-color: #7c3aed; color: #4c1d95; }
+
 .agenda-ev-time {
   font-size: 11px;
   font-weight: 700;
@@ -711,6 +717,57 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Empty Day view — a day with no classes used to render as just a bare time
+   axis, which reads as "broken". This gives it an actual empty state. */
+.calendar-empty-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 320px;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  animation: fadeInUp var(--dur-slow, 0.4s) var(--ease-out, ease) both;
+}
+.calendar-empty-day svg { color: var(--primary); opacity: 0.55; }
+.calendar-empty-day h3 { margin: 8px 0 0; font-size: 17px; color: var(--text-main); }
+.calendar-empty-day p { margin: 0; font-size: 14px; max-width: 360px; line-height: 1.5; }
+.calendar-empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--primary), #10b981);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform var(--dur-fast, 0.15s) var(--ease-out, ease),
+              box-shadow var(--dur, 0.25s) var(--ease-out, ease);
+}
+.calendar-empty-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(21, 128, 61, 0.3);
+}
+
+.instructor-pto-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: #fecdd3;
+  color: #881337;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 99px;
 }
 
 .timeline-container {
@@ -868,44 +925,58 @@
   gap: 4px;
 }
 
+/* Solid-colored, two-line block — same visual language as .agenda-event
+   (Week view), just denser to fit a month cell. Kept as one system so the
+   whole calendar reads consistently regardless of which view is open. */
 .mini-event {
-  font-size: 10px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  background: white;
-  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.25;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: #eef2f7;
+  border-left: 3px solid #94a3b8;
   overflow: hidden;
-  text-overflow: ellipsis;
   cursor: pointer;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: transform 0.1s;
+  flex-direction: column;
+  gap: 1px;
+  transition: transform var(--dur-fast, 0.15s) var(--ease-out, ease),
+              box-shadow var(--dur-fast, 0.15s) var(--ease-out, ease);
 }
 
 .mini-event:hover {
-  transform: scale(1.02);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
 }
 
-.mini-event .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.mini-event.math .dot { background: #3b82f6; }
-.mini-event.science .dot { background: #22c55e; }
-.mini-event.languages .dot { background: #ef4444; }
-.mini-event.arts .dot { background: #a855f7; }
-
-/* Clean borders for pill in month view */
-.mini-event.math, .mini-event.science, .mini-event.languages, .mini-event.arts {
+.mini-event-time {
+  font-size: 10px;
+  font-weight: 700;
   color: var(--text-main);
-  border: 1px solid var(--border-light);
-  background: white !important;
+  white-space: nowrap;
 }
+
+.mini-event-title {
+  font-size: 10.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mini-event.math      { background: #dbeafe; border-left-color: #3b82f6; }
+.mini-event.science   { background: #dcfce7; border-left-color: #22c55e; }
+.mini-event.languages { background: #fee2e2; border-left-color: #ef4444; }
+.mini-event.arts      { background: #f3e8ff; border-left-color: #a855f7; }
+
+/* Staff-only entries merged in from the PTO / Shared Spaces panels — read-only,
+   so no hover-lift/pointer affordance beyond the tooltip. */
+.mini-event.pto, .mini-event.meeting { cursor: default; }
+.mini-event.pto:hover, .mini-event.meeting:hover { transform: none; box-shadow: none; }
+.mini-event.pto     { background: #fecdd3; border-left-color: #e11d48; color: #881337; }
+.mini-event.meeting { background: #ede9fe; border-left-color: #7c3aed; color: #4c1d95; }
+.mini-event.pto .mini-event-time, .mini-event.pto .mini-event-title,
+.mini-event.meeting .mini-event-time, .mini-event.meeting .mini-event-title { color: inherit; }
 
 /* Modal Styles */
 .modal-overlay {

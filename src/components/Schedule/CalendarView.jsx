@@ -473,6 +473,51 @@ const CalendarView = () => {
     loadSessions(view, currentDate);
   }, [view, currentDate]);
 
+  // Org-wide time off + shared-space bookings, merged read-only into the
+  // Month/Week grids so front desk sees "who's out" alongside actual classes
+  // instead of digging through the separate PTO/Spaces side panels. Staff-only —
+  // students/parents don't get teacher absence info on their calendar.
+  const [staffEvents, setStaffEvents] = useState([]);
+  const canSeeStaffEvents = role === 'ADMIN' || role === 'TEACHER';
+
+  const loadStaffEvents = async (viewMode, date) => {
+    if (!canSeeStaffEvents) { setStaffEvents([]); return; }
+    try {
+      const { start, end } = getVisibleRange(viewMode, date);
+      const res = await api.get(
+        `/calendar?showPTO=true&showSharedSpaces=true&orgWide=true&from=${toISODate(start)}&to=${toISODate(end)}`
+      );
+      const pto = (res.data.ptoRequests || []).map(r => ({
+        id: `pto-${r.id}`,
+        kind: 'pto',
+        dateStr: new Date(r.date).toISOString().split('T')[0],
+        time: 'All day',
+        teacherName: r.teacher?.fullName || '',
+        title: `${r.type === 'SICK' ? 'Out Sick' : 'Vacation'} — ${r.teacher?.fullName || 'Staff'}`,
+      }));
+      const spaces = (res.data.spaceReservations || []).map(r => {
+        // Written with a forced "Z" suffix (see reserveSpace on the server) —
+        // same UTC-pinned-wall-clock convention as Session times, so it's read
+        // back the same way: via formatTimeOfDay's UTC getters, not local ones.
+        const startDt = new Date(r.startTime);
+        return {
+          id: `space-${r.id}`,
+          kind: 'meeting',
+          dateStr: startDt.toISOString().split('T')[0],
+          time: `${formatTimeOfDay(r.startTime)} - ${formatTimeOfDay(r.endTime)}`,
+          title: `${r.purpose || r.space?.name || 'Meeting'}${r.user?.fullName ? ` — ${r.user.fullName}` : ''}`,
+        };
+      });
+      setStaffEvents([...pto, ...spaces]);
+    } catch {
+      setStaffEvents([]);
+    }
+  };
+
+  useEffect(() => {
+    loadStaffEvents(view, currentDate);
+  }, [view, currentDate, role]);
+
   const reloadClasses = async () => {
     try {
       const res = await api.get('/classes?limit=200');
@@ -1159,7 +1204,13 @@ const CalendarView = () => {
   };
 
   const dayEventsList = events.filter(e => e.dateStr === toISODate(currentDate));
-  const uniqueTeachers = [...new Set(events.map(e => e.teacher))].sort();
+  // Union with teachers who are on PTO today but have no session — otherwise
+  // a teacher taking the whole day off (no classes to show) never gets a
+  // column, and the "Out" badge below would have nowhere to render.
+  const todaysPtoTeachers = staffEvents
+    .filter(se => se.kind === 'pto' && se.dateStr === toISODate(currentDate))
+    .map(se => se.teacherName);
+  const uniqueTeachers = [...new Set([...events.map(e => e.teacher), ...todaysPtoTeachers])].sort();
 
   // Moves currentDate by one unit of whatever's currently in view — this is
   // what the header's ◀ ▶ arrows call; each change re-fetches sessions via
@@ -1621,9 +1672,15 @@ const CalendarView = () => {
                 const isToday = toISODate(date) === toISODate(new Date());
                 // Agenda layout: each day lists its events top-to-bottom, ordered
                 // by start time (no time-grid positioning), TutorBird-style.
-                const dayEvents = events
-                  .filter(e => e.dateStr === toISODate(date))
-                  .sort((a, b) => parseTimeToPix(a.time) - parseTimeToPix(b.time));
+                // Vacation/sick chips have no real time, so they float to the top.
+                const dayEvents = [
+                  ...events.filter(e => e.dateStr === toISODate(date)),
+                  ...staffEvents.filter(e => e.dateStr === toISODate(date)),
+                ].sort((a, b) => {
+                  const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
+                  const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
+                  return pa - pb;
+                });
 
                 return (
                   <div key={idx} className={`agenda-day-col ${isToday ? 'today' : ''}`}>
@@ -1640,27 +1697,32 @@ const CalendarView = () => {
                       {dayEvents.length === 0 ? (
                         <div className="agenda-empty">—</div>
                       ) : (
-                        dayEvents.map(e => (
-                          <div
-                            key={e.id}
-                            className={`agenda-event ${e.subject}`}
-                            style={{ cursor: role === 'ADMIN' ? 'grab' : 'pointer' }}
-                            title={`${e.title} · ${e.time} · ${e.teacher}`}
-                            draggable={role === 'ADMIN'}
-                            onDragStart={(evt) => handleDragStart(evt, e)}
-                            onClick={() => handleEventClick(e)}
-                          >
-                            <span className="agenda-ev-time">{e.time}</span>
-                            <div className="agenda-ev-title">
-                              <CheckCircle2 size={13} className="agenda-ev-check" />
-                              <strong>{e.title}</strong>
+                        dayEvents.map(item => {
+                          const isStaff = !!item.kind;
+                          return (
+                            <div
+                              key={item.id}
+                              className={`agenda-event ${isStaff ? item.kind : item.subject}`}
+                              style={{ cursor: isStaff ? 'default' : (role === 'ADMIN' ? 'grab' : 'pointer') }}
+                              title={isStaff ? `${item.title} · ${item.time}` : `${item.title} · ${item.time} · ${item.teacher}`}
+                              draggable={!isStaff && role === 'ADMIN'}
+                              onDragStart={!isStaff ? (evt) => handleDragStart(evt, item) : undefined}
+                              onClick={!isStaff ? () => handleEventClick(item) : undefined}
+                            >
+                              <span className="agenda-ev-time">{item.time}</span>
+                              <div className="agenda-ev-title">
+                                {!isStaff && <CheckCircle2 size={13} className="agenda-ev-check" />}
+                                <strong>{item.title}</strong>
+                              </div>
+                              {!isStaff && (
+                                <span className="agenda-ev-desc">
+                                  {item.type === 'Virtual' ? <Video size={11} /> : <MapPin size={11} />}
+                                  <span>{item.teacher.replace('Prof. ', '')}{item.students > 0 ? ` · ${item.students} student${item.students > 1 ? 's' : ''}` : ''}</span>
+                                </span>
+                              )}
                             </div>
-                            <span className="agenda-ev-desc">
-                              {e.type === 'Virtual' ? <Video size={11} /> : <MapPin size={11} />}
-                              <span>{e.teacher.replace('Prof. ', '')}{e.students > 0 ? ` · ${e.students} student${e.students > 1 ? 's' : ''}` : ''}</span>
-                            </span>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </div>
@@ -1670,7 +1732,24 @@ const CalendarView = () => {
           </div>
         )}
 
-        {view === 'day' && (
+        {view === 'day' && uniqueTeachers.length === 0 && (
+          <div className="calendar-empty-day">
+            <CalendarIcon size={40} />
+            <h3>No classes scheduled</h3>
+            <p>
+              {sessionsLoading
+                ? 'Loading the day…'
+                : `Nothing on the books for ${currentDate.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}.`}
+            </p>
+            {canAddEvents && !sessionsLoading && (
+              <button className="calendar-empty-cta" onClick={() => setActiveModal('full')}>
+                <Plus size={15} /> Add an event
+              </button>
+            )}
+          </div>
+        )}
+
+        {view === 'day' && uniqueTeachers.length > 0 && (
           <div className="calendar-scroll-wrapper">
              <div className="instructor-schedule-grid">
                 {/* Time Axis */}
@@ -1691,18 +1770,27 @@ const CalendarView = () => {
                 {uniqueTeachers.map(teacher => {
                   const teacherEvents = dayEventsList.filter(e => e.teacher === teacher);
                   const teacherLayout = layoutOverlaps(teacherEvents);
+                  // PTO has no time-of-day, so it can't be positioned on the
+                  // timeline like a real session — it shows as a badge on the
+                  // column header instead.
+                  const teacherName = teacher.replace('Prof. ', '');
+                  const isOutToday = staffEvents.some(se =>
+                    se.kind === 'pto' && se.dateStr === toISODate(currentDate) &&
+                    se.teacherName.replace('Prof. ', '') === teacherName
+                  );
                   return (
-                    <div 
-                      key={teacher} 
+                    <div
+                      key={teacher}
                       className="instructor-col"
                       onDragOver={e => e.preventDefault()}
                       onDrop={e => handleDropOnTeacher(e, teacher)}
                     >
                       <div className="instructor-header">
                          <div className="avatar">{teacher.charAt(6)}</div>
-                         <div className="name">{teacher.replace('Prof. ', '')}</div>
+                         <div className="name">{teacherName}</div>
+                         {isOutToday && <span className="instructor-pto-badge">Out</span>}
                       </div>
-                      
+
                       <div className="timeline-container" style={{ height: `${10 * 60 * PIXELS_PER_MINUTE}px` }}>
                          {/* Background Hour Lines */}
                          {Array.from({ length: 10 }).map((_, i) => (
@@ -1749,7 +1837,25 @@ const CalendarView = () => {
                 const isCurrentMonth = dayNum > 0 && dayNum <= daysInMonth;
                 const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), dayNum);
                 const isToday = isCurrentMonth && toISODate(cellDate) === toISODate(new Date());
-                const dayEvents = isCurrentMonth ? events.filter(e => e.dateStr === toISODate(cellDate)) : [];
+                // Vacation/sick chips (no real time) float to the top of the day;
+                // everything else — classes and shared-space meetings — is
+                // chronological underneath.
+                const dayEvents = isCurrentMonth
+                  ? [
+                      ...events.filter(e => e.dateStr === toISODate(cellDate)),
+                      ...staffEvents.filter(e => e.dateStr === toISODate(cellDate)),
+                    ].sort((a, b) => {
+                      const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
+                      const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
+                      return pa - pb;
+                    })
+                  : [];
+
+                // On the 1st of the month, label the cell "Jul 1" instead of a
+                // bare "1" so a week spanning two months doesn't read as ambiguous.
+                const cellDateLabel = dayNum === 1
+                  ? `${cellDate.toLocaleString('en-US', { month: 'short' })} ${dayNum}`
+                  : dayNum;
 
                 return (
                   <div
@@ -1761,23 +1867,26 @@ const CalendarView = () => {
                     {isCurrentMonth && (
                       <>
                         <div className="month-cell-top">
-                          <span className="cell-date">{dayNum}</span>
+                          <span className="cell-date">{cellDateLabel}</span>
                         </div>
                         <div className="cell-events-area">
-                          {dayEvents.map(e => (
-                            <div 
-                              key={e.id} 
-                              className={`mini-event ${e.subject}`} 
-                              title={`${e.time} - ${e.title}`}
-                              draggable={role === 'ADMIN'}
-                              onDragStart={(evt) => handleDragStart(evt, e)}
-                              onClick={() => handleEventClick(e)}
-                              style={{ cursor: role === 'ADMIN' ? 'grab' : 'pointer' }}
-                            >
-                               <div className="dot"></div>
-                               <span>{e.time.split(' ')[0]} {e.title}</span>
-                            </div>
-                          ))}
+                          {dayEvents.map(item => {
+                            const isStaff = !!item.kind;
+                            return (
+                              <div
+                                key={item.id}
+                                className={`mini-event ${isStaff ? item.kind : item.subject}`}
+                                title={`${item.time} — ${item.title}`}
+                                draggable={!isStaff && role === 'ADMIN'}
+                                onDragStart={!isStaff ? (evt) => handleDragStart(evt, item) : undefined}
+                                onClick={!isStaff ? () => handleEventClick(item) : undefined}
+                                style={{ cursor: isStaff ? 'default' : (role === 'ADMIN' ? 'grab' : 'pointer') }}
+                              >
+                                <span className="mini-event-time">{item.time}</span>
+                                <span className="mini-event-title">{item.title}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </>
                     )}

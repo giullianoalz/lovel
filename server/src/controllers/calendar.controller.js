@@ -4,10 +4,16 @@ import prisma from '../config/database.js';
 export const getCalendarData = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { from, to, showPTO, showSharedSpaces } = req.query;
+    const { from, to, showPTO, showSharedSpaces, orgWide } = req.query;
 
     const fromDate = from ? new Date(from) : new Date(new Date().setHours(0,0,0,0));
     const toDate = to ? new Date(to) : new Date(new Date().setDate(new Date().getDate() + 30));
+
+    // `orgWide` powers the shared read-only calendar grid (Month/Week views),
+    // where front desk/admins need to see everyone's time off at a glance.
+    // It's gated to staff roles and never used by the self-service "My PTO"
+    // panel, which always omits it and stays scoped to the caller only.
+    const isOrgWide = orgWide === 'true' && ['ADMIN', 'TEACHER'].includes(req.user.role);
 
     let sessions = [];
     let ptoRequests = [];
@@ -28,9 +34,10 @@ export const getCalendarData = async (req, res, next) => {
     if (showPTO === 'true') {
       ptoRequests = await prisma.timeOffRequest.findMany({
         where: {
-          teacherId: userId,
+          ...(isOrgWide ? {} : { teacherId: userId }),
           date: { gte: fromDate, lte: toDate }
-        }
+        },
+        ...(isOrgWide ? { include: { teacher: { select: { id: true, fullName: true } } } } : {}),
       });
     }
 
