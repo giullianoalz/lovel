@@ -243,6 +243,18 @@
 .severity-badge.minor { background: #e0f2fe; color: #0369a1; }
 .severity-badge.moderate { background: #fef3c7; color: #92400e; }
 .severity-badge.severe { background: #fee2e2; color: #991b1b; }
+.severity-badge.pending { background: #f1f5f9; color: #64748b; border: 1px dashed #cbd5e1; }
+
+/* Inline hint shown in the report form telling the teacher an admin sets severity */
+.behavior-severity-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted, #64748b);
+}
+.behavior-severity-hint svg { color: #0369a1; flex-shrink: 0; }
 
 .desc-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .teacher-cell { color: var(--text-muted); font-size: 12px; }

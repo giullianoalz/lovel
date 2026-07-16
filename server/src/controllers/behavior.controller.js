@@ -4,7 +4,7 @@ import { notifyAdmins, sendNotification } from '../jobs/notification.helper.js';
 // POST /api/behavior — Log a behavior entry
 export const createBehaviorLog = async (req, res, next) => {
   try {
-    const { studentId, additionalStudentIds = [], sessionId, place, ruleBroken, type, category, description, severity } = req.body;
+    const { studentId, additionalStudentIds = [], sessionId, place, ruleBroken, type, category, description } = req.body;
     const teacherId = req.user.id;
 
     if (!studentId || !type || !category || !description) {
@@ -15,10 +15,12 @@ export const createBehaviorLog = async (req, res, next) => {
     }
 
     const allStudentIds = [studentId, ...additionalStudentIds];
-    
-    // Create logs for all involved students
+
+    // Severity is intentionally NOT taken from the reporter. Teachers report the
+    // incident; an admin decides the severity level afterwards during review
+    // (see updateBehaviorStatus). It stays at the schema default until then.
     const logs = await prisma.$transaction(
-      allStudentIds.map(sId => 
+      allStudentIds.map(sId =>
         prisma.behaviorLog.create({
           data: {
             studentId: sId,
@@ -29,7 +31,6 @@ export const createBehaviorLog = async (req, res, next) => {
             type,
             category,
             description,
-            severity: severity || 'MINOR',
             status: 'RECORDED'
           },
           include: {
@@ -42,15 +43,15 @@ export const createBehaviorLog = async (req, res, next) => {
 
     const io = req.app.get('io');
     const studentNames = logs.map(l => l.student.fullName).join(', ');
-    const isSevere = (severity || 'MINOR') === 'SEVERE';
 
     // Persist a durable in-app notification for every admin (+ FCM push). This is
     // what makes the report show up in the notifications inbox even when no admin
     // is on the alerts screen and no device token is registered — previously it
-    // only lived in the Behavior list.
+    // only lived in the Behavior list. Severity isn't known yet — the admin sets
+    // it while reviewing, so the report reads as pending review here.
     notifyAdmins({
       type: 'BEHAVIOR',
-      title: isSevere ? '🚨 Severe Behavior Report' : 'New Behavior Report',
+      title: type === 'POSITIVE' ? 'New Positive Note' : 'New Behavior Report — needs review',
       message: `${logs[0].teacher.fullName} reported a ${category.toLowerCase()} incident involving ${studentNames}.`,
       referenceType: 'behaviorLog',
       referenceId: logs[0].id,
@@ -150,15 +151,28 @@ export const getStudentBehavior = async (req, res, next) => {
 };
 
 // PUT /api/behavior/:id/status — Manager updates status (e.g. DOWNGRADED, SENT_TO_PARENT)
+// and, crucially, sets the severity level — this is the ONLY place severity is
+// assigned, and it's admin-only (see behavior.routes.js).
+const VALID_SEVERITIES = ['MINOR', 'MODERATE', 'SEVERE'];
 export const updateBehaviorStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status, managerNotes } = req.body;
+    const { status, managerNotes, severity } = req.body;
 
     const data = {
       status,
       managerNotes
     };
+
+    if (severity !== undefined) {
+      if (!VALID_SEVERITIES.includes(severity)) {
+        return res.status(400).json({
+          error: 'Validation Error',
+          message: `severity must be one of: ${VALID_SEVERITIES.join(', ')}.`,
+        });
+      }
+      data.severity = severity;
+    }
 
     if (status === 'SENT_TO_PARENT') {
       data.parentNotifiedAt = new Date();

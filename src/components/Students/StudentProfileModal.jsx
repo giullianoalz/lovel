@@ -28,7 +28,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const [reportType, setReportType] = useState(null); // 'medical' | 'behavior' | null
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [medForm, setMedForm] = useState({ time: new Date().toISOString().slice(0, 16), place: '', description: '', actionsTaken: '', sentHome: false });
-  const [behForm, setBehForm] = useState({ place: '', ruleBroken: '', category: '', description: '', severity: 'MINOR' });
+  const [behForm, setBehForm] = useState({ place: '', ruleBroken: '', category: '', description: '' });
 
   const handleSubmitReport = async () => {
     setReportSubmitting(true);
@@ -174,11 +174,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                 </select>
                 <input type="text" placeholder="Rule broken" value={behForm.ruleBroken} onChange={e => setBehForm(p => ({...p, ruleBroken: e.target.value}))} />
                 <textarea placeholder="Description of incident..." value={behForm.description} onChange={e => setBehForm(p => ({...p, description: e.target.value}))} />
-                <select value={behForm.severity} onChange={e => setBehForm(p => ({...p, severity: e.target.value}))}>
-                  <option value="MINOR">Minor</option>
-                  <option value="MODERATE">Moderate</option>
-                  <option value="SEVERE">Severe</option>
-                </select>
+                <p className="report-hint">The severity level is set by an administrator during review.</p>
               </div>
             )}
             <button className="action-btn primary" onClick={handleSubmitReport} disabled={reportSubmitting} style={{marginTop:10}}>

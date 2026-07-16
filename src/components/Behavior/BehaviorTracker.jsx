@@ -21,6 +21,7 @@ const BehaviorTracker = () => {
   const [reviewLog, setReviewLog] = useState(null);
   const [classification, setClassification] = useState('Verbal Warning');
   const [reviewNotes, setReviewNotes] = useState('');
+  const [reviewSeverity, setReviewSeverity] = useState('MINOR');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [logs, setLogs] = useState([]);
   const [, setTotal] = useState(0);
@@ -31,13 +32,13 @@ const BehaviorTracker = () => {
   const [filterType, setFilterType] = useState('');
   const [filterSeverity, setFilterSeverity] = useState('');
 
-  // Form state
+  // Form state — no severity here: an admin assigns the severity level later,
+  // during review. The teacher/reporter only describes the incident.
   const [form, setForm] = useState({
     studentId: '',
     type: 'WARNING',
     category: '',
     description: '',
-    severity: 'MINOR',
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -76,7 +77,7 @@ const BehaviorTracker = () => {
     try {
       await api.post('/behavior', form);
       setShowModal(false);
-      setForm({ studentId: '', type: 'WARNING', category: '', description: '', severity: 'MINOR' });
+      setForm({ studentId: '', type: 'WARNING', category: '', description: '' });
       await loadLogs();
     } catch (error) {
       console.error('Error creating behavior log:', error);
@@ -89,6 +90,9 @@ const BehaviorTracker = () => {
     setReviewLog(log);
     setClassification('Verbal Warning');
     setReviewNotes(log.managerNotes || '');
+    // Not yet reviewed → make the admin consciously pick a level (default to
+    // Moderate) rather than silently inheriting the placeholder.
+    setReviewSeverity(log.status && log.status !== 'RECORDED' ? log.severity : 'MODERATE');
   };
 
   const handleReviewAction = async (status) => {
@@ -96,7 +100,7 @@ const BehaviorTracker = () => {
     setReviewSubmitting(true);
     try {
       const notesWithClassification = `[${classification}] ${reviewNotes}`.trim();
-      await api.put(`/behavior/${reviewLog.id}/status`, { status, managerNotes: notesWithClassification });
+      await api.put(`/behavior/${reviewLog.id}/status`, { status, managerNotes: notesWithClassification, severity: reviewSeverity });
       setReviewLog(null);
       await loadLogs();
       toast.success(status === 'SENT_TO_PARENT' ? 'Sent to parent' : 'Incident downgraded');
@@ -231,9 +235,15 @@ const BehaviorTracker = () => {
                     </td>
                     <td><span className="category-pill">{log.category}</span></td>
                     <td>
-                      <span className={`severity-badge ${log.severity.toLowerCase()}`}>
-                        {log.severity}
-                      </span>
+                      {log.type === 'POSITIVE' ? (
+                        <span className="text-muted">—</span>
+                      ) : (log.status || 'RECORDED') === 'RECORDED' ? (
+                        <span className="severity-badge pending" title="An admin sets the severity during review">Pending</span>
+                      ) : (
+                        <span className={`severity-badge ${log.severity.toLowerCase()}`}>
+                          {log.severity}
+                        </span>
+                      )}
                     </td>
                     <td className="desc-cell">{log.description}</td>
                     <td className="teacher-cell">{log.teacher?.fullName || 'System'}</td>
@@ -293,32 +303,23 @@ const BehaviorTracker = () => {
                 </select>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Category</label>
-                  <select
-                    className="form-control"
-                    value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  >
-                    <option value="">Select category...</option>
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-
-                {form.type !== 'POSITIVE' && (
-                  <div className="form-group">
-                    <label>Severity</label>
-                    <select
-                      className="form-control"
-                      value={form.severity}
-                      onChange={(e) => setForm({ ...form, severity: e.target.value })}
-                    >
-                      {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                )}
+              <div className="form-group">
+                <label>Category</label>
+                <select
+                  className="form-control"
+                  value={form.category}
+                  onChange={(e) => setForm({ ...form, category: e.target.value })}
+                >
+                  <option value="">Select category...</option>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
+
+              {form.type !== 'POSITIVE' && (
+                <p className="behavior-severity-hint">
+                  <ShieldCheck size={14} /> An administrator will set the severity level when they review this report.
+                </p>
+              )}
 
               <div className="form-group">
                 <label>Description</label>
@@ -358,9 +359,16 @@ const BehaviorTracker = () => {
             <div className="modal-form">
               <div className="review-summary">
                 <strong>{reviewLog.student?.fullName}</strong>
-                <span className="text-muted"> — {reviewLog.category} ({reviewLog.severity})</span>
+                <span className="text-muted"> — {reviewLog.category}</span>
                 <p className="text-muted" style={{ marginTop: 6 }}>{reviewLog.description}</p>
                 <span className="text-muted" style={{ fontSize: 12 }}>Reported by {reviewLog.teacher?.fullName}</span>
+              </div>
+
+              <div className="form-group">
+                <label>Severity level</label>
+                <select className="form-control" value={reviewSeverity} onChange={(e) => setReviewSeverity(e.target.value)}>
+                  {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
               </div>
 
               <div className="form-group">

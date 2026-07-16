@@ -387,6 +387,7 @@
   padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px;
 }
 .report-fields textarea { min-height: 60px; resize: vertical; }
+.report-hint { margin: 2px 0 0; font-size: 12px; font-style: italic; color: var(--text-muted, #64748b); }
 
 .seashell-tiers {
   display: flex; gap: 12px; margin-top: 10px;

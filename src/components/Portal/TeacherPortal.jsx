@@ -95,7 +95,7 @@ const TeacherPortal = () => {
   const [lpSupplyInput, setLpSupplyInput] = useState({ itemName: '', quantity: 1, dayNeeded: '' });
 
   /* ── Forms ── */
-  const [behaviorForm, setBehaviorForm] = useState({ studentId: '', place: '', ruleBroken: '', type: 'WARNING', category: '', description: '', severity: 'MINOR' });
+  const [behaviorForm, setBehaviorForm] = useState({ studentId: '', place: '', ruleBroken: '', type: 'WARNING', category: '', description: '' });
   const [medicalForm, setMedicalForm] = useState({ studentId: '', time: '', place: '', description: '', actionsTaken: '', sentHome: false });
 
   /* ── Refs ── */
@@ -357,7 +357,7 @@ const TeacherPortal = () => {
     e.preventDefault();
     try { await api.post('/behavior', behaviorForm); showToast('✅ Behavior report submitted'); }
     catch { showToast('⚠️ Report saved locally'); }
-    setBehaviorForm({ studentId: '', place: '', ruleBroken: '', type: 'WARNING', category: '', description: '', severity: 'MINOR' });
+    setBehaviorForm({ studentId: '', place: '', ruleBroken: '', type: 'WARNING', category: '', description: '' });
   };
 
   const handleMedicalSubmit = async (e) => {
@@ -493,7 +493,7 @@ const TeacherPortal = () => {
             ))}
           </>
         )}
-        <button className="ann-view-feed-link" onClick={() => navigate('/feed')}>View Academy Feed →</button>
+        <button className="ann-view-feed-link" onClick={() => navigate('/feed')}>View Announcements →</button>
       </div>
 
       {/* ── TOP BAR: title + notification bell ───────────────── */}
@@ -936,20 +936,13 @@ const TeacherPortal = () => {
                   <input type="text" placeholder="Which rule was broken?" value={behaviorForm.ruleBroken}
                     onChange={(e) => setBehaviorForm({ ...behaviorForm, ruleBroken: e.target.value })} />
                 </div>
-                <div className="tp-form-group">
-                  <label>Severity</label>
-                  <select value={behaviorForm.severity} onChange={(e) => setBehaviorForm({ ...behaviorForm, severity: e.target.value })}>
-                    <option value="MINOR">Minor</option>
-                    <option value="MODERATE">Moderate</option>
-                    <option value="SEVERE">Severe</option>
-                  </select>
-                </div>
                 <div className="tp-form-group full-width">
                   <label>Description</label>
                   <textarea placeholder="Describe the incident in detail…" value={behaviorForm.description}
                     onChange={(e) => setBehaviorForm({ ...behaviorForm, description: e.target.value })} required />
                 </div>
               </div>
+              <p className="tp-form-note">An administrator will set the severity level after reviewing this report.</p>
               <button type="submit" className="tp-submit-btn">Submit Behavior Report</button>
             </form>
           </div>
