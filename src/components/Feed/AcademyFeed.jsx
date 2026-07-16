@@ -104,7 +104,7 @@ const AcademyFeed = () => {
       const res = await api.get('/announcements');
       setPosts(res.data.announcements || []);
     } catch {
-      toast.error('Could not load the Academy Feed.');
+      toast.error('Could not load Announcements.');
     }
     setLoading(false);
   };
@@ -146,7 +146,7 @@ const AcademyFeed = () => {
       mediaItems.forEach(item => data.append('media', item.file));
 
       await api.post('/announcements', data, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success('Posted to the Academy Feed!');
+      toast.success('Posted to Announcements!');
       clearComposer();
       setComposerOpen(false);
       await loadPosts();
@@ -265,7 +265,7 @@ const AcademyFeed = () => {
               onClick={handleSubmit}
               disabled={submitting || !form.title.trim() || !form.body.trim()}
             >
-              <Send size={14} /> {submitting ? 'Posting...' : 'Post to Feed'}
+              <Send size={14} /> {submitting ? 'Posting...' : 'Post Announcement'}
             </button>
           </div>
         </div>
@@ -273,7 +273,7 @@ const AcademyFeed = () => {
 
       <div className="feed-list">
         {loading ? (
-          <div className="feed-empty">Loading the Academy Feed...</div>
+          <div className="feed-empty">Loading Announcements...</div>
         ) : posts.length === 0 ? (
           <div className="feed-empty">
             <Megaphone size={32} />

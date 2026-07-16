@@ -171,7 +171,7 @@ const Sidebar = () => {
             )}
             <NavLink to="/feed" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <Megaphone size={20} />
-              <span>Academy Feed</span>
+              <span>Announcements</span>
             </NavLink>
             <NavLink to="/chat" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <MessageSquare size={20} />
