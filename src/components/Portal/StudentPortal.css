@@ -91,7 +91,19 @@
   background: rgba(255,255,255,0.15);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255,255,255,0.2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
+
+.sp-stat-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  background: rgba(255,255,255,0.25);
+}
+
+.sp-stat-pill:active { transform: translateY(0); }
 
 .sp-stat-pill.shells { background: rgba(14,165,233,0.25); border-color: rgba(14,165,233,0.4); }
 .sp-stat-pill.pos    { background: rgba(34,197,94,0.2);   border-color: rgba(34,197,94,0.35); }

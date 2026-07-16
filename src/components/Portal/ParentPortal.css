@@ -173,10 +173,15 @@
 .pp-cstat {
   display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 12px;
   background: #f8fafc; border: 1px solid #e2e8f0;
+  font: inherit; color: inherit; cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
+.pp-cstat:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12); }
+.pp-cstat:active { transform: translateY(0); }
 .pp-cstat.shells { background: #f0f9ff; border-color: #bae6fd; color: #0284c7; }
 .pp-cstat.pos    { background: #f0fdf4; border-color: #86efac; color: #15803d; }
 .pp-cstat.warn   { background: #fffbeb; border-color: #fcd34d; color: #b45309; }
+.pp-cstat.snack  { color: #b45309; }
 
 .pp-cstat-num { font-size: 20px; font-weight: 800; line-height: 1; }
 .pp-cstat-lbl { font-size: 11px; opacity: 0.8; text-transform: uppercase; letter-spacing: 0.4px; }

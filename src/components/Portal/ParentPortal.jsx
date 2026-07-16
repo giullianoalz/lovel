@@ -10,6 +10,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import ErrorBanner from '../Layout/ErrorBanner';
+import StatHistoryModal from './StatHistoryModal';
 import './ParentPortal.css';
 
 const RELATIONSHIPS = ['Parent', 'Guardian', 'Grandparent', 'Aunt/Uncle', 'Sibling', 'Family Friend', 'Other'];
@@ -417,6 +418,7 @@ const ParentPortal = () => {
   const [error, setError]           = useState(null);
   const [tab, setTab]               = useState('children');
   const [activeChild, setActiveChild] = useState(0);
+  const [statModal, setStatModal] = useState(null); // 'seashells' | 'punches' | 'positive' | 'warnings'
   const [pickupAuths, setPickupAuths] = useState([]);
   const [showPickupModal, setShowPickupModal] = useState(false);
   const [paying, setPaying]         = useState(null);
@@ -650,30 +652,31 @@ const ParentPortal = () => {
                       <span className={`status-tag ${child.status?.toLowerCase()}`}>{child.status}</span>
                     </div>
                   </div>
+                  {/* Tap any stat to see its full history and the reason behind each entry */}
                   <div className="pp-child-stats">
-                    <div className="pp-cstat shells">
+                    <button type="button" className="pp-cstat shells" onClick={() => setStatModal('seashells')}>
                       <Shell size={20} />
                       <span className="pp-cstat-num">{child.seashells || 0}</span>
                       <span className="pp-cstat-lbl">Seashells</span>
-                    </div>
+                    </button>
                     {child.isInPerson && (
-                      <div className="pp-cstat snack">
+                      <button type="button" className="pp-cstat snack" onClick={() => setStatModal('punches')}>
                         <span style={{ fontSize: 20 }}>🍪</span>
                         <span className="pp-cstat-num">{child.snackPunches || 0}</span>
                         <span className="pp-cstat-lbl">Punches</span>
-                      </div>
+                      </button>
                     )}
-                    <div className="pp-cstat pos">
+                    <button type="button" className="pp-cstat pos" onClick={() => setStatModal('positive')}>
                       <ThumbsUp size={20} />
                       <span className="pp-cstat-num">{child.behaviorSummary?.positives || 0}</span>
                       <span className="pp-cstat-lbl">Positive</span>
-                    </div>
+                    </button>
                     {(child.behaviorSummary?.warnings || 0) > 0 && (
-                      <div className="pp-cstat warn">
+                      <button type="button" className="pp-cstat warn" onClick={() => setStatModal('warnings')}>
                         <AlertTriangle size={20} />
                         <span className="pp-cstat-num">{child.behaviorSummary.warnings}</span>
                         <span className="pp-cstat-lbl">Warnings</span>
-                      </div>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1059,6 +1062,19 @@ const ParentPortal = () => {
           children={inPersonChildren}
           onClose={() => setShowPickupModal(false)}
           onCreated={handlePickupCreated}
+        />
+      )}
+
+      {child && (
+        <StatHistoryModal
+          kind={statModal}
+          studentName={child.fullName?.split(' ')[0]}
+          data={{
+            prizeHistory: child.prizeHistory || [],
+            punchHistory: child.punchHistory || [],
+            behaviorHistory: child.behaviorHistory || [],
+          }}
+          onClose={() => setStatModal(null)}
         />
       )}
     </div>

@@ -5,6 +5,40 @@ import { invalidate } from '../middleware/cache.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 import { getAdminUserIds } from '../services/notificationConfig.service.js';
 
+// Shape a behavior log for the student/parent portals — exposes the reason
+// ("why") behind each positive note or warning, not just the count.
+const mapBehaviorLog = (log) => ({
+  id: log.id,
+  type: log.type,
+  category: log.category,
+  description: log.description,
+  ruleBroken: log.ruleBroken || null,
+  severity: log.severity,
+  createdAt: log.createdAt,
+  teacherName: log.teacher?.fullName || 'Staff',
+});
+
+// Merge a student's snack-punch movements — purchases (spent) and fulfilled
+// card reloads (added) — into one reverse-chronological list with a reason, so
+// students/parents can see why the punch balance went up or down.
+const buildPunchHistory = (purchases = [], reloads = []) => {
+  const spent = purchases.map((p) => ({
+    id: `spent_${p.id}`,
+    kind: 'spent',
+    amount: p.punchesUsed,
+    reason: p.snack?.name || 'Snack',
+    date: p.purchasedAt,
+  }));
+  const added = reloads.map((r) => ({
+    id: `added_${r.id}`,
+    kind: 'added',
+    amount: r.punchCount,
+    reason: r.price ? `Card reload — $${Number(r.price).toFixed(2)}` : 'Card reload',
+    date: r.fulfilledAt || r.createdAt,
+  }));
+  return [...spent, ...added].sort((a, b) => new Date(b.date) - new Date(a.date));
+};
+
 // GET /api/portal/teacher — Teacher dashboard (Today's classes, roster, etc)
 export const getTeacherPortal = async (req, res, next) => {
   try {
@@ -153,11 +187,32 @@ export const getStudentPortal = async (req, res, next) => {
       take: 20,
     });
 
-    // Get behavior summary (counts only — students don't see full details)
-    const [warningCount, positiveCount] = await Promise.all([
+    // Behavior history — the student can now see WHY each note/warning was
+    // given, not just the count. Counts stay accurate (from a separate count),
+    // while the detail list is capped to the 30 most recent for the modal.
+    const [warningCount, positiveCount, behaviorLogs, snackPurchases, fulfilledReloads] = await Promise.all([
       prisma.behaviorLog.count({ where: { studentId: userId, type: { in: ['WARNING', 'SLIP'] } } }),
       prisma.behaviorLog.count({ where: { studentId: userId, type: 'POSITIVE' } }),
+      prisma.behaviorLog.findMany({
+        where: { studentId: userId, type: { in: ['WARNING', 'SLIP', 'POSITIVE'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+        include: { teacher: { select: { fullName: true } } },
+      }),
+      prisma.snackPurchase.findMany({
+        where: { studentId: userId },
+        orderBy: { purchasedAt: 'desc' },
+        take: 30,
+        include: { snack: { select: { name: true } } },
+      }),
+      prisma.snackReloadRequest.findMany({
+        where: { studentId: userId, status: 'FULFILLED' },
+        orderBy: { fulfilledAt: 'desc' },
+        take: 30,
+      }),
     ]);
+    const behaviorHistory = behaviorLogs.map(mapBehaviorLog);
+    const punchHistory = buildPunchHistory(snackPurchases, fulfilledReloads);
 
     // Get materials assigned to student (last 20)
     const materials = await prisma.material.findMany({
@@ -197,6 +252,8 @@ export const getStudentPortal = async (req, res, next) => {
       })),
       prizeHistory,
       behaviorSummary: { warnings: warningCount, positives: positiveCount },
+      behaviorHistory,
+      punchHistory,
       materials,
       announcements,
     });
@@ -455,7 +512,7 @@ export const getParentPortal = async (req, res, next) => {
     }
 
     // Batch all child-data queries in a single Promise.all — O(1) DB round-trips
-    const [enrollments, behaviorCounts, prizeHistories, materials, announcements, pendingReloads] = await Promise.all([
+    const [enrollments, behaviorLogs, prizeHistories, materials, announcements, pendingReloads, snackPurchases, fulfilledReloads] = await Promise.all([
       prisma.classEnrollment.findMany({
         where: { studentId: { in: studentIds }, status: 'active' },
         include: {
@@ -471,13 +528,16 @@ export const getParentPortal = async (req, res, next) => {
           },
         },
       }), // class.type is used below to derive isInPerson
-      prisma.behaviorLog.groupBy({
-        by: ['studentId', 'type'],
+      // Full behavior logs (not just counts) so parents can see WHY each note or
+      // warning was given. Volumes per family are modest; counts + the detail
+      // list are both derived from this single fetch.
+      prisma.behaviorLog.findMany({
         where: {
           studentId: { in: studentIds },
           type: { in: ['WARNING', 'SLIP', 'POSITIVE'] },
         },
-        _count: { id: true },
+        orderBy: { createdAt: 'desc' },
+        include: { teacher: { select: { fullName: true } } },
       }),
       prisma.prizeHistory.findMany({
         where: { studentId: { in: studentIds } },
@@ -500,6 +560,15 @@ export const getParentPortal = async (req, res, next) => {
         where: { studentId: { in: studentIds }, status: 'PENDING' },
         orderBy: { createdAt: 'desc' },
       }),
+      prisma.snackPurchase.findMany({
+        where: { studentId: { in: studentIds } },
+        orderBy: { purchasedAt: 'desc' },
+        include: { snack: { select: { name: true } } },
+      }),
+      prisma.snackReloadRequest.findMany({
+        where: { studentId: { in: studentIds }, status: 'FULFILLED' },
+        orderBy: { fulfilledAt: 'desc' },
+      }),
     ]);
 
     // Index results by studentId for O(1) lookups during assembly
@@ -509,11 +578,31 @@ export const getParentPortal = async (req, res, next) => {
       enrollmentsByStudent[e.studentId].push(e);
     }
 
+    // Derive both the counts (for the stat pills) and a capped detail list (for
+    // the history modal) from the single behavior-log fetch.
     const behaviorByStudent = {};
-    for (const row of behaviorCounts) {
-      if (!behaviorByStudent[row.studentId]) behaviorByStudent[row.studentId] = { warnings: 0, positives: 0 };
-      if (['WARNING', 'SLIP'].includes(row.type)) behaviorByStudent[row.studentId].warnings += row._count.id;
-      if (row.type === 'POSITIVE') behaviorByStudent[row.studentId].positives += row._count.id;
+    const behaviorHistoryByStudent = {};
+    for (const log of behaviorLogs) {
+      if (!behaviorByStudent[log.studentId]) behaviorByStudent[log.studentId] = { warnings: 0, positives: 0 };
+      if (['WARNING', 'SLIP'].includes(log.type)) behaviorByStudent[log.studentId].warnings += 1;
+      if (log.type === 'POSITIVE') behaviorByStudent[log.studentId].positives += 1;
+
+      if (!behaviorHistoryByStudent[log.studentId]) behaviorHistoryByStudent[log.studentId] = [];
+      if (behaviorHistoryByStudent[log.studentId].length < 30) {
+        behaviorHistoryByStudent[log.studentId].push(mapBehaviorLog(log));
+      }
+    }
+
+    // Group punch movements (purchases + fulfilled reloads) per student.
+    const purchasesByStudent = {};
+    for (const p of snackPurchases) {
+      if (!purchasesByStudent[p.studentId]) purchasesByStudent[p.studentId] = [];
+      purchasesByStudent[p.studentId].push(p);
+    }
+    const reloadsByStudent = {};
+    for (const r of fulfilledReloads) {
+      if (!reloadsByStudent[r.studentId]) reloadsByStudent[r.studentId] = [];
+      reloadsByStudent[r.studentId].push(r);
     }
 
     const prizeByStudent = {};
@@ -551,6 +640,8 @@ export const getParentPortal = async (req, res, next) => {
           upcomingSessions: e.class.sessions,
         })),
         behaviorSummary: behaviorByStudent[user.id] || { warnings: 0, positives: 0 },
+        behaviorHistory: behaviorHistoryByStudent[user.id] || [],
+        punchHistory: buildPunchHistory(purchasesByStudent[user.id], reloadsByStudent[user.id]),
         prizeHistory: prizeByStudent[user.id] || [],
         materials: materialsByStudent[user.id] || [],
         pendingReload: reloadByStudent[user.id]

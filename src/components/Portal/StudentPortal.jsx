@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api from '../../lib/api';
 import ErrorBanner from '../Layout/ErrorBanner';
+import StatHistoryModal from './StatHistoryModal';
 import './StudentPortal.css';
 
 const TABS = [
@@ -22,6 +23,7 @@ const StudentPortal = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const [tab, setTab]         = useState('home');
+  const [statModal, setStatModal] = useState(null); // 'seashells' | 'punches' | 'positive' | 'warnings'
 
   const load = async () => {
     setLoading(true);
@@ -42,7 +44,8 @@ const StudentPortal = () => {
   if (error)   return <div className="sp-loading"><ErrorBanner message={error} onRetry={load} /></div>;
   if (!data)   return null;
 
-  const { student, enrollments, prizeHistory: seashellHistory, behaviorSummary, materials, announcements } = data;
+  const { student, enrollments, prizeHistory: seashellHistory, behaviorSummary, behaviorHistory = [], punchHistory = [], materials, announcements } = data;
+  const historyData = { prizeHistory: seashellHistory, punchHistory, behaviorHistory };
   const firstName = student.fullName?.split(' ')[0] || 'Student';
   const initials  = student.fullName?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?';
 
@@ -62,31 +65,31 @@ const StudentPortal = () => {
           </div>
         </div>
 
-        {/* Stat pills */}
+        {/* Stat pills — tap any to see its history and the reason behind each entry */}
         <div className="sp-hero-stats">
-          <div className="sp-stat-pill shells">
+          <button type="button" className="sp-stat-pill shells" onClick={() => setStatModal('seashells')}>
             <Shell size={18} />
             <span className="sp-stat-num">{student.seashells || 0}</span>
             <span className="sp-stat-lbl">Seashells</span>
-          </div>
+          </button>
           {student.isInPerson && (
-            <div className="sp-stat-pill snack">
+            <button type="button" className="sp-stat-pill snack" onClick={() => setStatModal('punches')}>
               <span style={{ fontSize: 18 }}>🍪</span>
               <span className="sp-stat-num">{student.snackPunches || 0}</span>
               <span className="sp-stat-lbl">Punches</span>
-            </div>
+            </button>
           )}
-          <div className="sp-stat-pill pos">
+          <button type="button" className="sp-stat-pill pos" onClick={() => setStatModal('positive')}>
             <ThumbsUp size={18} />
             <span className="sp-stat-num">{behaviorSummary.positives}</span>
             <span className="sp-stat-lbl">Positive</span>
-          </div>
+          </button>
           {behaviorSummary.warnings > 0 && (
-            <div className="sp-stat-pill warn">
+            <button type="button" className="sp-stat-pill warn" onClick={() => setStatModal('warnings')}>
               <AlertTriangle size={18} />
               <span className="sp-stat-num">{behaviorSummary.warnings}</span>
               <span className="sp-stat-lbl">Warnings</span>
-            </div>
+            </button>
           )}
         </div>
       </div>
@@ -307,6 +310,13 @@ const StudentPortal = () => {
           </div>
         )}
       </div>
+
+      <StatHistoryModal
+        kind={statModal}
+        studentName={firstName}
+        data={historyData}
+        onClose={() => setStatModal(null)}
+      />
     </div>
   );
 };
