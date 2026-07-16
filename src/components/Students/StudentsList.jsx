@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, UserPlus, AlertCircle, Cookie, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud } from 'lucide-react';
+import { Search, UserPlus, AlertCircle, Cookie, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download } from 'lucide-react';
 import { database } from '../../lib/database';
+import api from '../../lib/api';
+import { useToast } from '../Layout/ToastProvider';
 import { useAuth } from '../../context/AuthContext';
 import StudentProfileModal from './StudentProfileModal';
 import TeacherProfileModal from './TeacherProfileModal';
@@ -14,6 +16,8 @@ import './StudentsList.css';
 const StudentsList = () => {
   const navigate = useNavigate();
   const { role } = useAuth();
+  const toast = useToast();
+  const [exporting, setExporting] = useState(false);
   const [activeTab, setActiveTab] = useState('students');
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -78,9 +82,24 @@ const StudentsList = () => {
     (statusFilter === 'All' || t.status === statusFilter)
   );
 
-  const handleAddStudent = (newStudent) => {
-    setStudents(prev => [...prev, newStudent]);
-    setShowAddModal(false);
+  const handleExportCsv = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const res = await api.get('/students/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `students-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not export students.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -106,6 +125,15 @@ const StudentsList = () => {
               </button>
               {role === 'ADMIN' && (
                 <>
+                  <button
+                    className="action-btn outline"
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
+                    onClick={handleExportCsv}
+                    disabled={exporting}
+                  >
+                    <Download size={18} />
+                    <span className="desk-only">{exporting ? 'Exporting…' : 'Export CSV'}</span>
+                  </button>
                   <button
                     className="action-btn outline"
                     style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
@@ -339,7 +367,7 @@ const StudentsList = () => {
       {showAddModal && (
         <AddStudentModal
           onClose={() => setShowAddModal(false)}
-          onSave={handleAddStudent}
+          onSaved={loadData}
           families={families}
         />
       )}

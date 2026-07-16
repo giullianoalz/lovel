@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { 
-  signInWithEmailAndPassword, 
-  signOut, 
-  onAuthStateChanged 
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  signOut,
+  onAuthStateChanged
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import api from '../lib/api';
@@ -103,6 +105,25 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Open parent self-registration: create the Firebase account (parent picks
+  // their own password — we never see it), then sync a PARENT user row.
+  const signupParent = async ({ email, password, fullName, phone }) => {
+    setLoading(true);
+    localStorage.removeItem('devUserEmail');
+    setIsDevBypass(false);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(cred.user, { displayName: fullName }).catch(() => {});
+      // Create the DB user as PARENT (the interceptor attaches the fresh token).
+      await api.post('/auth/sync', { role: 'PARENT', fullName, phone: phone || '' });
+      const profile = await syncProfile();
+      return profile;
+    } catch (error) {
+      setLoading(false);
+      throw error;
+    }
+  };
+
   // Login using Developer Bypass for quick role testing
   const loginAsSeededUser = async (email) => {
     setLoading(true);
@@ -148,6 +169,7 @@ export const AuthProvider = ({ children }) => {
     isDevBypass,
     loginWithEmail,
     loginAsSeededUser,
+    signupParent,
     logout
   };
 

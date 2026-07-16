@@ -2,6 +2,75 @@ import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
 
 /**
+ * GET /api/students/export
+ * Downloads every student as a CSV whose columns mirror the importer
+ * (see import.controller.js), so an admin can export → edit → re-import
+ * without duplicating (the import matches students by email).
+ */
+export const exportStudentsCsv = async (req, res, next) => {
+  try {
+    const students = await prisma.user.findMany({
+      where: { role: 'STUDENT' },
+      orderBy: { fullName: 'asc' },
+      select: {
+        fullName: true,
+        email: true,
+        age: true,
+        allergies: true,
+        status: true,
+        familyMembers: {
+          select: {
+            family: {
+              select: {
+                name: true,
+                tags: true,
+                members: {
+                  where: { isInvoiceRecipient: true },
+                  select: { user: { select: { fullName: true, email: true, phone: true } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const headers = [
+      'studentName', 'studentEmail', 'age', 'allergies', 'status',
+      'parentName', 'parentEmail', 'parentPhone', 'familyName', 'tags',
+    ];
+
+    // RFC-4180-ish: wrap every field in quotes and double any internal quote.
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    const lines = [headers.join(',')];
+    for (const s of students) {
+      const family = s.familyMembers[0]?.family || null;
+      const parent = family?.members?.[0]?.user || null;
+      lines.push([
+        s.fullName,
+        s.email,
+        s.age ?? '',
+        s.allergies ?? '',
+        s.status,
+        parent?.fullName ?? '',
+        parent?.email ?? '',
+        parent?.phone ?? '',
+        family?.name ?? '',
+        (family?.tags || []).join(';'),
+      ].map(esc).join(','));
+    }
+
+    const csv = '﻿' + lines.join('\r\n'); // BOM so Excel opens UTF-8 correctly
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="students.csv"');
+    res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * GET /api/students
  * List all students with optional filtering
  */

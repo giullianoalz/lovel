@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Sidebar from './components/Layout/Sidebar'
 import Login from './components/Auth/Login'
+import Signup from './components/Auth/Signup'
 import { ToastProvider } from './components/Layout/ToastProvider'
 import { InstallPromptBanner } from './components/Layout/InstallPromptBanner'
 import './index.css'
@@ -27,6 +28,7 @@ const MedicalIncidents = lazy(() => import('./components/Medical/MedicalIncident
 const LessonPlanReview = lazy(() => import('./components/LessonPlans/LessonPlanReview'))
 const AcademyFeed = lazy(() => import('./components/Feed/AcademyFeed'))
 const NotificationSettings = lazy(() => import('./components/Settings/NotificationSettings'))
+const Integrations = lazy(() => import('./components/Settings/Integrations'))
 
 const RouteFallback = () => (
   <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
@@ -91,8 +93,9 @@ function App() {
       <AuthProvider>
         <ToastProvider>
         <Routes>
-          {/* Public Login Route */}
+          {/* Public Login + Signup Routes */}
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
 
           {/* Protected Sub-routes inside Main Layout */}
           <Route 
@@ -225,6 +228,14 @@ function App() {
                         element={
                           <ProtectedRoute allowedRoles={['ADMIN']}>
                             <NotificationSettings />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route
+                        path="/settings/integrations"
+                        element={
+                          <ProtectedRoute allowedRoles={['ADMIN']}>
+                            <Integrations />
                           </ProtectedRoute>
                         }
                       />

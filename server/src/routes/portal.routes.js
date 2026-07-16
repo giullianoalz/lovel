@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
 import { withCache } from '../middleware/cache.js';
+import { authLimiter } from '../middleware/rateLimit.js';
 import {
   getStudentPortal,
   getParentPortal,
@@ -12,6 +13,7 @@ import {
   getParentBilling,
   createPaymentSession,
   decideSnackReload,
+  registerFamily,
 } from '../controllers/portal.controller.js';
 
 const router = Router();
@@ -39,6 +41,9 @@ router.delete('/parent/pickup/:id', authenticate, requireRole('PARENT'), deleteP
 
 // Snack-punch reload approval
 router.patch('/parent/snack-reloads/:id', authenticate, requireRole('PARENT'), decideSnackReload);
+
+// Open parent self-registration: create the family + children after signup
+router.post('/parent/register-family', authLimiter, authenticate, requireRole('PARENT'), registerFamily);
 
 // Billing & Payments
 router.get('/parent/billing', authenticate, requireRole('PARENT'), getParentBilling);

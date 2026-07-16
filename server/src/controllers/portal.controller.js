@@ -262,6 +262,74 @@ export const deletePickupAuth = async (req, res, next) => {
   }
 };
 
+// POST /api/portal/parent/register-family — A just-signed-up parent creates
+// their family and one or more children (open self-registration). The parent's
+// own User row already exists (created by /auth/sync after Firebase signup);
+// here we attach a Family and STUDENT rows. Children are non-login records with
+// placeholder credentials, exactly like the CSV importer.
+export const registerFamily = async (req, res, next) => {
+  try {
+    const parent = req.user; // authenticated PARENT
+    const { familyName, children } = req.body;
+
+    const kids = Array.isArray(children) ? children.filter((c) => c && String(c.fullName || '').trim()) : [];
+    if (kids.length === 0) {
+      return res.status(400).json({ error: 'Bad Request', message: 'Add at least one child.' });
+    }
+
+    const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '').slice(0, 40);
+    const lastName = String(parent.fullName || 'Family').trim().split(' ').slice(-1)[0];
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Reuse the parent's existing family if they already have one; else create.
+      let membership = await tx.familyMember.findFirst({
+        where: { userId: parent.id },
+        include: { family: true },
+      });
+      let family = membership?.family;
+      if (!family) {
+        family = await tx.family.create({
+          data: { name: String(familyName || '').trim() || `${lastName} Family` },
+        });
+        await tx.familyMember.create({
+          data: { familyId: family.id, userId: parent.id, role: 'parent', isInvoiceRecipient: true },
+        });
+      }
+
+      const created = [];
+      for (const child of kids) {
+        const name = String(child.fullName).trim();
+        const email = `student.${slug(name)}.${family.id.slice(0, 6)}@selfreg.local`;
+        const age = child.age != null && !isNaN(parseInt(child.age)) ? parseInt(child.age) : null;
+        const student = await tx.user.create({
+          data: {
+            firebaseUid: `selfreg_${crypto.randomUUID()}`,
+            email,
+            fullName: name,
+            role: 'STUDENT',
+            status: 'ACTIVE',
+            age,
+            allergies: String(child.allergies || '').trim() || null,
+          },
+        });
+        await tx.familyMember.create({
+          data: { familyId: family.id, userId: student.id, role: 'child', isInvoiceRecipient: false },
+        });
+        created.push({ id: student.id, fullName: student.fullName });
+      }
+
+      return { familyId: family.id, familyName: family.name, children: created };
+    });
+
+    // Drop the parent's cached portal so their new children show up immediately.
+    invalidate(`portal:parent:${parent.id}`);
+
+    res.status(201).json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // PATCH /api/portal/parent/snack-reloads/:id — Parent approves or rejects a
 // paid snack-punch reload for their child. Approval only authorizes it; the
 // front desk still has to top up + charge (see fulfillReloadRequest).

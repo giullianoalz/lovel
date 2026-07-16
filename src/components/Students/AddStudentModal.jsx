@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, ChevronDown, ChevronUp, Plus, Trash2, Check, User, Users, BookOpen, CreditCard } from 'lucide-react';
+import api from '../../lib/api';
+import { useToast } from '../Layout/ToastProvider';
 import './AddStudentModal.css';
 
 const TUTORS = [
@@ -61,8 +63,10 @@ const INITIAL_BILLING_PROFILE = {
   price: ''
 };
 
-const AddStudentModal = ({ onClose, onSave, families = [] }) => {
+const AddStudentModal = ({ onClose, onSaved, families = [] }) => {
+  const toast = useToast();
   const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
   const [student, setStudent] = useState(INITIAL_STUDENT);
   const [family, setFamily] = useState(INITIAL_FAMILY);
   const [billingProfiles, setBillingProfiles] = useState([]);
@@ -122,45 +126,57 @@ const AddStudentModal = ({ onClose, onSave, families = [] }) => {
     return true;
   };
 
-  const handleSave = () => {
-    const fullStudent = {
-      id: `std_${Date.now()}`,
-      name: `${student.firstName} ${student.lastName}`,
-      firstName: student.firstName,
-      lastName: student.lastName,
-      studentType: student.studentType,
+  // Derive age from birthday (YYYY-MM-DD) if provided.
+  const ageFromBirthday = (birthday) => {
+    if (!birthday) return '';
+    const b = new Date(birthday);
+    if (isNaN(b)) return '';
+    const now = new Date();
+    let age = now.getFullYear() - b.getFullYear();
+    const m = now.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+    return age >= 0 && age < 120 ? age : '';
+  };
+
+  // Persist through the bulk-import endpoint: it already creates the family,
+  // parent and student idempotently, and only those fields have DB columns.
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+
+    const existingFamily = family.familyType === 'existing'
+      ? families.find(f => f.id === family.existingFamilyId)
+      : null;
+
+    const row = {
+      studentName: `${student.firstName} ${student.lastName}`.trim(),
+      studentEmail: student.email.trim(),
+      age: ageFromBirthday(student.birthday),
+      allergies: student.allergies.trim(),
       status: student.status,
-      email: student.email,
-      phone: student.phone,
-      gender: student.gender,
-      birthday: student.birthday,
-      school: student.school,
-      allergies: student.allergies || 'None',
-      subjects: student.subjects,
-      skillLevel: student.skillLevel,
-      groupTags: student.groupTags,
-      note: student.note,
-      studentSince: student.studentSince,
-      // Family
-      parentName: family.familyType === 'existing'
-        ? families.find(f => f.id === family.existingFamilyId)?.contacts?.[0]?.name || ''
-        : `${family.parentFirstName} ${family.parentLastName}`,
-      parentEmail: family.parentEmail,
-      parentPhone: family.parentPhone,
-      familyId: family.familyType === 'existing' ? family.existingFamilyId : `f_${Date.now()}`,
-      // Billing
-      billingProfiles,
-      // Defaults
-      snackAuthorized: false,
-      snackPunches: 0,
-      snackHistory: [],
-      seashells: 0,
-      seashellHistory: [],
-      materials: []
+      tags: student.groupTags.map(t => t.label).join(','),
+      // Family / parent
+      parentName: existingFamily ? '' : `${family.parentFirstName} ${family.parentLastName}`.trim(),
+      parentEmail: existingFamily ? '' : family.parentEmail.trim(),
+      parentPhone: existingFamily ? '' : family.parentPhone.trim(),
+      familyName: existingFamily ? existingFamily.name : '',
     };
 
-    if (onSave) onSave(fullStudent);
-    onClose();
+    try {
+      const res = await api.post('/import/students', { rows: [row] });
+      const s = res.data || {};
+      if (s.errors?.length) {
+        toast.error(s.errors[0].message || 'Could not save the student.');
+        setSaving(false);
+        return;
+      }
+      toast.success(s.studentsUpdated > 0 ? 'Student updated.' : 'Student created.');
+      await onSaved?.();
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not save the student.');
+      setSaving(false);
+    }
   };
 
   const billingModeLabels = {
@@ -574,8 +590,8 @@ const AddStudentModal = ({ onClose, onSave, families = [] }) => {
                 Next
               </button>
             ) : (
-              <button className="action-btn primary" onClick={handleSave}>
-                <Check size={16} /> Save Student
+              <button className="action-btn primary" onClick={handleSave} disabled={saving}>
+                <Check size={16} /> {saving ? 'Saving...' : 'Save Student'}
               </button>
             )}
           </div>

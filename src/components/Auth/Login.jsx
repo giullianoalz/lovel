@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { 
   ShieldCheck, 
   User, 
@@ -191,6 +191,10 @@ const Login = () => {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
+
+        <p className="login-signup-cta">
+          New family? <Link to="/signup">Create an account</Link>
+        </p>
 
         {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_TEST_LOGIN === 'true') && (
           <>

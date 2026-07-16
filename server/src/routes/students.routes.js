@@ -7,12 +7,17 @@ import {
   updateStudentHealth,
   updateSnackPunches,
   getAttendanceSummary,
+  exportStudentsCsv,
 } from '../controllers/students.controller.js';
 
 const router = Router();
 
 // GET /api/students — List all students (Admin/Teacher)
 router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listStudents);
+
+// GET /api/students/export — Download all students as CSV (Admin)
+// Registered before '/:id' so "export" isn't captured as an id param.
+router.get('/export', authenticate, requireRole('ADMIN'), exportStudentsCsv);
 
 // GET /api/students/:id — Get student detail (Admin/Teacher or self)
 router.get('/:id', authenticate, requireSelfOrRole('ADMIN', 'TEACHER'), getStudent);
