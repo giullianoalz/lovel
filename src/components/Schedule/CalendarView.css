@@ -514,6 +514,119 @@
   font-size: 11px;
 }
 
+/* Agenda-list Week View (TutorBird-style: each day lists its events) */
+.agenda-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(150px, 1fr));
+  gap: 10px;
+  min-width: 920px; /* horizontal scroll on narrow screens, like the day grid */
+}
+
+.agenda-day-col {
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  overflow: hidden;
+  min-height: 200px;
+}
+
+.agenda-day-col.today {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.agenda-day-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 10px 12px;
+  background: white;
+  border-bottom: 1px solid var(--border-light);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.agenda-day-col.today .agenda-day-header { background: var(--primary-light); }
+
+.agenda-day-name {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.agenda-day-col.today .agenda-day-name { color: var(--primary); }
+
+.agenda-day-num {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+.agenda-day-col.today .agenda-day-num { color: var(--primary); }
+
+.agenda-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  flex: 1;
+}
+
+.agenda-empty {
+  color: #cbd5e1;
+  text-align: center;
+  padding: 16px 0;
+  font-size: 14px;
+}
+
+.agenda-event {
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: #eef2f7;
+  border-left: 3px solid #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.agenda-event:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.agenda-event.math     { background: #dbeafe; border-left-color: #3b82f6; }
+.agenda-event.science  { background: #dcfce7; border-left-color: #22c55e; }
+.agenda-event.languages{ background: #fee2e2; border-left-color: #ef4444; }
+.agenda-event.arts     { background: #f3e8ff; border-left-color: #a855f7; }
+
+.agenda-ev-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.agenda-ev-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-main);
+}
+.agenda-ev-title strong { font-weight: 600; line-height: 1.2; }
+.agenda-ev-check { color: #16a34a; flex-shrink: 0; }
+
+.agenda-ev-desc {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* Multi-Instructor Day View */
 .instructor-schedule-grid {
   display: flex;
@@ -1200,6 +1313,80 @@
 
   .calendar-title h1 {
     font-size: 1.4rem;
+  }
+
+  /* ── Day / Week time grid on mobile ──
+     Give each column ~full screen width and let the user swipe cleanly from one
+     to the next. The hour axis is pinned (sticky) to the left edge so the times
+     stay visible while swiping — scroll-padding keeps snapped columns from
+     hiding behind it. */
+  .calendar-scroll-wrapper {
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    scroll-padding-left: 52px;
+  }
+  .instructor-schedule-grid {
+    min-width: 0; /* was 800px — no longer force horizontal squeeze */
+    gap: 10px;
+  }
+  .time-axis {
+    min-width: 46px;
+    position: sticky;
+    left: 0;
+    z-index: 20;
+    background: #f8fafc;
+    border-right: 1px solid var(--border-light);
+  }
+  .time-axis-header {
+    background: #f8fafc;
+  }
+  .instructor-col {
+    flex: 0 0 82vw;
+    min-width: 82vw;
+    scroll-snap-align: start;
+  }
+
+  /* ── Agenda week on mobile ──
+     7 side-by-side columns don't fit a phone, so stack the days vertically into
+     a single full-width scrolling list — the natural mobile agenda pattern. */
+  .agenda-week-grid {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    gap: 8px;
+  }
+  .agenda-day-col {
+    min-height: 0;
+  }
+  /* Don't pin every day header when they're stacked — they'd fight each other. */
+  .agenda-day-header {
+    position: static;
+  }
+  /* Keep days with no events from eating a full row of vertical space. */
+  .agenda-day-col:not(:has(.agenda-event)) .agenda-day-body {
+    padding: 2px 8px 6px;
+  }
+  .agenda-day-col:not(:has(.agenda-event)) .agenda-empty {
+    padding: 0;
+    font-size: 12px;
+  }
+
+  /* ── Month grid on mobile ──
+     Fit the 7 columns to the screen (was a forced 900px) with compact cells,
+     the standard phone month overview. */
+  .month-grid {
+    min-width: 0; /* was 900px */
+  }
+  .month-cell {
+    min-width: 0;
+    min-height: 74px;
+    padding: 4px;
+  }
+  .month-cell .cell-date {
+    font-size: 12px;
+  }
+  .month-day-name {
+    font-size: 10px;
+    padding: 6px 2px;
   }
 
   /* Modal Responsive Fixes - Bottom Sheet Style */

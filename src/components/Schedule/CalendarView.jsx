@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2 } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -1616,65 +1616,52 @@ const CalendarView = () => {
       <div className="calendar-glass-box">
         {view === 'week' && (
           <div className="calendar-scroll-wrapper">
-            <div className="instructor-schedule-grid">
-                {/* Time Axis */}
-                <div className="time-axis">
-                  <div className="time-axis-header" style={{ marginBottom: '0' }}>GMT-5</div>
-                  {Array.from({ length: 11 }).map((_, i) => {
-                    const hour = START_HOUR + i;
-                    const label = hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
-                    return (
-                      <div key={i} className="time-label" style={{ height: `${60 * PIXELS_PER_MINUTE}px` }}>
-                        <span>{label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
+            <div className="agenda-week-grid">
               {weekDates.map((date, idx) => {
                 const isToday = toISODate(date) === toISODate(new Date());
-                const dayEvents = events.filter(e => e.dateStr === toISODate(date));
-                const dayLayout = layoutOverlaps(dayEvents);
+                // Agenda layout: each day lists its events top-to-bottom, ordered
+                // by start time (no time-grid positioning), TutorBird-style.
+                const dayEvents = events
+                  .filter(e => e.dateStr === toISODate(date))
+                  .sort((a, b) => parseTimeToPix(a.time) - parseTimeToPix(b.time));
 
                 return (
-                  <div
-                    key={idx}
-                    className="instructor-col"
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={e => handleDropOnWeekDay(e, date)}
-                  >
-                    <div className={`instructor-header ${isToday ? 'today' : ''}`} style={{ flexDirection: 'column', gap: 0, justifyContent: 'center', padding: '8px' }}>
-                      <span className="day-name" style={{ fontSize: '11px', textTransform: 'uppercase', color: isToday ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 700 }}>{WEEK_DAYS[idx]}</span>
-                      <span className="day-num" style={{ fontSize: '18px', fontWeight: 700, color: isToday ? 'var(--primary)' : 'var(--text-main)' }}>{date.getDate()}</span>
+                  <div key={idx} className={`agenda-day-col ${isToday ? 'today' : ''}`}>
+                    <div className="agenda-day-header">
+                      <span className="agenda-day-name">{WEEK_DAYS[idx]}</span>
+                      <span className="agenda-day-num">{date.getDate()}</span>
                     </div>
-                    
-                    <div className="timeline-container" style={{ height: `${10 * 60 * PIXELS_PER_MINUTE}px` }}>
-                       {/* Background Hour Lines */}
-                       {Array.from({ length: 10 }).map((_, i) => (
-                         <div key={i} className="hourLine" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }}></div>
-                       ))}
-                       
-                       {/* Events */}
-                       {dayEvents.map(e => (
-                         <div
-                           key={e.id}
-                           className={`positioned-event ${e.subject}`}
-                           style={{...getPositionStyles(e.time), ...getOverlapStyles(e, dayLayout), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
-                           title={`${e.title} · ${e.time} · ${e.teacher}`}
-                           draggable={role === 'ADMIN'}
-                           onDragStart={(evt) => handleDragStart(evt, e)}
-                           onClick={() => handleEventClick(e)}
-                         >
-                           <div className="event-inner">
-                             <strong>{e.title}</strong>
-                             <span className="ev-time">{e.time}</span>
-                             <span className="ev-meta">
-                               {e.type === 'Virtual' ? <Video size={10} /> : <MapPin size={10} />}
-                               {e.teacher.replace('Prof. ', '')}
-                             </span>
-                           </div>
-                         </div>
-                       ))}
+
+                    <div
+                      className="agenda-day-body"
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => handleDropOnWeekDay(e, date)}
+                    >
+                      {dayEvents.length === 0 ? (
+                        <div className="agenda-empty">—</div>
+                      ) : (
+                        dayEvents.map(e => (
+                          <div
+                            key={e.id}
+                            className={`agenda-event ${e.subject}`}
+                            style={{ cursor: role === 'ADMIN' ? 'grab' : 'pointer' }}
+                            title={`${e.title} · ${e.time} · ${e.teacher}`}
+                            draggable={role === 'ADMIN'}
+                            onDragStart={(evt) => handleDragStart(evt, e)}
+                            onClick={() => handleEventClick(e)}
+                          >
+                            <span className="agenda-ev-time">{e.time}</span>
+                            <div className="agenda-ev-title">
+                              <CheckCircle2 size={13} className="agenda-ev-check" />
+                              <strong>{e.title}</strong>
+                            </div>
+                            <span className="agenda-ev-desc">
+                              {e.type === 'Virtual' ? <Video size={11} /> : <MapPin size={11} />}
+                              <span>{e.teacher.replace('Prof. ', '')}{e.students > 0 ? ` · ${e.students} student${e.students > 1 ? 's' : ''}` : ''}</span>
+                            </span>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
                 );
