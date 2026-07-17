@@ -7,6 +7,8 @@ import morgan from 'morgan';
 import compression from 'compression';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import { firebaseAuth } from './config/firebase-admin.js';
+import prisma from './config/database.js';
 
 // Middleware
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -71,7 +73,7 @@ const isAllowedOrigin = (origin) => {
   if (!origin) return true; // same-origin / server-to-server / curl
   const o = stripSlash(origin);
   if (configuredOrigins.includes(o)) return true;
-  if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(o)) return true;
+  if (/^https:\/\/lovel[a-z0-9-]*\.vercel\.app$/i.test(o)) return true;
   if (isLanDevOrigin(origin)) return true;
   return false;
 };
@@ -87,6 +89,47 @@ const io = new SocketIOServer(httpServer, {
 
 // Make io accessible to routes via req.app
 app.set('io', io);
+
+// ===========================================
+// Socket.IO Authentication Middleware
+// ===========================================
+// Verifies the Firebase token (or dev bypass email) on every new connection.
+// Without this, anyone could subscribe to admin_room or another user's
+// notification feed by guessing their userId.
+
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    const devEmail = socket.handshake.auth?.devEmail;
+
+    // Dev bypass — same guard as the HTTP middleware
+    const testLoginEnabled = process.env.NODE_ENV !== 'production' || process.env.ENABLE_TEST_LOGIN === 'true';
+    if (testLoginEnabled && devEmail) {
+      const devUser = await prisma.user.findUnique({ where: { email: devEmail }, select: { id: true, role: true } });
+      if (devUser) {
+        socket.user = devUser;
+        return next();
+      }
+    }
+
+    if (!token) return next(new Error('Authentication required'));
+
+    const decoded = await firebaseAuth.verifyIdToken(token);
+    const user = await prisma.user.findUnique({
+      where: { firebaseUid: decoded.uid },
+      select: { id: true, role: true, status: true },
+    });
+
+    if (!user) return next(new Error('User not found'));
+    if (user.status === 'SUSPENDED') return next(new Error('Account suspended'));
+
+    socket.user = user;
+    next();
+  } catch (err) {
+    console.error('[Socket.IO Auth] Verification failed:', err.message);
+    next(new Error('Invalid authentication token'));
+  }
+});
 
 // ===========================================
 // Global Middleware
@@ -173,7 +216,7 @@ app.use('/api/integrations', integrationsRoutes);
 // ===========================================
 
 io.on('connection', (socket) => {
-  console.log(`[Socket.IO] Client connected: ${socket.id}`);
+  console.log(`[Socket.IO] Client connected: ${socket.id} (user: ${socket.user.id})`);
 
   socket.on('join_room', (room) => {
     socket.join(room);
@@ -183,13 +226,16 @@ io.on('connection', (socket) => {
   // Every signed-in user joins their own room so the server can push
   // notifications (chat messages, alerts, etc.) straight to them regardless
   // of which screen they currently have open.
+  // Validated: users can only join their own notification room.
   socket.on('join_user', (userId) => {
-    if (!userId) return;
+    if (!userId || userId !== socket.user.id) return;
     socket.join(`user_${userId}`);
   });
 
-  // Admin/front-desk users auto-join the admin_room for real-time alerts
+  // Admin/front-desk users auto-join the admin_room for real-time alerts.
+  // Validated: only ADMIN users are allowed into the admin room.
   socket.on('join_admin', () => {
+    if (socket.user.role !== 'ADMIN') return;
     socket.join('admin_room');
     console.log(`[Socket.IO] ${socket.id} joined admin_room`);
   });

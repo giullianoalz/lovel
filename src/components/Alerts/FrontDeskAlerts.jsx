@@ -1,14 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign, Cookie } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import io from 'socket.io-client';
 import api from '../../lib/api';
+import { getSocket } from '../../lib/socket';
 import './FrontDeskAlerts.css';
-
-const configuredApiUrl = import.meta.env.VITE_API_URL;
-const SOCKET_URL = (!configuredApiUrl || configuredApiUrl === 'http://localhost:4000/api')
-  ? `http://${window.location.hostname}:4000`
-  : configuredApiUrl.replace(/\/api\/?$/, '');
 
 const ALERT_TYPES = {
   'Student out': { icon: LogOut, color: '#eab308' }, // Yellow
@@ -83,30 +78,32 @@ const FrontDeskAlerts = () => {
     loadCancellations();
     loadReloads();
 
-    // Connect to Socket.IO for real-time alerts
-    socketRef.current = io(SOCKET_URL);
-    socketRef.current.emit('join_admin');
+    // Share the app-wide authenticated socket (also used by chat + the
+    // notification bell) instead of opening a second, unauthenticated one.
+    const socket = getSocket();
+    socketRef.current = socket;
+    socket.emit('join_admin');
 
-    socketRef.current.on('class_alert', (alertData) => {
-      setAlerts(prev => [alertData, ...prev]);
-    });
-
-    socketRef.current.on('class_alert_update', (updateData) => {
+    const onClassAlert = (alertData) => setAlerts(prev => [alertData, ...prev]);
+    const onClassAlertUpdate = (updateData) => {
       setAlerts(prev => prev.filter(a => a.id !== updateData.id));
-      // Refresh history
-      loadAlerts('resolved');
-    });
+      loadAlerts('resolved'); // refresh history
+    };
+    const onCancellationPending = (data) => setCancellations(prev => [data, ...prev]);
+    const onCancellationResolved = ({ id }) => setCancellations(prev => prev.filter(c => c.id !== id));
 
-    socketRef.current.on('cancellation_pending', (data) => {
-      setCancellations(prev => [data, ...prev]);
-    });
-
-    socketRef.current.on('cancellation_resolved', ({ id }) => {
-      setCancellations(prev => prev.filter(c => c.id !== id));
-    });
+    socket.on('class_alert', onClassAlert);
+    socket.on('class_alert_update', onClassAlertUpdate);
+    socket.on('cancellation_pending', onCancellationPending);
+    socket.on('cancellation_resolved', onCancellationResolved);
 
     return () => {
-      if (socketRef.current) socketRef.current.disconnect();
+      // Detach only our own listeners — the socket is shared, so never
+      // disconnect it here or chat/notifications lose their connection.
+      socket.off('class_alert', onClassAlert);
+      socket.off('class_alert_update', onClassAlertUpdate);
+      socket.off('cancellation_pending', onCancellationPending);
+      socket.off('cancellation_resolved', onCancellationResolved);
     };
   }, []);
 
