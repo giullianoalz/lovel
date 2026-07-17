@@ -6,6 +6,7 @@ import Login from './components/Auth/Login'
 import Signup from './components/Auth/Signup'
 import { ToastProvider } from './components/Layout/ToastProvider'
 import { InstallPromptBanner } from './components/Layout/InstallPromptBanner'
+import ErrorBoundary from './components/Layout/ErrorBoundary'
 import './index.css'
 
 // Route components are lazy-loaded so each lands in its own chunk — the initial
@@ -31,8 +32,9 @@ const NotificationSettings = lazy(() => import('./components/Settings/Notificati
 const Integrations = lazy(() => import('./components/Settings/Integrations'))
 
 const RouteFallback = () => (
-  <div style={{ display: 'flex', minHeight: '60vh', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-    Loading…
+  <div className="app-loader">
+    <div className="app-spinner" />
+    <span className="app-loader-text">Loading…</span>
   </div>
 )
 
@@ -58,20 +60,10 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        minHeight: '100vh', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        backgroundColor: '#f0fdf4',
-        fontFamily: 'Inter, sans-serif'
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ color: '#064e3b', fontWeight: '600', fontSize: '16px', marginBottom: '8px' }}>
-            Loading your academy experience...
-          </p>
-          <span style={{ fontSize: '13px', color: '#166534', opacity: 0.8 }}>Connecting to Neon database</span>
-        </div>
+      <div className="app-loader full">
+        <div className="app-spinner" />
+        <span className="app-loader-text">Loading your academy…</span>
+        <span className="app-loader-sub">Just a moment while we get things ready</span>
       </div>
     );
   }
@@ -105,6 +97,7 @@ function App() {
                 <div className="app-container">
                   <Sidebar />
                   <main className="content">
+                    <ErrorBoundary>
                     <Suspense fallback={<RouteFallback />}>
                     <Routes>
                       <Route path="/" element={<SmartRoot />} />
@@ -244,6 +237,7 @@ function App() {
                       <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Routes>
                     </Suspense>
+                    </ErrorBoundary>
                     <InstallPromptBanner />
                   </main>
                 </div>

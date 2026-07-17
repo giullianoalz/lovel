@@ -537,7 +537,7 @@ const ClassSession = () => {
         </div>
         <div className="history-body">
            {loadingHistory ? (
-             <div className="history-loading">Loading past notes...</div>
+             <div className="history-loading"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading past notes…</span></div>
            ) : filteredHistory.length > 0 ? (
              <div className="history-timeline">
                {filteredHistory.map(hist => (

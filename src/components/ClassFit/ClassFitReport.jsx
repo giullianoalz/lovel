@@ -115,7 +115,7 @@ const ClassFitReport = () => {
       {/* Reports Grid */}
       <div className="reports-grid">
         {loading ? (
-          <div className="classfit-loading">Loading reports...</div>
+          <div className="classfit-loading"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading reports…</span></div>
         ) : reports.length === 0 ? (
           <div className="classfit-empty">
             <CheckCircle size={40} />

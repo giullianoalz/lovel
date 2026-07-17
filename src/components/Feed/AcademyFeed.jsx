@@ -274,7 +274,7 @@ const AcademyFeed = () => {
 
       <div className="feed-list">
         {loading ? (
-          <div className="feed-empty">Loading Announcements...</div>
+          <div className="feed-empty"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading Announcements…</span></div>
         ) : posts.length === 0 ? (
           <div className="feed-empty">
             <Megaphone size={32} />

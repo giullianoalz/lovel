@@ -185,7 +185,7 @@ const BehaviorTracker = () => {
       {/* Logs Table */}
       <div className="behavior-table-container">
         {loading ? (
-          <div className="behavior-loading">Loading behavior logs...</div>
+          <div className="behavior-loading"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading behavior logs…</span></div>
         ) : filteredLogs.length === 0 ? (
           <div className="behavior-empty">
             <AlertTriangle size={32} />

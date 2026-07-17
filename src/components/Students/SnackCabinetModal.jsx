@@ -143,7 +143,7 @@ const SnackCabinetModal = ({
               </div>
             </div>
           ) : loading ? (
-            <p>Loading cabinet...</p>
+            <p className="app-inline-loader"><span className="app-spinner-sm" />Loading cabinet…</p>
           ) : (
             <div className="cabinet-grid">
               {snackCabinet.map(snack => (

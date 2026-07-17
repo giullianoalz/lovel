@@ -130,7 +130,7 @@ const LessonPlanReview = () => {
 
           <div className="lpr-card">
             {loading ? (
-              <div className="lpr-empty">Loading lesson plans...</div>
+              <div className="lpr-empty"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading lesson plans…</span></div>
             ) : plans.length === 0 ? (
               <div className="lpr-empty">
                 <BookOpen size={32} />
@@ -170,7 +170,7 @@ const LessonPlanReview = () => {
       ) : (
         <>
           {supplyLoading ? (
-            <div className="lpr-empty">Loading shopping list...</div>
+            <div className="lpr-empty"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading shopping list…</span></div>
           ) : supplyItems.length === 0 ? (
             <div className="lpr-card lpr-empty">
               <ShoppingCart size={32} />

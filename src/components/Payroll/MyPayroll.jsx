@@ -60,7 +60,7 @@ const MyPayroll = () => {
       </div>
 
       {loading ? (
-        <div className="payroll-loading-page">Loading payroll...</div>
+        <div className="payroll-loading-page"><div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">Loading payroll…</span></div></div>
       ) : error ? (
         <div className="payroll-error-page">{error}</div>
       ) : payroll ? (

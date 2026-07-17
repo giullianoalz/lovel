@@ -352,7 +352,7 @@ const MarketingHub = () => {
           </div>
 
           {loading ? (
-            <div className="gallery-loading">Loading submissions...</div>
+            <div className="gallery-loading"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading submissions…</span></div>
           ) : submissions.length === 0 ? (
             <div className="gallery-empty">
               <Camera size={40} />

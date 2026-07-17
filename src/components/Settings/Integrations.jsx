@@ -118,7 +118,7 @@ const Integrations = () => {
     }
   };
 
-  if (loading) return <div className="int-page">Loading…</div>;
+  if (loading) return <div className="int-page"><div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">Loading integrations…</span></div></div>;
 
   const status = data?.status || {};
   const accounts = data?.accounts || null;

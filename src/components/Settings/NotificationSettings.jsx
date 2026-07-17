@@ -76,7 +76,7 @@ const NotificationSettings = () => {
     }
   };
 
-  if (loading) return <div className="ns-page">Loading…</div>;
+  if (loading) return <div className="ns-page"><div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">Loading settings…</span></div></div>;
   if (!events) return <div className="ns-page">{error || 'Settings unavailable.'}</div>;
 
   return (

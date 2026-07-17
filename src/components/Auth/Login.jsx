@@ -203,7 +203,7 @@ const Login = () => {
             </div>
 
             <div className="dev-bypass-section">
-              <p className="dev-bypass-subtitle">Select one of the seeded profiles in Neon PostgreSQL:</p>
+              <p className="dev-bypass-subtitle">Select one of the demo profiles to explore:</p>
               <div className="dev-bypass-grid">
                 {seededUsers.map((u, i) => (
                   <button

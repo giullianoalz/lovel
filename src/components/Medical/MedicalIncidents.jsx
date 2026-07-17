@@ -121,7 +121,7 @@ const MedicalIncidents = () => {
 
       <div className="mi-card">
         {loading ? (
-          <div className="mi-empty">Loading medical incidents...</div>
+          <div className="mi-empty"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading medical incidents…</span></div>
         ) : filtered.length === 0 ? (
           <div className="mi-empty">
             <Heart size={32} />

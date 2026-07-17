@@ -255,7 +255,7 @@ const SupervisionPanel = () => {
 
       {/* Content */}
       {loading ? (
-        <div className="supervision-loading">Loading supervision data...</div>
+        <div className="supervision-loading"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading supervision data…</span></div>
       ) : error ? (
         <div className="supervision-error">{error}</div>
       ) : filteredGroups.length === 0 ? (

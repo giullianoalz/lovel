@@ -207,7 +207,7 @@ const StudentsList = () => {
         <>
           {loadError && <ErrorBanner message={loadError} onRetry={loadData} />}
           {loading ? (
-            <div className="loading-state">Loading academy records...</div>
+            <div className="loading-state"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading academy records…</span></div>
           ) : filteredStudents.length === 0 ? (
             <div className="empty-state">
               <Search size={32} />

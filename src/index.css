@@ -206,6 +206,86 @@ input[type="number"] {
 .anim-fade-up { animation: fadeInUp var(--dur-slow) var(--ease-out) both; }
 .anim-pop-in  { animation: popIn var(--dur) var(--ease-spring) both; }
 
+/* ── Shared branded loader — used for the cold-start auth check and for
+   lazy-route suspense so every "please wait" moment looks the same. ── */
+.app-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 60vh;
+  color: var(--text-muted);
+  animation: fadeInUp var(--dur-slow) var(--ease-out) both;
+}
+.app-loader.full { min-height: 100vh; background: var(--primary-light); }
+.app-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid rgba(21, 128, 61, 0.18);
+  border-top-color: var(--primary);
+  animation: appSpin 0.7s linear infinite;
+}
+.app-loader-text { font-size: 14px; font-weight: 600; color: var(--text-main); }
+.app-loader-sub { font-size: 13px; color: var(--text-muted); margin-top: -8px; }
+@keyframes appSpin { to { transform: rotate(360deg); } }
+
+/* Inline loader — a self-contained spinner+label unit that drops into any
+   existing loading wrapper (card, modal, section) without disturbing its
+   layout, so every "Loading…" across the app reads the same. */
+.app-inline-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+.app-spinner-sm {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(21, 128, 61, 0.2);
+  border-top-color: var(--primary);
+  animation: appSpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Error-boundary fallback (reuses .app-loader layout) */
+.error-boundary-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: #fef2f2;
+  color: var(--secondary-red);
+}
+.error-boundary-actions { display: flex; gap: 10px; margin-top: 6px; }
+.error-boundary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+}
+.error-boundary-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(21, 128, 61, 0.3); }
+.error-boundary-btn.ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-light);
+}
+.error-boundary-btn.ghost:hover { box-shadow: none; background: #f8fafc; }
+
 @media (max-width: 1100px) {
   .app-container {
     flex-direction: column;

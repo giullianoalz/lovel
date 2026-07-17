@@ -1246,7 +1246,7 @@ const CalendarView = () => {
             <button onClick={goToNextPeriod} aria-label="Next"><ChevronRight size={20} /></button>
           </div>
           <h1>{headerLabel}</h1>
-          {sessionsLoading && <span className="text-muted" style={{ fontSize: 12, marginLeft: 8 }}>Loading…</span>}
+          {sessionsLoading && <span className="app-inline-loader" style={{ fontSize: 12, marginLeft: 8 }}><span className="app-spinner-sm" style={{ width: 13, height: 13 }} />Loading…</span>}
         </div>
 
         <div className="calendar-actions">
@@ -2126,7 +2126,7 @@ const CalendarView = () => {
                         </div>
                       ))
                     ) : selectedEvent.studentList === null ? (
-                      <p className="text-muted" style={{ padding: '8px 0' }}>Loading roster…</p>
+                      <p className="app-inline-loader" style={{ padding: '8px 0' }}><span className="app-spinner-sm" />Loading roster…</p>
                     ) : (
                       <p className="text-muted" style={{ padding: '8px 0' }}>No students enrolled in this class.</p>
                     )}
