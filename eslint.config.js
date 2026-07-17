@@ -27,6 +27,19 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // eslint-plugin-react-hooks v7 flags every `setLoading(true)` fired at the
+      // top of a fetch-on-mount effect as a "cascading render" error. That
+      // pattern (show the spinner, then await the request) is standard and safe
+      // here — one extra render, no cascade. Keep it as a warning so genuine
+      // derive-state-in-effect mistakes still surface without failing lint on
+      // correct data-loading code.
+      'react-hooks/set-state-in-effect': 'warn',
+      // AuthContext and ToastProvider deliberately export their hook
+      // (useAuth/useToast) next to the provider component — the standard
+      // Context pattern. That only costs a full fast-refresh reload for those
+      // two files in dev, so keep it as a warning rather than a build-failing
+      // error.
+      'react-refresh/only-export-components': 'warn',
     },
   },
   {
