@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import DOMPurify from 'dompurify';
 import { database } from '../../lib/database';
 import { Check, X, AlertTriangle, FileWarning, Clock, Users, Star, Gift, TrendingUp, FileText, Image, Paperclip, Video, History, Eye, EyeOff, ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List, Link2, Type, Activity, Wind, LogOut, LifeBuoy, AlertCircle } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -553,8 +554,8 @@ const ClassSession = () => {
                    <div className="history-content">
                      <div className="history-formatted-notes">
                        {hist.notes.length > 200 && !expandedNotes[hist.sessionId] 
-                         ? <div dangerouslySetInnerHTML={{ __html: `${hist.notes.substring(0, 200)}...` }} />
-                         : <div dangerouslySetInnerHTML={{ __html: hist.notes }} />
+                         ? <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(`${hist.notes.substring(0, 200)}...`) }} />
+                         : <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(hist.notes) }} />
                        }
                      </div>
                      
@@ -937,7 +938,7 @@ const ClassSession = () => {
                         </div>
                       </div>
                     ) : officePreviewHtml ? (
-                      <div className="office-html-canvas" dangerouslySetInnerHTML={{ __html: officePreviewHtml }} style={{ fontSize: '14px', color: '#334155', lineHeight: '1.6' }} />
+                      <div className="office-html-canvas" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(officePreviewHtml) }} style={{ fontSize: '14px', color: '#334155', lineHeight: '1.6' }} />
                     ) : (
                       <div className="document-preview-placeholder">
                         <FileText size={64} color="#e2e8f0" />

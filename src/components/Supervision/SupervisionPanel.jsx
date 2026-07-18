@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import DOMPurify from 'dompurify';
 import {
   BookOpenCheck, Filter, Download, ChevronDown, ChevronRight,
   FileText, Paperclip, Video, Eye, EyeOff, Users, Clock,
@@ -333,7 +334,7 @@ const SupervisionPanel = () => {
                                       ? <><EyeOff size={12} /> Teacher only</>
                                       : <><Eye size={12} /> Visible to all</>}
                                   </div>
-                                  <div className="note-content" dangerouslySetInnerHTML={{ __html: note.notes }} />
+                                  <div className="note-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(note.notes) }} />
                                 </div>
                               )) : (
                                 <p className="no-data">No notes recorded for this session.</p>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import DOMPurify from 'dompurify';
 import { useNavigate } from 'react-router-dom';
 import {
   ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, MessageSquare, Calendar as CalendarIcon,
@@ -1208,7 +1209,7 @@ const TeacherPortal = () => {
                         </div>
                       </div>
                     ) : officePreviewHtml ? (
-                      <div className="office-html-canvas" dangerouslySetInnerHTML={{ __html: officePreviewHtml }}
+                      <div className="office-html-canvas" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(officePreviewHtml) }}
                         style={{ fontSize: 14, color: '#334155', lineHeight: 1.6 }} />
                     ) : (
                       <div className="document-preview-placeholder"><FileText size={64} color="#e2e8f0" /><p>Preview unsupported</p></div>
@@ -1264,8 +1265,8 @@ const TeacherPortal = () => {
                       <div className="history-content">
                         <div className="history-formatted-notes">
                           {hist.notes?.length > 200 && !expandedNotes[hist.sessionId]
-                            ? <div dangerouslySetInnerHTML={{ __html: `${hist.notes.substring(0, 200)}...` }} />
-                            : <div dangerouslySetInnerHTML={{ __html: hist.notes }} />}
+                            ? <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(`${hist.notes.substring(0, 200)}...`) }} />
+                            : <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(hist.notes) }} />}
                         </div>
                         {hist.notes?.length > 200 && (
                           <button className="read-more-btn"
