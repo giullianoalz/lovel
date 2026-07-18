@@ -151,9 +151,16 @@ export const registerUser = async (req, res, next) => {
       user,
     });
   } catch (error) {
-    // Clean up Firebase user if DB creation fails
-    if (error.code === 'P2002') {
-      // User already exists in DB
+    // Clean up Firebase user if DB creation fails — without this, the
+    // Firebase account would exist without a matching DB row, trapping the
+    // user in a "User not found in database" loop on every login attempt.
+    if (error.code !== 'P2002' && firebaseUser?.uid) {
+      try {
+        await firebaseAuth.deleteUser(firebaseUser.uid);
+        console.warn(`[Auth] Rolled back Firebase user ${firebaseUser.uid} after DB failure`);
+      } catch (cleanupErr) {
+        console.error(`[Auth] Failed to rollback Firebase user ${firebaseUser.uid}:`, cleanupErr.message);
+      }
     }
     next(error);
   }
