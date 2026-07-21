@@ -100,6 +100,10 @@ export const getMe = async (req, res) => {
  * Used by admins to create accounts for teachers/students.
  */
 export const registerUser = async (req, res, next) => {
+  // Declared at function scope so the catch block can roll it back — a `const`
+  // inside the try is out of scope in catch, which silently broke the rollback
+  // (it threw ReferenceError instead of deleting the orphaned Firebase user).
+  let firebaseUser = null;
   try {
     const { email, password, fullName, role, phone } = req.body;
 
@@ -111,7 +115,7 @@ export const registerUser = async (req, res, next) => {
     }
 
     // Create user in Firebase
-    const firebaseUser = await firebaseAuth.createUser({
+    firebaseUser = await firebaseAuth.createUser({
       email,
       password,
       displayName: fullName,
