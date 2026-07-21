@@ -222,9 +222,30 @@ app.use('/api/integrations', integrationsRoutes);
 io.on('connection', (socket) => {
   console.log(`[Socket.IO] Client connected: ${socket.id} (user: ${socket.user.id})`);
 
-  socket.on('join_room', (room) => {
-    socket.join(room);
-    console.log(`[Socket.IO] ${socket.id} joined room: ${room}`);
+  // Clients only ever pass chat thread ids here, so membership is enforced
+  // against ChatParticipant. Without this check any signed-in user could join
+  // "admin_room" or another family's thread and receive its receive_message /
+  // messages_read events live. admin_room and user_* have their own validated
+  // handlers below and are never valid thread ids.
+  socket.on('join_room', async (room) => {
+    try {
+      if (typeof room !== 'string' || room === 'admin_room' || room.startsWith('user_')) return;
+
+      if (socket.user.role !== 'ADMIN') {
+        const membership = await prisma.chatParticipant.findUnique({
+          where: { threadId_userId: { threadId: room, userId: socket.user.id } },
+          select: { isBlocked: true },
+        });
+        if (!membership || membership.isBlocked) return;
+      }
+
+      socket.join(room);
+      console.log(`[Socket.IO] ${socket.id} joined room: ${room}`);
+    } catch (err) {
+      // Malformed ids (non-UUID) make the Prisma lookup throw — treat as a
+      // denied join rather than crashing the handler.
+      console.error(`[Socket.IO] join_room rejected for ${socket.id}:`, err.message);
+    }
   });
 
   // Every signed-in user joins their own room so the server can push
