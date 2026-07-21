@@ -2,20 +2,44 @@ import { firebaseAuth } from '../config/firebase-admin.js';
 import prisma from '../config/database.js';
 
 // ── Dev bypass control ──────────────────────────────────────────────────────
-// Test login lets the frontend skip Firebase by sending x-dev-user-email.
-// In development it is always on; in production it requires the explicit env
-// var AND every request must also carry x-dev-secret matching DEV_SECRET.
-const TEST_LOGIN_ENABLED =
-  process.env.NODE_ENV !== 'production' || process.env.ENABLE_TEST_LOGIN === 'true';
+// Test login lets a client skip Firebase by identifying itself with a plain
+// x-dev-user-email header. It is OFF unless ENABLE_TEST_LOGIN is explicitly
+// "true".
+//
+// It deliberately does NOT infer "this must be a dev box" from NODE_ENV. A
+// deployment that simply never sets NODE_ENV would otherwise silently switch
+// the bypass on — which is exactly how this API once ended up serving student
+// and medical records to unauthenticated callers. Enabling the bypass must be
+// a deliberate act, never a default.
+const TEST_LOGIN_ENABLED = process.env.ENABLE_TEST_LOGIN === 'true';
 
 const DEV_SECRET = process.env.DEV_SECRET || null;
 
-if (TEST_LOGIN_ENABLED && process.env.NODE_ENV === 'production') {
+/**
+ * Whether a bypass request carrying `providedSecret` may proceed.
+ *
+ * When DEV_SECRET is configured every bypass request must present it, so a
+ * deliberately-enabled staging demo still isn't open to the world. Leaving
+ * DEV_SECRET unset is only appropriate on a local machine that isn't reachable
+ * from the internet.
+ */
+export const isTestLoginAuthorized = (providedSecret) => {
+  if (!TEST_LOGIN_ENABLED) return false;
+  if (DEV_SECRET) return providedSecret === DEV_SECRET;
+  return true;
+};
+
+if (TEST_LOGIN_ENABLED) {
   console.warn('');
   console.warn('⚠️  ────────────────────────────────────────────────────────');
-  console.warn('⚠️  TEST LOGIN IS ENABLED IN PRODUCTION');
-  console.warn('⚠️  Anyone with the dev-secret can impersonate any user.');
-  console.warn('⚠️  Set ENABLE_TEST_LOGIN to false when done testing.');
+  console.warn('⚠️  TEST LOGIN IS ENABLED — Firebase auth can be bypassed');
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('⚠️  AND NODE_ENV IS "production". Unset ENABLE_TEST_LOGIN now.');
+  }
+  if (!DEV_SECRET) {
+    console.warn('⚠️  No DEV_SECRET set: any caller may impersonate any user.');
+    console.warn('⚠️  Safe only if this host is not reachable from the internet.');
+  }
   console.warn('⚠️  ────────────────────────────────────────────────────────');
   console.warn('');
 }
@@ -33,38 +57,31 @@ export const authenticate = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      if (TEST_LOGIN_ENABLED) {
-        // In production, also require the secret header to prevent open access.
-        if (process.env.NODE_ENV === 'production' && req.headers['x-dev-secret'] !== DEV_SECRET) {
-          // Silently fall through to the 401 below — don't reveal that test
-          // login exists at all.
-        } else {
-          const devUserEmail = req.headers['x-dev-user-email'];
-          let devUser;
-          if (devUserEmail) {
-            devUser = await prisma.user.findUnique({
-              where: { email: devUserEmail },
-              include: {
-                familyMembers: {
-                  include: { family: true },
-                },
-              },
-            });
-          } else {
-            devUser = await prisma.user.findFirst({
-              where: { role: 'ADMIN' },
-              include: {
-                familyMembers: {
-                  include: { family: true },
-                },
-              },
-            });
-          }
-          if (devUser) {
-            req.user = devUser;
-            req.firebaseUser = { uid: devUser.firebaseUid, email: devUser.email, name: devUser.fullName };
-            return next();
-          }
+      const devUserEmail = req.headers['x-dev-user-email'];
+
+      // A caller who names no user is simply unauthenticated. There is
+      // deliberately no "fall back to some admin" branch here: that fallback
+      // used to authenticate *every* header-less request as the first ADMIN
+      // row, turning each protected route into an open endpoint.
+      //
+      // Failures below fall through to the 401 rather than reporting why, so
+      // the response never reveals that test login exists at all.
+      if (devUserEmail && isTestLoginAuthorized(req.headers['x-dev-secret'])) {
+        const devUser = await prisma.user.findUnique({
+          where: { email: devUserEmail },
+          include: {
+            familyMembers: {
+              include: { family: true },
+            },
+          },
+        });
+
+        // Impersonating a suspended account would sidestep the same check the
+        // real Firebase path enforces below.
+        if (devUser && devUser.status !== 'SUSPENDED') {
+          req.user = devUser;
+          req.firebaseUser = { uid: devUser.firebaseUid, email: devUser.email, name: devUser.fullName };
+          return next();
         }
       }
 

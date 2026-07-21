@@ -14,7 +14,7 @@ import prisma from './config/database.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { cacheStats } from './middleware/cache.js';
-import { TEST_LOGIN_ENABLED, DEV_SECRET } from './middleware/auth.js';
+import { isTestLoginAuthorized } from './middleware/auth.js';
 
 // Routes
 import authRoutes from './routes/auth.routes.js';
@@ -103,16 +103,14 @@ io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;
     const devEmail = socket.handshake.auth?.devEmail;
 
-    // Dev bypass — uses the same shared constants as the HTTP middleware
-    // so the two stay in lock-step (see middleware/auth.js).
-    if (TEST_LOGIN_ENABLED && devEmail) {
-      // In production, require the secret alongside the email.
-      const devSecret = socket.handshake.auth?.devSecret;
-      if (process.env.NODE_ENV === 'production' && devSecret !== DEV_SECRET) {
-        return next(new Error('Authentication required'));
-      }
-      const devUser = await prisma.user.findUnique({ where: { email: devEmail }, select: { id: true, role: true } });
-      if (devUser) {
+    // Dev bypass — defers to the same authorization helper as the HTTP
+    // middleware so the two can't drift apart (see middleware/auth.js).
+    if (devEmail && isTestLoginAuthorized(socket.handshake.auth?.devSecret)) {
+      const devUser = await prisma.user.findUnique({
+        where: { email: devEmail },
+        select: { id: true, role: true, status: true },
+      });
+      if (devUser && devUser.status !== 'SUSPENDED') {
         socket.user = devUser;
         return next();
       }
