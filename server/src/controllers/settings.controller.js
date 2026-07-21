@@ -5,7 +5,8 @@ import {
 
 // GET /api/settings/notifications
 // Returns the fully-resolved per-event config for every notification event,
-// including each event's label/description, allowed audiences, and param schema
+// including each event's label/description, allowed audiences, allowed delivery
+// channels, and param schema
 // so the admin UI can render itself generically.
 export const getNotificationSettings = async (req, res, next) => {
   try {
@@ -17,7 +18,7 @@ export const getNotificationSettings = async (req, res, next) => {
 };
 
 // PUT /api/settings/notifications
-// Body: { events: [ { key, enabled?, audience?, params? }, ... ] }
+// Body: { events: [ { key, enabled?, audience?, channels?, params? }, ... ] }
 // Validates and persists each event's overrides, then returns the refreshed set.
 export const putNotificationSettings = async (req, res, next) => {
   try {

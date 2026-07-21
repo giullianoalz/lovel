@@ -549,6 +549,9 @@ model Notification {
 //
 //   enabled  — master on/off for the event
 //   audience — which recipient groups get it (e.g. ["PARENTS","ADMINS"])
+//   channels — how it's delivered (e.g. ["IN_APP","EMAIL","SMS"]); an empty
+//              array means "use the catalog default". Recipients can still
+//              mute a channel for themselves via NotificationPreference.
 //   params   — event-specific tunables as JSON, e.g. { minutesBefore: 15 } for
 //              CLASS_REMINDER or { thresholdCount: 3, windowDays: 30 } for
 //              REPEATED_ABSENCE. Validated against the catalog before saving.
@@ -557,6 +560,7 @@ model NotificationEventConfig {
   eventKey    String   @unique @map("event_key") @db.VarChar(50)
   enabled     Boolean  @default(true)
   audience    String[] @default([])
+  channels    String[] @default([])
   params      Json     @default("{}")
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
   updatedById String?  @map("updated_by") @db.Uuid

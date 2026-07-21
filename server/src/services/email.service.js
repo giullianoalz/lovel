@@ -63,3 +63,43 @@ export const sendRegistrationBillingEmail = async ({ to, studentName, className,
     return { ok: false, error: error.message };
   }
 };
+
+export const isEmailConfigured = () => resend !== null;
+
+const buildNotificationEmailHtml = ({ title, message, actionUrl }) => `
+  <div style="font-family: Arial, sans-serif; color: #222; max-width: 560px;">
+    <h2 style="margin: 0 0 12px;">${title}</h2>
+    <p style="font-size: 15px; line-height: 1.5;">${message}</p>
+    ${actionUrl
+      ? `<p style="margin-top: 20px;"><a href="${actionUrl}" style="background: #2563eb; color: #fff; padding: 10px 18px; border-radius: 6px; text-decoration: none; display: inline-block;">Open in Lovelearning</a></p>`
+      : ''}
+    <p style="margin-top: 28px; font-size: 12px; color: #777;">
+      You're receiving this because of your notification preferences. You can change them in your account settings.
+    </p>
+  </div>
+`;
+
+/**
+ * Emails a single notification — the EMAIL channel of the notification
+ * dispatcher. Generic on purpose: same title/message the in-app row carries,
+ * so an event never needs a bespoke template to gain an email copy.
+ *
+ * Never throws — returns { ok, error } so a failed email can't break the flow
+ * that triggered the notification.
+ */
+export const sendNotificationEmail = async ({ to, title, message, actionUrl = null }) => {
+  if (!resend) return { ok: false, error: 'RESEND_API_KEY not configured' };
+  if (!to) return { ok: false, error: 'No recipient email' };
+
+  try {
+    await resend.emails.send({
+      from: process.env.EMAIL_FROM || 'noreply@lovelearning.app',
+      to,
+      subject: title,
+      html: buildNotificationEmailHtml({ title, message, actionUrl }),
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+};

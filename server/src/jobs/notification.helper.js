@@ -1,14 +1,81 @@
 import prisma from '../config/database.js';
 import { sendPushNotification } from '../utils/pushNotifications.js';
-import { getAdminUserIds } from '../services/notificationConfig.service.js';
+import { getAdminUserIds, getEventConfig } from '../services/notificationConfig.service.js';
+import { EVENTS_BY_KEY } from '../config/notificationEvents.js';
+import { sendNotificationEmail } from '../services/email.service.js';
+import { sendSms } from '../services/sms.service.js';
 
 /**
- * Creates a persistent in-app Notification row (deduplicated) and optionally
- * fires a Firebase Cloud Messaging push if the user has an fcmToken saved.
+ * Fans a notification out to the EMAIL / SMS channels an admin enabled for this
+ * event, on top of the in-app row the caller already persisted.
+ *
+ * Two gates, both of which must pass: the admin-level channel config for the
+ * event (notificationEvents.js + NotificationEventConfig) and the recipient's
+ * own NotificationPreference row for the event's category. A recipient with no
+ * preference row falls back to the admin config alone.
+ *
+ * Every delivery is best-effort and independently caught — a bounced email must
+ * not stop the text, and neither can surface to the caller.
+ */
+const deliverExtraChannels = async ({ userId, type, title, message }) => {
+  const descriptor = EVENTS_BY_KEY[type];
+  // Only catalog events have channel config. Everything else (chat messages,
+  // medical incidents, …) stays in-app, exactly as before.
+  if (!descriptor) return;
+
+  const config = await getEventConfig(type);
+  const wantsEmail = config.channels.includes('EMAIL');
+  const wantsSms = config.channels.includes('SMS');
+  if (!wantsEmail && !wantsSms) return;
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, phone: true },
+  });
+  if (!user) return;
+
+  const pref = descriptor.category
+    ? await prisma.notificationPreference.findUnique({
+      where: { userId_category: { userId, category: descriptor.category } },
+      select: { email: true, sms: true },
+    })
+    : null;
+
+  const jobs = [];
+  if (wantsEmail && (pref ? pref.email : true) && user.email) {
+    jobs.push(
+      sendNotificationEmail({
+        to: user.email,
+        title,
+        message,
+        actionUrl: process.env.APP_URL || null,
+      }).then((r) => {
+        if (!r.ok) console.error(`[Notification] email to userId=${userId} failed: ${r.error}`);
+      }),
+    );
+  }
+  if (wantsSms && (pref ? pref.sms : true) && user.phone) {
+    jobs.push(
+      // Texts are charged per segment, so send the one-line version.
+      sendSms({ to: user.phone, body: `${title} — ${message}` }).then((r) => {
+        if (!r.ok) console.error(`[Notification] SMS to userId=${userId} failed: ${r.error}`);
+      }),
+    );
+  }
+
+  await Promise.all(jobs);
+};
+
+/**
+ * Creates a persistent in-app Notification row (deduplicated), fires a Firebase
+ * Cloud Messaging push if the user has an fcmToken saved, and — for catalog
+ * events whose admin config enables them — also delivers by email and/or SMS.
  *
  * Deduplication: if a notification with the same `dedupKey` already exists
  * for this user, the function skips creation silently. This prevents the cron
- * jobs from spamming the same alert multiple times per day.
+ * jobs from spamming the same alert multiple times per day. Because dedup keys
+ * live on the in-app row, that row is always written even when an admin cares
+ * only about email/SMS — otherwise a daily cron would re-text every run.
  *
  * @param {object} opts
  * @param {string}  opts.userId        - UUID of the recipient user
@@ -60,6 +127,8 @@ export const sendNotification = async ({
       referenceType: referenceType || '',
       referenceId: referenceId || '',
     });
+
+    await deliverExtraChannels({ userId, type, title, message });
   } catch (err) {
     // Notifications should never crash the main flow
     console.error(`[Notification] Failed to send to userId=${userId}:`, err.message);

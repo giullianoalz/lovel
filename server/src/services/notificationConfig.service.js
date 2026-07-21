@@ -3,6 +3,7 @@ import {
   NOTIFICATION_EVENTS,
   EVENTS_BY_KEY,
   AUDIENCES,
+  CHANNELS,
 } from '../config/notificationEvents.js';
 
 /**
@@ -36,14 +37,28 @@ const resolveAudience = (descriptor, stored) => {
   return filtered && filtered.length ? filtered : [...descriptor.defaults.audience];
 };
 
+// Same shape as resolveAudience, for delivery channels. An empty/invalid stored
+// array falls back to the catalog default rather than "deliver nowhere" — every
+// event pre-dating the channels column stores [], and those must keep sending.
+const resolveChannels = (descriptor, stored) => {
+  const allowed = descriptor.allowedChannels || CHANNELS;
+  const filtered = Array.isArray(stored)
+    ? [...new Set(stored.filter((c) => allowed.includes(c)))]
+    : null;
+  return filtered && filtered.length ? filtered : [...descriptor.defaults.channels];
+};
+
 const mergeConfig = (descriptor, row) => ({
   key: descriptor.key,
   label: descriptor.label,
   description: descriptor.description,
+  category: descriptor.category,
   allowedAudience: descriptor.allowedAudience || AUDIENCES,
+  allowedChannels: descriptor.allowedChannels || CHANNELS,
   paramSchema: descriptor.params,
   enabled: row ? row.enabled : descriptor.defaults.enabled,
   audience: row ? resolveAudience(descriptor, row.audience) : [...descriptor.defaults.audience],
+  channels: row ? resolveChannels(descriptor, row.channels) : [...descriptor.defaults.channels],
   params: resolveParams(descriptor, row?.params),
 });
 
@@ -92,6 +107,18 @@ export const updateEventConfig = async (eventKey, patch, updatedById) => {
     data.audience = [...new Set(patch.audience)];
   }
 
+  if (patch.channels !== undefined) {
+    if (!Array.isArray(patch.channels)) {
+      throw { status: 400, message: `${eventKey}: channels must be an array.` };
+    }
+    const allowed = descriptor.allowedChannels || CHANNELS;
+    const invalid = patch.channels.filter((c) => !allowed.includes(c));
+    if (invalid.length) {
+      throw { status: 400, message: `${eventKey}: invalid channel value(s): ${invalid.join(', ')}` };
+    }
+    data.channels = [...new Set(patch.channels)];
+  }
+
   if (patch.params !== undefined) {
     if (typeof patch.params !== 'object' || patch.params === null) {
       throw { status: 400, message: `${eventKey}: params must be an object.` };
@@ -115,6 +142,7 @@ export const updateEventConfig = async (eventKey, patch, updatedById) => {
       eventKey,
       enabled: data.enabled ?? descriptor.defaults.enabled,
       audience: data.audience ?? descriptor.defaults.audience,
+      channels: data.channels ?? descriptor.defaults.channels,
       params: data.params ?? {},
       updatedById,
     },

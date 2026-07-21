@@ -8,6 +8,16 @@ const AUDIENCE_LABELS = {
   ADMINS: 'Admins / front desk',
 };
 
+const CHANNEL_LABELS = {
+  IN_APP: 'In-app + push',
+  EMAIL: 'Email',
+  SMS: 'Text message',
+};
+
+// IN_APP is always delivered — the bell inbox is the record of what was sent,
+// and it's what keeps repeat cron runs from re-sending. Only these are toggleable.
+const OPTIONAL_CHANNELS = ['EMAIL', 'SMS'];
+
 const NotificationSettings = () => {
   const [events, setEvents] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -40,6 +50,15 @@ const NotificationSettings = () => {
     return { ...e, audience: has ? e.audience.filter((a) => a !== audience) : [...e.audience, audience] };
   });
 
+  const toggleChannel = (key, channel) => patchEvent(key, (e) => {
+    const has = e.channels.includes(channel);
+    return {
+      ...e,
+      // IN_APP is never removed, so the array always keeps at least one channel.
+      channels: has ? e.channels.filter((c) => c !== channel) : [...e.channels, channel],
+    };
+  });
+
   const setParam = (key, paramKey, value) => patchEvent(key, (e) => ({
     ...e,
     params: { ...e.params, [paramKey]: value },
@@ -55,6 +74,8 @@ const NotificationSettings = () => {
           key: e.key,
           enabled: e.enabled,
           audience: e.audience,
+          // Always re-assert IN_APP; the UI never lets it be unchecked.
+          channels: [...new Set(['IN_APP', ...e.channels])],
           // Coerce param inputs to numbers; empty string falls back to schema default.
           params: Object.fromEntries(
             e.paramSchema.map((p) => {
@@ -124,6 +145,30 @@ const NotificationSettings = () => {
                 </div>
                 {evt.audience.length === 0 && (
                   <span className="ns-warn">No recipients selected — this notification won't be sent.</span>
+                )}
+              </div>
+
+              <div className="ns-detail-block">
+                <span className="ns-detail-label">Deliver by</span>
+                <div className="ns-audience">
+                  <span className="ns-chip ns-chip-on ns-chip-locked" title="Always on — the in-app inbox is the record of every notification sent.">
+                    {CHANNEL_LABELS.IN_APP}
+                  </span>
+                  {OPTIONAL_CHANNELS
+                    .filter((ch) => evt.allowedChannels.includes(ch))
+                    .map((ch) => (
+                      <label key={ch} className={`ns-chip ${evt.channels.includes(ch) ? 'ns-chip-on' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={evt.channels.includes(ch)}
+                          onChange={() => toggleChannel(evt.key, ch)}
+                        />
+                        {CHANNEL_LABELS[ch] || ch}
+                      </label>
+                    ))}
+                </div>
+                {evt.channels.includes('SMS') && (
+                  <span className="ns-warn">Texts only reach recipients who have a phone number on file, and require an SMS provider to be configured.</span>
                 )}
               </div>
 
