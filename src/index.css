@@ -68,6 +68,13 @@ body {
   overflow-x: clip;
 }
 
+/* Global utility used across every panel for secondary/caption text. Defined
+   here (loaded on every route) rather than per-component CSS, since dozens of
+   lazy-loaded panels reference it and none of them should have to own it. */
+.text-muted {
+  color: var(--text-muted);
+}
+
 /* Media never blows out its container on small screens */
 img, svg, video, canvas {
   max-width: 100%;

@@ -1401,6 +1401,34 @@
 }
 .vis-toggle-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
 
+/* Defined here rather than reused from StudentsList.css/StudentProfileModal.css:
+   each panel is lazy-loaded per route, so landing on /portal/teacher directly
+   never pulls those stylesheets in and "Publish Materials" rendered as a bare
+   browser button. */
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.action-btn.primary {
+  background: var(--primary);
+  color: white;
+  border: none;
+}
+
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ── Custom filter dropdown ─────────────────────────────── */
 .custom-filter-wrapper { position: relative; }
 .custom-filter-menu {

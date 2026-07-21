@@ -994,6 +994,43 @@
   padding: 20px;
 }
 
+/* Defined here rather than reused from RegistrationAdmin.css or StudentsList.css:
+   each panel is lazy-loaded per route, so landing on /calendar directly never
+   pulls those stylesheets in and these render as bare browser buttons. */
+.btn-text {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.btn-text:hover {
+  background: var(--primary-light);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: white;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.icon-btn:hover {
+  background: var(--primary-light);
+}
+
 .modal-content {
   width: 100%;
   max-width: 600px;

@@ -87,6 +87,33 @@
 }
 .teacher-picker-modal h3 { margin: 0 0 14px; font-size: 16px; }
 .teacher-picker-list { display: flex; flex-direction: column; gap: 6px; }
+
+/* Defined here rather than reused from RegistrationAdmin.css: each panel is
+   lazy-loaded per route, so landing on /chat directly never pulls that
+   stylesheet in and these render unstyled. */
+.form-control {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.btn-text:hover {
+  background: var(--primary-light);
+}
 .teacher-picker-item {
   display: flex; flex-direction: column; gap: 2px;
   padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 10px;
