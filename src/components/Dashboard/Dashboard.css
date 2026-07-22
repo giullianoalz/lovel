@@ -80,6 +80,13 @@
   align-items: center;
   justify-content: center;
   border: 2px solid white;
+  /* Pops in when a count appears so a new alert catches the eye. */
+  animation: badgePop var(--dur) var(--ease-spring) both;
+}
+
+@keyframes badgePop {
+  from { opacity: 0; transform: scale(0); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 /* Role Toggle */
@@ -103,6 +110,11 @@
   transition: all 0.2s ease;
 }
 
+.role-btn:not(.active):hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.6);
+}
+
 .role-btn.active {
   background: white;
   color: var(--primary);
@@ -124,6 +136,13 @@
   border-radius: 20px;
   padding: 24px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+  transition: box-shadow var(--dur) var(--ease-out),
+              transform var(--dur) var(--ease-out);
+}
+
+.glass-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 44px rgba(6, 78, 59, 0.10);
 }
 
 /* Next Class Widget */
@@ -185,6 +204,13 @@
 
 .stat-item {
   text-align: center;
+  padding: 8px 4px;
+  border-radius: 12px;
+  transition: background-color var(--dur) var(--ease-out);
+}
+
+.stat-item:hover {
+  background: rgba(21, 128, 61, 0.06);
 }
 
 .stat-value {
@@ -192,6 +218,13 @@
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--primary);
+  transition: transform var(--dur) var(--ease-spring);
+}
+
+/* The number itself pops a touch when you hover its tile — a small reward that
+   makes the metrics feel tappable rather than painted on. */
+.stat-item:hover .stat-value {
+  transform: scale(1.08);
 }
 
 .stat-label {
@@ -339,6 +372,8 @@
   background: #f1f5f9;
   border-color: #cbd5e1;
   color: var(--primary);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
 .list-item {
@@ -349,6 +384,19 @@
   background: rgba(255, 255, 255, 0.5);
   border-radius: 12px;
   border: 1px solid var(--border-light);
+  transition: background-color var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              transform var(--dur) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out);
+}
+
+/* Rows lift and warm their border on hover so a dense list reads as a set of
+   discrete, reachable items. (Action rows keep their own translateX below.) */
+.list-item:not(.action-row):hover {
+  background: #fff;
+  border-color: #cbd5e1;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
 }
 
 .item-main {
@@ -429,6 +477,15 @@
   font-weight: 600;
   margin-top: 15px;
   cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out),
+              background-color var(--dur) var(--ease-out);
+}
+
+.pay-btn:hover {
+  background: #053b2c;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(6, 78, 59, 0.28);
 }
 
 .action-row {
