@@ -12,6 +12,14 @@ import {
 const CANCELLATION_WINDOW_HOURS = 48;
 const LATE_CANCELLATION_SUGGESTED_PERCENT = 50;
 
+// A student marked ABSENT with no prior cancellation is a no-show: the teacher
+// held the slot and waited, so it's chargeable. Like a late cancellation it
+// opens a review item (never an automatic charge) — the admin confirms the
+// amount. The reason string is also the marker used to recognise (and clean up)
+// auto-created no-show items when a mis-marked student is later set present.
+const NO_SHOW_SUGGESTED_PERCENT = 50;
+const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
+
 /**
  * GET /api/sessions
  * List sessions, typically filtered by date range for a calendar view
@@ -238,7 +246,17 @@ export const updateAttendance = async (req, res, next) => {
       )
     );
 
-    res.json({ message: 'Attendance records updated successfully.' });
+    // Open (or clear) no-show charge reviews based on this sheet. Wrapped so a
+    // billing-review hiccup can never fail the teacher's attendance save — the
+    // attendance itself is already committed above.
+    let noShows = [];
+    try {
+      noShows = await processNoShowReviews(req.params.id, attendanceRecords, req.user.id);
+    } catch (err) {
+      console.error('[Attendance] no-show review processing failed:', err.message);
+    }
+
+    res.json({ message: 'Attendance records updated successfully.', noShowsFlagged: noShows.length });
 
     // Notify parents of anyone marked absent — fire-and-forget so a slow
     // notification fan-out never delays the teacher's save confirmation.
@@ -250,8 +268,105 @@ export const updateAttendance = async (req, res, next) => {
         console.error('[Attendance] absence notification failed:', err.message)
       );
     }
+
+    // Tell the admin queue about any newly-flagged no-show charges to review.
+    if (noShows.length > 0) {
+      notifyAdminsOfNoShows(req.app.get('io'), req.params.id, noShows).catch((err) =>
+        console.error('[Attendance] no-show admin notification failed:', err.message)
+      );
+    }
   } catch (error) {
     next(error);
+  }
+};
+
+// For a saved attendance sheet: any student marked ABSENT with no prior
+// cancellation gets a PENDING no-show charge review (suggested 50%); any student
+// now marked present/late has any still-pending no-show review removed (the
+// teacher corrected a mis-mark before the admin acted on it). Students who
+// cancelled are EXCUSED and already carry their own cancellation row, so they
+// are never treated as no-shows here. Returns the review rows it created.
+const processNoShowReviews = async (sessionId, attendanceRecords, staffId) => {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { id: true, date: true, startTime: true, class: { select: { name: true, teacherId: true } } },
+  });
+  if (!session) return [];
+
+  // Notice is 0 or negative for a no-show (the class is happening / has passed).
+  const start = new Date(session.date);
+  const st = new Date(session.startTime);
+  start.setUTCHours(st.getUTCHours(), st.getUTCMinutes(), st.getUTCSeconds());
+  const hoursBeforeClass = Math.min(0, (start.getTime() - Date.now()) / 3_600_000);
+
+  const created = [];
+  for (const record of attendanceRecords) {
+    const status = String(record.status || '').toUpperCase();
+
+    if (status === 'ABSENT') {
+      // Skip if this student already has any cancellation/no-show row for the
+      // session — the unique(sessionId,studentId) also guarantees no duplicate.
+      const existing = await prisma.sessionCancellation.findUnique({
+        where: { sessionId_studentId: { sessionId, studentId: record.studentId } },
+        select: { id: true },
+      });
+      if (existing) continue;
+
+      const row = await prisma.sessionCancellation.create({
+        data: {
+          sessionId,
+          studentId: record.studentId,
+          cancelledById: staffId,
+          reason: NO_SHOW_REASON,
+          hoursBeforeClass,
+          suggestedChargePercent: NO_SHOW_SUGGESTED_PERCENT,
+          status: 'PENDING_REVIEW',
+        },
+        include: { student: { select: { id: true, fullName: true } } },
+      });
+      created.push({ ...row, className: session.class?.name });
+    } else if (status === 'PRESENT' || status === 'LATE') {
+      // Correction: drop a still-pending no-show review for a student now
+      // present. Scoped to auto-created no-show rows (matched by reason) that
+      // haven't been resolved, so real cancellations are never touched.
+      await prisma.sessionCancellation.deleteMany({
+        where: { sessionId, studentId: record.studentId, reason: NO_SHOW_REASON, status: 'PENDING_REVIEW' },
+      });
+    }
+  }
+  return created;
+};
+
+// Pushes newly-flagged no-shows into the same admin review surfaces that late
+// cancellations use: the live admin_room socket event, a management push, and a
+// durable notification for the admin bell.
+const notifyAdminsOfNoShows = async (io, sessionId, noShows) => {
+  for (const ns of noShows) {
+    if (io) {
+      io.to('admin_room').emit('cancellation_pending', {
+        id: ns.id,
+        studentName: ns.student.fullName,
+        className: ns.className,
+        sessionDate: ns.hoursBeforeClass,
+        hoursBeforeClass: Number(ns.hoursBeforeClass),
+        suggestedChargePercent: ns.suggestedChargePercent,
+        reason: ns.reason,
+        createdAt: ns.createdAt,
+        noShow: true,
+      });
+    }
+    await broadcastToManagement(
+      'No-show needs a decision',
+      `${ns.student.fullName} was a no-show for ${ns.className} (no cancellation) — decide how much to charge (suggested ${NO_SHOW_SUGGESTED_PERCENT}%).`,
+      { cancellationId: ns.id }
+    );
+    await notifyAdmins({
+      type: 'CANCELLATION',
+      title: 'No-show needs a decision',
+      message: `${ns.student.fullName} was a no-show for ${ns.className} (no cancellation) — decide how much to charge (suggested ${NO_SHOW_SUGGESTED_PERCENT}%).`,
+      referenceType: 'sessionCancellation',
+      referenceId: ns.id,
+    });
   }
 };
 
@@ -567,13 +682,17 @@ export const resolveCancellation = async (req, res, next) => {
     if (chargeAmount != null && parseFloat(chargeAmount) > 0) {
       const familyMember = await prisma.familyMember.findFirst({ where: { userId: cancellation.studentId } });
       if (familyMember) {
+        // Label the ledger line for what actually happened — a no-show routes
+        // through this same queue but must not read as a "cancellation fee" on
+        // the family's statement.
+        const feeLabel = cancellation.reason === NO_SHOW_REASON ? 'No-show fee' : 'Late cancellation fee';
         await prisma.transaction.create({
           data: {
             studentId: cancellation.studentId,
             familyId: familyMember.familyId,
             amount: parseFloat(chargeAmount),
             type: 'CHARGE',
-            description: `Late cancellation fee — ${cancellation.session.class.name} (${cancellation.finalChargePercent ?? finalChargePercent}%)`,
+            description: `${feeLabel} — ${cancellation.session.class.name} (${cancellation.finalChargePercent ?? finalChargePercent}%)`,
           },
         });
       }
