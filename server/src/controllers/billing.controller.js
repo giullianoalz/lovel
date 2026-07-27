@@ -79,22 +79,13 @@ export const createTransaction = async (req, res, next) => {
         });
       }
 
-      let created = await db.transaction.create({
-        data: {
-          familyId,
-          studentId: studentId || null,
-          invoiceId: invoiceId || null,
-          paymentId: payment?.id || null,
-          amount: parsedAmount,
-          type: upperType,
-          description: description || `Manual ${type}`,
-          date: date ? new Date(date) : new Date(),
-        },
-      });
-
-      // If applied against a specific invoice, cap at what's actually due and
-      // spill any excess into a CREDIT transaction instead of over-crediting
-      // that one invoice.
+      // If the payment targets a specific invoice, cap what's applied there at
+      // what's actually due, and record the ledger rows the same way the EMA
+      // reconciler does: PAYMENT for the applied part, CREDIT for the excess.
+      // Together they sum to the money received — recording the full payment
+      // AND a credit would count the excess twice and understate the balance.
+      let txAmount = parsedAmount;
+      let excess = 0;
       if (upperType === 'PAYMENT' && invoiceId) {
         const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
         if (invoice) {
@@ -105,20 +96,34 @@ export const createTransaction = async (req, res, next) => {
             where: { id: invoiceId },
             data: { amountPaid: newPaid, status: newPaid >= Number(invoice.totalAmount) ? 'PAID' : 'PARTIAL' },
           });
-
-          const excess = parsedAmount - appliedToInvoice;
-          if (excess > 0) {
-            await db.transaction.create({
-              data: {
-                familyId,
-                studentId: studentId || null,
-                amount: excess,
-                type: 'CREDIT',
-                description: 'Overpayment applied as account credit',
-              },
-            });
-          }
+          txAmount = appliedToInvoice;
+          excess = parsedAmount - appliedToInvoice;
         }
+      }
+
+      let created = await db.transaction.create({
+        data: {
+          familyId,
+          studentId: studentId || null,
+          invoiceId: invoiceId || null,
+          paymentId: payment?.id || null,
+          amount: txAmount,
+          type: upperType,
+          description: description || `Manual ${type}`,
+          date: date ? new Date(date) : new Date(),
+        },
+      });
+
+      if (excess > 0) {
+        await db.transaction.create({
+          data: {
+            familyId,
+            studentId: studentId || null,
+            amount: excess,
+            type: 'CREDIT',
+            description: 'Overpayment applied as account credit',
+          },
+        });
       }
 
       return created;
