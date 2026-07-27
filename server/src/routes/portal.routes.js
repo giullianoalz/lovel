@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
 import { withCache } from '../middleware/cache.js';
+import { validate, createPickupAuthSchema } from '../utils/validators.js';
 import {
   getStudentPortal,
   getParentPortal,
@@ -34,7 +35,7 @@ router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'),
 
 // Pickup Authorization routes
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);
-router.post('/parent/pickup', authenticate, requireRole('PARENT'), createPickupAuth);
+router.post('/parent/pickup', authenticate, requireRole('PARENT'), validate(createPickupAuthSchema), createPickupAuth);
 router.delete('/parent/pickup/:id', authenticate, requireRole('PARENT'), deletePickupAuth);
 
 // Snack-punch reload approval

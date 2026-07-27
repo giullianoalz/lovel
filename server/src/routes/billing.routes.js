@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
+import { validate, createTransactionSchema, createInvoiceSchema } from '../utils/validators.js';
 import {
   listTransactions,
   createTransaction,
@@ -17,13 +18,13 @@ const router = Router();
 router.get('/transactions', authenticate, requireRole('ADMIN'), listTransactions);
 
 // POST /api/billing/transactions — Create a transaction (Admin)
-router.post('/transactions', authenticate, requireRole('ADMIN'), createTransaction);
+router.post('/transactions', authenticate, requireRole('ADMIN'), validate(createTransactionSchema), createTransaction);
 
 // GET /api/billing/invoices — List invoices (Admin)
 router.get('/invoices', authenticate, requireRole('ADMIN'), listInvoices);
 
 // POST /api/billing/invoices — Generate an invoice (Admin)
-router.post('/invoices', authenticate, requireRole('ADMIN'), createInvoice);
+router.post('/invoices', authenticate, requireRole('ADMIN'), validate(createInvoiceSchema), createInvoice);
 
 // EMA Step Up — generate invoices from the Step Up CSV (Admin)
 router.post('/ema/generate', authenticate, requireRole('ADMIN'), generateEmaBatch);

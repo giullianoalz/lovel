@@ -42,16 +42,81 @@ export const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+// ── Request-payload schemas for the critical parent- and money-facing routes ──
+// Every schema uses .passthrough(): zod strips unknown keys by default, which
+// would silently drop fields a controller still reads. Passthrough keeps them,
+// so validation only *adds* guarantees (required fields present, ids are UUIDs,
+// numbers are numbers) without changing what reaches the handler. Free-form
+// strings are checked for presence only — no brittle format regexes that could
+// reject a valid variation the frontend already sends.
+const uuid = z.string().uuid('Must be a valid id');
+
+export const registrationRequestSchema = z.object({
+  termId: uuid,
+  studentId: uuid,
+  firstChoiceClassId: uuid,
+  secondChoiceClassId: z.string().optional().nullable(),
+  electiveIds: z.array(z.string()).optional(),
+  ixlPlan: z.string().optional(),
+}).passthrough();
+
+export const termIdQuerySchema = z.object({ termId: uuid }).passthrough();
+
+export const createSessionSchema = z.object({
+  classId: uuid,
+  date: z.string().min(1, 'date is required'),
+  startTime: z.string().min(1, 'startTime is required'),
+  endTime: z.string().min(1, 'endTime is required'),
+}).passthrough();
+
+export const updateAttendanceSchema = z.object({
+  attendanceRecords: z.array(z.object({
+    studentId: uuid,
+    status: z.string().min(1, 'status is required'),
+  })),
+}).passthrough();
+
+export const cancelStudentSchema = z.object({ studentId: uuid }).passthrough();
+
+export const resolveCancellationSchema = z.object({
+  finalChargePercent: z.coerce.number().min(0).max(100),
+}).passthrough();
+
+export const createTransactionSchema = z.object({
+  familyId: uuid,
+  amount: z.coerce.number(),
+  type: z.string().min(1, 'type is required'),
+}).passthrough();
+
+export const createInvoiceSchema = z.object({
+  familyId: uuid,
+  transactionIds: z.array(uuid).min(1, 'transactionIds must not be empty'),
+}).passthrough();
+
+export const createPickupAuthSchema = z.object({
+  pickupPerson: z.string().min(1, 'pickupPerson is required'),
+  validDate: z.string().min(1, 'validDate is required'),
+}).passthrough();
+
 /**
- * Middleware factory to validate request body against a Zod schema
+ * Middleware factory to validate a request against a Zod schema.
+ *
+ * @param schema  Zod schema
+ * @param source  'body' (default), 'query', or 'params'
+ *
+ * Body is reassigned with the parsed (coerced) result. Query/params are only
+ * validated in place — Express 5 exposes req.query as a getter, so reassigning
+ * it throws; parsing purely for its throw-on-invalid side effect still yields a
+ * clean 400 without mutating the read-only object.
  */
-export const validate = (schema) => {
+export const validate = (schema, source = 'body') => {
   return (req, res, next) => {
     try {
-      req.body = schema.parse(req.body);
+      const parsed = schema.parse(req[source]);
+      if (source === 'body') req.body = parsed;
       next();
     } catch (error) {
-      next(error); // Will be caught by errorHandler
+      next(error); // ZodError -> 400 via errorHandler
     }
   };
 };

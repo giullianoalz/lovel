@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
 import { withCache } from '../middleware/cache.js';
+import { validate, registrationRequestSchema, termIdQuerySchema } from '../utils/validators.js';
 import {
   createTerm,
   seedPriorityHolds,
@@ -52,10 +53,10 @@ router.post('/admin-register', authenticate, requireRole('ADMIN'), adminRegister
 // Consolidated parent registration view (open term, children eligibility, coves)
 router.get('/parent', authenticate, getParentRegistration);
 
-// Check window and status for a student
-router.get('/status/:studentId', authenticate, getRegistrationStatus);
+// Check window and status for a student (requires ?termId=)
+router.get('/status/:studentId', authenticate, validate(termIdQuerySchema, 'query'), getRegistrationStatus);
 
 // Submit 1st/2nd choice
-router.post('/request', authenticate, submitRegistrationRequest);
+router.post('/request', authenticate, validate(registrationRequestSchema), submitRegistrationRequest);
 
 export default router;
