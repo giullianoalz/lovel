@@ -17,7 +17,7 @@ messaging.onBackgroundMessage((payload) => {
   const { title, body } = payload.notification || {};
   self.registration.showNotification(title || 'Love Learning Explorers', {
     body: body || '',
-    icon: '/favicon.svg',
+    icon: '/pwa-192.png',
     data: payload.data,
   });
 });
