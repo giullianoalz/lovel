@@ -242,6 +242,18 @@ const RegistrationAdmin = () => {
     return new Date(isoString).toLocaleDateString();
   };
 
+  // For date-only values: Prisma's @db.Date columns and the bare YYYY-MM-DD a
+  // <input type="date"> produces. Both mean a calendar day, but both parse as
+  // UTC midnight — so toLocaleDateString renders the day *before* anywhere west
+  // of UTC, which is every US timezone. Read the parts in UTC instead.
+  // Use formatDateForDisplay for real timestamps; this one for plain dates.
+  const formatDateOnlyForDisplay = (value) => {
+    if (!value) return '';
+    const iso = typeof value === 'string' ? value : new Date(value).toISOString();
+    const [year, month, day] = iso.slice(0, 10).split('-');
+    return `${Number(month)}/${Number(day)}/${year}`;
+  };
+
   // Windows must run in chronological order: Early opens -> Early ends/Public
   // opens -> Public opens -> Registration closes. Returns an error string, or
   // null if the order is valid.
@@ -1012,7 +1024,7 @@ const RegistrationAdmin = () => {
                         <div>${r.totalQuarterly.toFixed(2)}</div>
                         <div className="text-xs text-muted">Deposit: ${r.depositAmount.toFixed(2)}</div>
                       </td>
-                      <td>{r.depositDueDate ? formatDateForDisplay(r.depositDueDate) : '—'}</td>
+                      <td>{r.depositDueDate ? formatDateOnlyForDisplay(r.depositDueDate) : '—'}</td>
                       <td>
                         {r.emailStatus === 'SENT' && <span className="badge active"><CheckCircle size={12} /> Sent</span>}
                         {r.emailStatus === 'FAILED' && <span className="badge danger"><AlertCircle size={12} /> Failed</span>}
@@ -1128,6 +1140,28 @@ const RegistrationAdmin = () => {
                   onChange={(e) => setNewTermForm({...newTermForm, name: e.target.value})}
                 />
               </div>
+
+              {/* Window 1 admits only students holding a priority spot, and those
+                  are seeded from an earlier term's rosters. With no earlier term
+                  there is nothing to seed, so Window 1 stays shut for everyone —
+                  worth saying out loud, because the dates alone suggest otherwise. */}
+              {terms.length === 0 && (
+                <div className="reg-first-term-warn">
+                  <AlertCircle size={18} />
+                  <div>
+                    <strong>First term: Window 1 will be closed to everyone.</strong>
+                    <p>
+                      Window 1 only lets in students who already hold a priority spot, and those are
+                      carried over from a previous term's rosters. There is no previous term yet, so
+                      nobody qualifies and families will see registration locked until Window 1 ends
+                      {newTermForm.earlySameDayEnd && <> on <strong>{formatDateOnlyForDisplay(newTermForm.earlySameDayEnd)}</strong></>}.
+                      Set that end date to the day you actually want families to be able to register,
+                      or register them yourself from the Manual Registration tab, which skips the
+                      windows entirely.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div className="reg-window-box">
                 <h4>Window 1: Early (Same Day)</h4>

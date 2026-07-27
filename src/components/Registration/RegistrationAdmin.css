@@ -836,6 +836,45 @@
   border-radius: 6px;
 }
 
+/* Shown in the new-term form when no earlier term exists, so Window 1 cannot
+   admit anyone. Deliberately louder than .manual-reg-warn: it changes how the
+   admin should pick the dates sitting right below it. */
+.reg-first-term-warn {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-left: 4px solid #d97706;
+  color: #92400e;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.reg-first-term-warn svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #d97706;
+}
+
+.reg-first-term-warn strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.reg-first-term-warn p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reg-first-term-warn p strong {
+  display: inline;
+  font-size: inherit;
+}
+
 /* Electives */
 .manual-reg-electives {
   display: flex;
