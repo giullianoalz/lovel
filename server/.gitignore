@@ -2,3 +2,7 @@ node_modules/
 .env
 *.log
 dist/
+
+# Database dumps. These carry student, medical and family records in the clear —
+# never commit one.
+backups/

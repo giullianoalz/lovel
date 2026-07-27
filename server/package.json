@@ -13,7 +13,8 @@
     "db:migrate:deploy": "npx prisma migrate deploy",
     "db:push": "npx prisma db push",
     "db:seed": "node prisma/seed.js",
-    "db:studio": "npx prisma studio"
+    "db:studio": "npx prisma studio",
+    "db:backup": "node scripts/backup-db.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",
