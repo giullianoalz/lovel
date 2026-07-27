@@ -1,0 +1,399 @@
+/* Registration form for a family signing itself up.
+   Shares the sign-in card's language (soft green, glass, blobs) but has to hold
+   a lot more, so it scrolls and is wider. */
+
+.signup-page {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background-color: #f0fdf4;
+  overflow-x: hidden;
+  padding: 32px 24px 64px;
+}
+
+.signup-card {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 620px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 24px;
+  box-shadow: 0 20px 40px -15px rgba(6, 78, 59, 0.08),
+              0 0 0 1px rgba(6, 78, 59, 0.02);
+  padding: 36px;
+  display: flex;
+  flex-direction: column;
+  animation: signupCardIn 0.4s ease;
+}
+
+@keyframes signupCardIn {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.signup-header { text-align: center; margin-bottom: 22px; }
+.signup-logo { height: 56px; object-fit: contain; margin-bottom: 14px; }
+.signup-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+.signup-header p {
+  font-size: 14px;
+  color: var(--text-muted);
+  max-width: 42ch;
+  margin: 0 auto;
+}
+
+/* ── Step rail ── */
+.signup-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+}
+
+.signup-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: color 0.25s ease;
+}
+
+.signup-step + .signup-step::before {
+  content: '';
+  width: 22px;
+  height: 1px;
+  background: rgba(6, 78, 59, 0.15);
+  margin-right: 7px;
+}
+
+.signup-step-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(6, 78, 59, 0.07);
+  color: var(--text-muted);
+  transition: all 0.25s ease;
+}
+
+.signup-step.active { color: var(--text-main); }
+.signup-step.active .signup-step-dot {
+  background: var(--primary, #15803d);
+  color: white;
+  box-shadow: 0 0 0 4px rgba(21, 128, 61, 0.13);
+}
+.signup-step.done .signup-step-dot {
+  background: #dcfce7;
+  color: var(--primary, #15803d);
+}
+
+/* Labels are noise on a narrow screen — the dots still show progress. */
+@media (max-width: 520px) {
+  .signup-step-label { display: none; }
+  .signup-step + .signup-step::before { width: 14px; }
+}
+
+/* ── Form ── */
+.signup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.signup-row {
+  display: flex;
+  gap: 14px;
+}
+.signup-row .input-group { flex: 1; min-width: 0; }
+.signup-row .input-group.narrow { flex: 0 0 110px; }
+.signup-row .input-group.grow { flex: 1; }
+
+@media (max-width: 520px) {
+  .signup-row { flex-direction: column; gap: 18px; }
+  .signup-row .input-group.narrow { flex: 1; }
+}
+
+.signup-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
+.signup-form textarea,
+.signup-form select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(6, 78, 59, 0.15);
+  background: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-main);
+  transition: all 0.2s ease;
+  resize: vertical;
+}
+
+.signup-form textarea:focus,
+.signup-form select:focus {
+  outline: none;
+  border-color: var(--primary, #15803d);
+  background: white;
+  box-shadow: 0 0 0 4px rgba(21, 128, 61, 0.1);
+}
+
+/* ── Child cards ── */
+.signup-child-card {
+  border: 1px solid rgba(6, 78, 59, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: signupCardIn 0.3s ease;
+}
+
+.signup-child-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.signup-child-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.signup-remove-btn {
+  background: none;
+  border: none;
+  color: #b91c1c;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  transition: background 0.2s ease;
+}
+.signup-remove-btn:hover { background: #fef2f2; }
+
+.signup-add-btn {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px dashed rgba(6, 78, 59, 0.3);
+  background: transparent;
+  color: var(--primary, #15803d);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.signup-add-btn:hover {
+  background: #f0fdf4;
+  border-color: var(--primary, #15803d);
+  transform: translateY(-1px);
+}
+
+/* ── Interest chips ── */
+.signup-interests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.signup-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(6, 78, 59, 0.15);
+  background: white;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.signup-chip input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.signup-chip:hover { border-color: var(--primary, #15803d); }
+
+.signup-chip.on {
+  background: var(--primary, #15803d);
+  border-color: var(--primary, #15803d);
+  color: white;
+  box-shadow: 0 3px 8px rgba(21, 128, 61, 0.22);
+}
+
+/* Keyboard users get no hover, so the focused chip has to say so itself. */
+.signup-chip:focus-within {
+  outline: 2px solid var(--primary, #15803d);
+  outline-offset: 2px;
+}
+
+/* ── Review ── */
+.signup-review {
+  border: 1px solid rgba(6, 78, 59, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 18px;
+}
+
+.signup-review h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0 0 2px;
+}
+
+.signup-review-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+.signup-review-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signup-review-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid rgba(6, 78, 59, 0.07);
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+/* Name and age read as one line; the li itself is a column, so they need a
+   wrapper or the age drops underneath the name. */
+.signup-review-name { font-size: 14px; color: var(--text-main); }
+
+.signup-review-meta { font-size: 12.5px; color: var(--text-muted); }
+
+.signup-review-allergy {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.signup-check {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(6, 78, 59, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.signup-check:hover { border-color: var(--primary, #15803d); }
+.signup-check span { display: inline-flex; align-items: center; gap: 7px; }
+.signup-check input { width: 17px; height: 17px; accent-color: var(--primary, #15803d); }
+
+.signup-fineprint {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ── Actions ── */
+.signup-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.signup-actions .grow { flex: 1; }
+
+.signup-actions .login-submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 0;
+  cursor: pointer;
+}
+
+.signup-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 13px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(6, 78, 59, 0.15);
+  background: white;
+  color: var(--text-main);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.signup-back-btn:hover:not(:disabled) { background: #f8fafc; transform: translateY(-1px); }
+.signup-back-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.signup-signin-cta {
+  text-align: center;
+  margin: 20px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.signup-signin-cta a {
+  color: var(--primary, #15803d);
+  font-weight: 700;
+  text-decoration: none;
+}
+.signup-signin-cta a:hover { text-decoration: underline; }
+
+@media (max-width: 520px) {
+  .signup-page { padding: 20px 14px 48px; }
+  .signup-card { padding: 24px 20px; }
+}

@@ -14,6 +14,14 @@ const api = axios.create({
   timeout: 60000,
 });
 
+// Halfway through a family signup the Firebase account exists but the academy
+// profile does not, so /auth/me legitimately answers 401. Signing them out on
+// that 401 — the normal, correct reaction everywhere else — would strip the very
+// token POST /auth/signup needs, and the signup could never complete.
+let signupInFlight = false;
+export const setSignupInFlight = (value) => { signupInFlight = value; };
+export const isSignupInFlight = () => signupInFlight;
+
 // Request interceptor — attach Firebase JWT or dev bypass header
 api.interceptors.request.use(
   async (config) => {
@@ -42,7 +50,7 @@ api.interceptors.response.use(
   async (error) => {
     const status = error.response?.status;
 
-    if (status === 401) {
+    if (status === 401 && !signupInFlight) {
       // Token expired or invalid — sign out and redirect to login
       try {
         localStorage.removeItem('devUserEmail');

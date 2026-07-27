@@ -85,6 +85,9 @@ model User {
   snackReloadsAsStudent  SnackReloadRequest[]      @relation("SnackReloadStudent")
   snackReloadsDecided    SnackReloadRequest[]      @relation("SnackReloadDecidedBy")
   snackReloadsFulfilled  SnackReloadRequest[]      @relation("SnackReloadFulfilledBy")
+  applicationsAsStudent  EnrollmentApplication[]   @relation("StudentApplications")
+  applicationsSubmitted  EnrollmentApplication[]   @relation("SubmittedApplications")
+  applicationsReviewed   EnrollmentApplication[]   @relation("ReviewedApplications")
 
   @@map("users")
 }
@@ -100,6 +103,7 @@ model Family {
   scholarships ScholarshipDisbursement[]
   transactions Transaction[]
   snackReloads SnackReloadRequest[]
+  applications EnrollmentApplication[]
 
   @@map("families")
 }
@@ -1153,6 +1157,51 @@ model CronJobRun {
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("cron_job_runs")
+}
+
+// What a self-registered family asked for, per child.
+//
+// A family that signs itself up gets a working account immediately, but its
+// children are parked as INACTIVE until staff place them in a class. This row
+// is what staff act on: it carries the child's stated interests so the
+// placement screen opens with the request already filled in, and it is the only
+// thing standing between "someone filled in a form" and a student who shows up
+// on rosters, invoices and payroll.
+model EnrollmentApplication {
+  id            String            @id @default(uuid()) @db.Uuid
+  familyId      String            @map("family_id") @db.Uuid
+  studentId     String            @map("student_id") @db.Uuid
+  submittedById String            @map("submitted_by_id") @db.Uuid
+  status        ApplicationStatus @default(PENDING)
+  // Free-form modality tags the parent ticked (one-on-one, group, virtual,
+  // homeschool, pods…). Deliberately not an enum: the offering changes faster
+  // than a migration, and nothing branches on these — staff read them.
+  interests     String[]          @default([])
+  ixlPlan       IxlPlan           @default(NONE)
+  // Most families here are on a Step Up scholarship, so knowing this up front
+  // decides whether the first invoice goes to the parent or into the EMA run.
+  scholarship   Boolean           @default(false)
+  parentNotes   String?           @map("parent_notes")
+  staffNotes    String?           @map("staff_notes")
+  reviewedById  String?           @map("reviewed_by_id") @db.Uuid
+  reviewedAt    DateTime?         @map("reviewed_at") @db.Timestamptz(6)
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  family        Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  student       User              @relation("StudentApplications", fields: [studentId], references: [id], onDelete: Cascade)
+  submittedBy   User              @relation("SubmittedApplications", fields: [submittedById], references: [id], onDelete: Cascade)
+  reviewedBy    User?             @relation("ReviewedApplications", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([familyId])
+  @@map("enrollment_applications")
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  DECLINED
+
+  @@map("application_status")
 }
 
 enum ChatThreadStatus {

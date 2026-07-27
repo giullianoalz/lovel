@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   ShieldCheck,
   Lock,
@@ -164,7 +164,7 @@ const Login = () => {
             Forgot your password?
           </button>
           <p className="login-signup-cta">
-            New family? The academy creates your account and emails you an invite.
+            New family? <Link to="/signup" className="login-signup-link">Register your family</Link>
           </p>
         </div>
 

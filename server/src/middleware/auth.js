@@ -143,6 +143,37 @@ export const authenticate = async (req, res, next) => {
 };
 
 /**
+ * Verifies a Firebase token but does NOT require a matching User row.
+ *
+ * Only for signup: the caller has just created a Firebase account and has no
+ * profile yet, so `authenticate` would 401 them. Everything else must keep
+ * using `authenticate` — this proves who the caller is, not what they may do,
+ * and it deliberately has no test-login branch, so the one route that creates
+ * accounts can never be reached without a real verified token.
+ */
+export const authenticateFirebaseOnly = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Missing or invalid Authorization header. Expected: Bearer <token>',
+    });
+  }
+
+  try {
+    req.firebaseUser = await firebaseAuth.verifyIdToken(authHeader.split('Bearer ')[1]);
+    next();
+  } catch (error) {
+    console.error('[Auth Middleware] Signup token verification failed:', error.message);
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid authentication token.',
+    });
+  }
+};
+
+/**
  * Optional authentication — doesn't block if no token provided,
  * but attaches user if token is valid
  */

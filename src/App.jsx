@@ -29,6 +29,7 @@ const LessonPlanReview = lazy(() => import('./components/LessonPlans/LessonPlanR
 const AcademyFeed = lazy(() => import('./components/Feed/AcademyFeed'))
 const NotificationSettings = lazy(() => import('./components/Settings/NotificationSettings'))
 const Integrations = lazy(() => import('./components/Settings/Integrations'))
+const FamilySignup = lazy(() => import('./components/Auth/FamilySignup'))
 
 const RouteFallback = () => (
   <div className="app-loader">
@@ -84,9 +85,19 @@ function App() {
       <AuthProvider>
         <ToastProvider>
         <Routes>
-          {/* Public login. There is no public signup: staff create the family
-              and email an invite (see POST /api/users/:id/invite). */}
+          {/* Public. Families register themselves at /signup; the account it
+              creates is always a PARENT whose children stay inert until staff
+              place them (see POST /api/auth/signup). Staff accounts are still
+              created by an admin and activated by invite. */}
           <Route path="/login" element={<Login />} />
+          <Route
+            path="/signup"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <FamilySignup />
+              </Suspense>
+            }
+          />
 
           {/* Protected Sub-routes inside Main Layout */}
           <Route 

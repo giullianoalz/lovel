@@ -99,6 +99,33 @@ export const createPickupAuthSchema = z.object({
 }).passthrough();
 
 /**
+ * A family registering itself.
+ *
+ * Note what is absent: no `email`, no `password`, no `role`. The email is taken
+ * from the verified Firebase token and the roles are written by the controller,
+ * so none of the three can be chosen by the caller. This is not .passthrough()
+ * for the same reason — an unknown key must not reach the handler here.
+ */
+export const familySignupSchema = z.object({
+  parent: z.object({
+    fullName: z.string().min(2, 'Your full name is required'),
+    phone: z.string().max(20).optional(),
+  }),
+  children: z.array(
+    z.object({
+      fullName: z.string().min(2, "Each child's name is required"),
+      age: z.coerce.number().int().min(1).max(25).optional().nullable(),
+      allergies: z.string().max(500).optional(),
+      medicalNotes: z.string().max(1000).optional(),
+      interests: z.array(z.string().max(40)).max(10).optional(),
+      ixlPlan: z.enum(['NONE', 'CORE', 'CORE_SPANISH']).optional(),
+    })
+  ).min(1, 'Add at least one child').max(10, 'Contact the academy to register more than 10 children'),
+  scholarship: z.boolean().optional(),
+  notes: z.string().max(2000).optional(),
+});
+
+/**
  * Middleware factory to validate a request against a Zod schema.
  *
  * @param schema  Zod schema

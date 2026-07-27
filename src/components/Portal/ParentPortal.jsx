@@ -649,7 +649,12 @@ const ParentPortal = () => {
                     <div className="pp-child-info">
                       <h2>{child.fullName}</h2>
                       {child.age && <span className="pp-child-age">Age {child.age}</span>}
-                      <span className={`status-tag ${child.status?.toLowerCase()}`}>{child.status}</span>
+                      {/* A self-registered child sits INACTIVE until staff place
+                          them. "INACTIVE" reads like something is wrong with
+                          their account; it only means we haven't placed them yet. */}
+                      <span className={`status-tag ${child.status?.toLowerCase()}`}>
+                        {child.status === 'INACTIVE' ? 'Pending placement' : child.status}
+                      </span>
                     </div>
                   </div>
                   {/* Tap any stat to see its full history and the reason behind each entry */}

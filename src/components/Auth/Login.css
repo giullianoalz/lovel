@@ -341,3 +341,9 @@
   font-size: 13px;
   color: var(--text-muted, #64748b);
 }
+.login-signup-link {
+  color: var(--primary, #15803d);
+  font-weight: 700;
+  text-decoration: none;
+}
+.login-signup-link:hover { text-decoration: underline; }
