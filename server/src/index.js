@@ -299,7 +299,8 @@ httpServer.listen(PORT, () => {
   ──────────────────────────
   `);
 
-  // Start all background scheduled jobs (overdue invoices, absences, snack alerts)
+  // Start all background scheduled jobs (overdue invoices, absences, snack
+  // alerts) and catch up on any slot missed while the process was down.
   startCronJobs();
 });
 

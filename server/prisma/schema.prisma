@@ -1134,6 +1134,27 @@ model Grade {
   @@map("grades")
 }
 
+// One row per scheduled job registered in server/src/jobs/cron.jobs.js,
+// recording when it last completed. node-cron keeps no history and only fires
+// forward from process start, so without this a job whose slot passed while the
+// server was down (deploy, crash, Render spin-down) is simply skipped. At boot
+// the catch-up pass compares `lastRunAt` against the job's last expected fire
+// time and re-runs whatever was missed.
+//
+//   lastRunAt  — start of the last *successful* run; null means never completed.
+//                A failed run deliberately leaves it alone so the next boot retries.
+//   lastStatus — "ok" | "error" | "seeded" (row created at boot with no history)
+model CronJobRun {
+  id         String    @id @default(uuid()) @db.Uuid
+  jobName    String    @unique @map("job_name") @db.VarChar(100)
+  lastRunAt  DateTime? @map("last_run_at") @db.Timestamptz(6)
+  lastStatus String    @default("ok") @map("last_status") @db.VarChar(20)
+  lastError  String?   @map("last_error")
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("cron_job_runs")
+}
+
 enum ChatThreadStatus {
   ACTIVE   @map("active")
   RESOLVED @map("resolved")
