@@ -265,17 +265,20 @@ export const createThread = async (req, res, next) => {
 
     // For direct 1:1 threads, reuse an existing thread between the same two users
     // instead of creating a duplicate every time "Message Teacher" is clicked.
+    // Named threads are excluded: a group thread (e.g. "Management Team") can
+    // happen to have exactly these two members, but it's not a direct thread.
     if (!isBot && allParticipants.length === 2) {
       const [a, b] = allParticipants;
       const existingThreads = await prisma.chatThread.findMany({
         where: {
           isBot: false,
+          name: null,
           participants: { some: { userId: a } }
         },
         include: { participants: { include: { user: true } } },
       });
-      const existing = existingThreads.find(t => 
-        t.participants.length === 2 && 
+      const existing = existingThreads.find(t =>
+        t.participants.length === 2 &&
         t.participants.some(p => p.userId === b)
       );
       if (existing) {
