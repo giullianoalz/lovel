@@ -871,6 +871,116 @@ export const getBillingSummary = async (req, res, next) => {
 };
 
 /**
+ * GET /api/registration/applications?status=PENDING
+ * The self-signup review queue (see POST /api/auth/signup).
+ *
+ * Every row is one child a family registered itself with. Those children are
+ * parked INACTIVE and appear on no roster, no invoice and no payroll run, so
+ * until staff act on the application this list is the only place they exist.
+ */
+export const getEnrollmentApplications = async (req, res, next) => {
+  try {
+    const status = String(req.query.status || 'PENDING').toUpperCase();
+    const where = status === 'ALL' ? {} : { status };
+
+    const [applications, byStatus] = await Promise.all([
+      prisma.enrollmentApplication.findMany({
+        where,
+        // Oldest first — this is a queue to work through, not a feed to read.
+        orderBy: { createdAt: 'asc' },
+        take: 200,
+        include: {
+          student: {
+            select: {
+              id: true, fullName: true, age: true, status: true,
+              allergies: true, medicalNotes: true,
+              enrollments: {
+                where: { status: 'active' },
+                select: { class: { select: { name: true } } },
+              },
+            },
+          },
+          family: { select: { id: true, name: true } },
+          submittedBy: { select: { id: true, fullName: true, email: true, phone: true } },
+          reviewedBy: { select: { fullName: true } },
+        },
+      }),
+      prisma.enrollmentApplication.groupBy({ by: ['status'], _count: { _all: true } }),
+    ]);
+
+    res.json({
+      applications: applications.map(a => ({
+        id: a.id,
+        status: a.status,
+        createdAt: a.createdAt,
+        interests: a.interests,
+        ixlPlan: a.ixlPlan,
+        scholarship: a.scholarship,
+        parentNotes: a.parentNotes,
+        staffNotes: a.staffNotes,
+        reviewedAt: a.reviewedAt,
+        reviewedByName: a.reviewedBy?.fullName || null,
+        family: a.family,
+        parent: a.submittedBy,
+        student: {
+          id: a.student.id,
+          fullName: a.student.fullName,
+          age: a.student.age,
+          status: a.student.status,
+          allergies: a.student.allergies,
+          medicalNotes: a.student.medicalNotes,
+          // A pending application whose child is already on a roster means the
+          // child was placed through the plain manual flow; staff need to see
+          // that before they place them a second time.
+          enrolledClassNames: a.student.enrollments.map(e => e.class.name),
+        },
+      })),
+      counts: byStatus.reduce((acc, row) => ({ ...acc, [row.status]: row._count._all }), {}),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/registration/applications/:id/decline
+ * Closes an application without placing the child.
+ *
+ * There is nothing to undo: the student row was already INACTIVE and stays
+ * that way, so this only records a decision (and stops the row nagging from
+ * the queue). Approval is not a button — it happens when the child is actually
+ * placed in a class, via POST /admin-register with this application's id.
+ */
+export const declineApplication = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { staffNotes } = req.body || {};
+
+    const application = await prisma.enrollmentApplication.findUnique({ where: { id } });
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+    if (application.status !== 'PENDING') {
+      return res.status(409).json({ message: `This application was already ${application.status.toLowerCase()}.` });
+    }
+
+    await prisma.enrollmentApplication.update({
+      where: { id },
+      data: {
+        status: 'DECLINED',
+        staffNotes: staffNotes?.trim() || null,
+        reviewedById: req.user.id,
+        reviewedAt: new Date(),
+      },
+    });
+
+    res.json({ message: 'Application declined.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/registration/requests/:id/resend-email
  * Manually retries the billing confirmation email for one request.
  */
@@ -924,6 +1034,11 @@ export const resendBillingEmail = async (req, res, next) => {
  * Admin-only: register any student on behalf of a parent, bypassing all
  * registration window restrictions. Runs through the same pricing calculator
  * and billing email logic as the self-service parent flow.
+ *
+ * Optionally carries an `applicationId`: this is how a self-signup application
+ * gets approved. Placing the child *is* the approval — there is no separate
+ * button — because that is the moment the child stops being a form submission
+ * and starts appearing on rosters, invoices and payroll.
  */
 export const adminRegisterStudent = async (req, res, next) => {
   try {
@@ -935,6 +1050,7 @@ export const adminRegisterStudent = async (req, res, next) => {
       electiveIds = [],
       ixlPlan = 'NONE',
       skipEmail = false,
+      applicationId = null,
     } = req.body;
 
     if (!termId || !studentId || !firstChoiceClassId) {
@@ -947,6 +1063,21 @@ export const adminRegisterStudent = async (req, res, next) => {
     const existing = await prisma.registrationRequest.findFirst({ where: { termId, studentId } });
     if (existing) {
       return res.status(409).json({ message: 'This student already has a request for this term.' });
+    }
+
+    if (applicationId) {
+      const application = await prisma.enrollmentApplication.findUnique({ where: { id: applicationId } });
+      if (!application) {
+        return res.status(404).json({ message: 'Application not found.' });
+      }
+      // A mismatch means the admin changed the student after opening the
+      // application, so approving this row would credit the wrong child.
+      if (application.studentId !== studentId) {
+        return res.status(400).json({ message: 'This application belongs to a different student.' });
+      }
+      if (application.status !== 'PENDING') {
+        return res.status(409).json({ message: `This application was already ${application.status.toLowerCase()}.` });
+      }
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -980,6 +1111,21 @@ export const adminRegisterStudent = async (req, res, next) => {
         select: { familyId: true }
       });
       const familyId = familyMember?.familyId;
+
+      // Whatever the outcome below — a seat or a waitlist place — staff have
+      // decided this child attends, so the application is settled here and the
+      // INACTIVE parking status a self-signup leaves behind is lifted. Scoped
+      // to INACTIVE so this can never revive a SUSPENDED student by accident.
+      if (applicationId) {
+        await tx.enrollmentApplication.update({
+          where: { id: applicationId },
+          data: { status: 'APPROVED', reviewedById: req.user.id, reviewedAt: new Date() },
+        });
+      }
+      await tx.user.updateMany({
+        where: { id: studentId, status: 'INACTIVE' },
+        data: { status: 'ACTIVE' },
+      });
 
       const postCharge = async (className) => {
         if (familyId && billing.totalQuarterly > 0) {
@@ -1029,6 +1175,10 @@ export const adminRegisterStudent = async (req, res, next) => {
       });
       return { status: 'waitlisted_both', requestId: request.id, className: firstClass.name, electives };
     });
+
+    // The roster counts this UI shows are cached for a minute; a seat that just
+    // filled must not keep reading as free to the admin who filled it.
+    invalidate('registration:classes:*');
 
     // Fire billing email (outside transaction — a failed send never rolls back the enrollment)
     let emailResult = { ok: false, error: 'skipped' };

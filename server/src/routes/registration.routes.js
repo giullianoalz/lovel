@@ -21,6 +21,8 @@ import {
   resendBillingEmail,
   adminRegisterStudent,
   getTermElectives,
+  getEnrollmentApplications,
+  declineApplication,
 } from '../controllers/registration.controller.js';
 
 const router = Router();
@@ -46,7 +48,13 @@ router.post('/classes/:id/holds/remind', authenticate, requireRole('ADMIN'), rem
 router.get('/billing-summary', authenticate, requireRole('ADMIN'), getBillingSummary);
 router.post('/requests/:id/resend-email', authenticate, requireRole('ADMIN'), resendBillingEmail);
 
-// Admin manual registration — bypasses window guards
+// Self-signup review queue. Deliberately uncached: a placement made from this
+// screen has to disappear from it on the next load, not a minute later.
+router.get('/applications', authenticate, requireRole('ADMIN'), getEnrollmentApplications);
+router.post('/applications/:id/decline', authenticate, requireRole('ADMIN'), declineApplication);
+
+// Admin manual registration — bypasses window guards. Approving an application
+// is this same call with its `applicationId`.
 router.post('/admin-register', authenticate, requireRole('ADMIN'), adminRegisterStudent);
 
 // --- PARENT/USER ROUTES ---

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
+import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone } from 'lucide-react';
 import api from '../../lib/api';
+import { interestLabel } from '../../lib/enrollmentInterests';
 import './RegistrationAdmin.css';
 
 const RegistrationAdmin = () => {
@@ -54,6 +55,13 @@ const RegistrationAdmin = () => {
   const [billingLoading, setBillingLoading] = useState(false);
   const [resendingId, setResendingId] = useState(null);
 
+  // ── Applications state (self-signup review queue) ──────────────────────────
+  const [applications, setApplications] = useState([]);
+  const [applicationCounts, setApplicationCounts] = useState({});
+  const [applicationsLoading, setApplicationsLoading] = useState(false);
+  const [applicationFilter, setApplicationFilter] = useState('PENDING');
+  const [declineModal, setDeclineModal] = useState({ isOpen: false, application: null, staffNotes: '', submitting: false });
+
   // ── Manual Registration state ──────────────────────────────────────────────
   const [manualTermElectives, setManualTermElectives] = useState([]);
   const [manualTermClasses, setManualTermClasses] = useState([]);
@@ -65,8 +73,16 @@ const RegistrationAdmin = () => {
     electiveIds: [],
     ixlPlan: 'NONE',
     skipEmail: false,
+    // Set only when this registration is placing a self-signup application; the
+    // server approves that application in the same transaction.
+    applicationId: null,
   });
   const [manualStudentSearch, setManualStudentSearch] = useState('');
+  // The student picker only knows the students /students returned (first page).
+  // A child who just self-registered may not be among them, so the name is kept
+  // here rather than looked up in that list.
+  const [manualStudentName, setManualStudentName] = useState('');
+  const [manualApplication, setManualApplication] = useState(null);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualPreview, setManualPreview] = useState(null); // billing preview
   const [manualResult, setManualResult] = useState(null);  // success result
@@ -101,6 +117,16 @@ const RegistrationAdmin = () => {
     });
   };
 
+  // Picking a different student invalidates the application the form was
+  // preloaded from — approving it would credit the wrong child (the server
+  // rejects the mismatch too, but not before the admin filled in a whole form).
+  const selectManualStudent = (student) => {
+    updateManualForm({ studentId: student?.id || '', applicationId: null });
+    setManualStudentName(student?.fullName || '');
+    setManualStudentSearch(student?.fullName || '');
+    setManualApplication(null);
+  };
+
   // When term changes, load its classes and electives
   const handleManualTermChange = async (termId) => {
     updateManualForm({ termId, firstChoiceClassId: '', secondChoiceClassId: '', electiveIds: [] });
@@ -132,17 +158,85 @@ const RegistrationAdmin = () => {
     setManualSubmitting(true);
     try {
       const res = await api.post('/registration/admin-register', manualForm);
-      setManualResult(res.data);
+      setManualResult({ ...res.data, applicationApproved: Boolean(manualForm.applicationId) });
       // Reset form
-      setManualForm({ termId: '', studentId: '', firstChoiceClassId: '', secondChoiceClassId: '', electiveIds: [], ixlPlan: 'NONE', skipEmail: false });
+      setManualForm({ termId: '', studentId: '', firstChoiceClassId: '', secondChoiceClassId: '', electiveIds: [], ixlPlan: 'NONE', skipEmail: false, applicationId: null });
       setManualPreview(null);
       setManualStudentSearch('');
+      setManualStudentName('');
+      setManualApplication(null);
       // Reload billing summary to reflect the new registration
       if (activeTab === 'billing') loadBillingSummary();
+      // The placed child is no longer pending — refresh the queue and its badge.
+      if (manualForm.applicationId) loadApplications();
     } catch (err) {
       showAlert(err.response?.data?.message || 'Error procesando el registro.', 'Error', 'warning');
     } finally {
       setManualSubmitting(false);
+    }
+  };
+
+  // ── Applications ───────────────────────────────────────────────────────────
+
+  const loadApplications = async (filter = applicationFilter) => {
+    setApplicationsLoading(true);
+    try {
+      const res = await api.get(`/registration/applications?status=${filter}`);
+      setApplications(res.data.applications || []);
+      setApplicationCounts(res.data.counts || {});
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setApplicationsLoading(false);
+    }
+  };
+
+  // The term a placement should default to: the nearest one still accepting
+  // registrations. Terms arrive newest-first, so the last one that has not
+  // closed yet is the one about to start.
+  const defaultTermIdForPlacement = () => {
+    const now = Date.now();
+    const stillOpen = terms.filter(t => new Date(t.registrationCloses).getTime() >= now);
+    return (stillOpen.length ? stillOpen[stillOpen.length - 1] : terms[0])?.id || '';
+  };
+
+  // Hands the application over to the Manual Registration tab with everything
+  // the parent already told us filled in, so staff only choose the class.
+  const handlePlaceApplication = async (application) => {
+    setManualResult(null);
+    setManualApplication(application);
+    setManualStudentName(application.student.fullName);
+    setManualStudentSearch(application.student.fullName);
+    setManualForm({
+      termId: '',
+      studentId: application.student.id,
+      firstChoiceClassId: '',
+      secondChoiceClassId: '',
+      electiveIds: [],
+      ixlPlan: application.ixlPlan || 'NONE',
+      skipEmail: false,
+      applicationId: application.id,
+    });
+    setManualPreview(null);
+    setActiveTab('manual');
+
+    const termId = defaultTermIdForPlacement();
+    if (termId) await handleManualTermChange(termId);
+  };
+
+  const handleConfirmDecline = async () => {
+    const application = declineModal.application;
+    if (!application) return;
+    setDeclineModal(prev => ({ ...prev, submitting: true }));
+    try {
+      await api.post(`/registration/applications/${application.id}/decline`, {
+        staffNotes: declineModal.staffNotes,
+      });
+      setDeclineModal({ isOpen: false, application: null, staffNotes: '', submitting: false });
+      loadApplications();
+    } catch (error) {
+      setDeclineModal(prev => ({ ...prev, submitting: false }));
+      showAlert(error.response?.data?.message || 'Error declining the application', 'Error', 'warning');
     }
   };
 
@@ -189,6 +283,9 @@ const RegistrationAdmin = () => {
   useEffect(() => {
     loadTerms();
     loadAllStudents();
+    // On mount too, not just on the tab: the pending count rides on the tab
+    // label, and a family waiting to be placed shouldn't need a click to notice.
+    loadApplications();
   }, []);
 
   const loadBillingSummary = async () => {
@@ -225,6 +322,11 @@ const RegistrationAdmin = () => {
       loadBillingSummary();
     }
   }, [activeTab, selectedTermForRoster]);
+
+  // Its own effect: the queue has nothing to do with the roster term selector.
+  useEffect(() => {
+    if (activeTab === 'applications') loadApplications();
+  }, [activeTab]);
 
   useEffect(() => {
     if (selectedCove) {
@@ -494,6 +596,12 @@ const RegistrationAdmin = () => {
         <button className={`tab ${activeTab === 'rosters' ? 'active' : ''}`} onClick={() => setActiveTab('rosters')}>
           Live Rosters & Waitlists
         </button>
+        <button className={`tab ${activeTab === 'applications' ? 'active' : ''}`} onClick={() => setActiveTab('applications')}>
+          Applications
+          {applicationCounts.PENDING > 0 && (
+            <span className="tab-count">{applicationCounts.PENDING}</span>
+          )}
+        </button>
         <button className={`tab ${activeTab === 'billing' ? 'active' : ''}`} onClick={() => setActiveTab('billing')}>
           Billing
         </button>
@@ -560,6 +668,133 @@ const RegistrationAdmin = () => {
           </div>
         )}
 
+        {/* ── APPLICATIONS TAB ────────────────────────────────────────────── */}
+        {activeTab === 'applications' && (
+          <div className="applications-view">
+            <div className="filters-bar glass-card">
+              <select
+                className="form-control"
+                style={{ width: '200px' }}
+                value={applicationFilter}
+                onChange={(e) => { setApplicationFilter(e.target.value); loadApplications(e.target.value); }}
+              >
+                <option value="PENDING">Pending review</option>
+                <option value="APPROVED">Approved</option>
+                <option value="DECLINED">Declined</option>
+                <option value="ALL">All</option>
+              </select>
+              <div style={{ flex: 1 }}></div>
+              <button className="btn-outline" onClick={() => loadApplications()} disabled={applicationsLoading}>
+                <RefreshCw size={14} /> Refresh
+              </button>
+            </div>
+
+            {!applicationsLoading && applications.length === 0 && (
+              <div className="glass-card applications-empty">
+                <Inbox size={36} style={{ opacity: 0.35 }} />
+                <h3>Nothing waiting</h3>
+                <p className="text-muted">
+                  {applicationFilter === 'PENDING'
+                    ? 'Every family that registered itself has been placed or declined.'
+                    : 'No applications with this status.'}
+                </p>
+              </div>
+            )}
+
+            <div className="applications-list">
+              {applications.map(app => (
+                <div key={app.id} className="glass-card application-card">
+                  <div className="application-head">
+                    <div>
+                      <h3 className="application-student">
+                        {app.student.fullName}
+                        {app.student.age != null && <span className="application-age">{app.student.age} yrs</span>}
+                        {app.status !== 'PENDING' && (
+                          <span className={`badge ${app.status === 'APPROVED' ? 'active' : 'danger'}`}>{app.status}</span>
+                        )}
+                      </h3>
+                      <p className="text-muted application-family">
+                        {app.family?.name} · applied {formatDateForDisplay(app.createdAt)}
+                      </p>
+                    </div>
+                    {app.scholarship && <span className="badge pending application-scholarship">Step Up scholarship</span>}
+                  </div>
+
+                  <div className="application-parent">
+                    <User size={14} className="text-muted" />
+                    <span>{app.parent?.fullName}</span>
+                    {app.parent?.email && (
+                      <a className="application-contact" href={`mailto:${app.parent.email}`}>
+                        <Mail size={13} /> {app.parent.email}
+                      </a>
+                    )}
+                    {app.parent?.phone && (
+                      <a className="application-contact" href={`tel:${app.parent.phone}`}>
+                        <Phone size={13} /> {app.parent.phone}
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="application-asks">
+                    {app.interests.length > 0
+                      ? app.interests.map(interest => (
+                          <span key={interest} className="badge application-interest">{interestLabel(interest)}</span>
+                        ))
+                      : <span className="text-muted text-sm">No modality chosen</span>}
+                    {app.ixlPlan !== 'NONE' && (
+                      <span className="badge application-interest">
+                        IXL {app.ixlPlan === 'CORE_SPANISH' ? 'Core + Spanish' : 'Core'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Allergies and medical notes travel with the child from the
+                      signup form; front desk needs them before the placement,
+                      not after the first snack. */}
+                  {(app.student.allergies || app.student.medicalNotes) && (
+                    <div className="application-medical">
+                      <AlertCircle size={14} />
+                      <div>
+                        {app.student.allergies && <p><strong>Allergies:</strong> {app.student.allergies}</p>}
+                        {app.student.medicalNotes && <p><strong>Medical:</strong> {app.student.medicalNotes}</p>}
+                      </div>
+                    </div>
+                  )}
+
+                  {app.parentNotes && <p className="application-notes">“{app.parentNotes}”</p>}
+
+                  {app.student.enrolledClassNames.length > 0 && app.status === 'PENDING' && (
+                    <p className="manual-reg-warn">
+                      ⚠️ Already on a roster ({app.student.enrolledClassNames.join(', ')}) — this application may have been handled without it.
+                    </p>
+                  )}
+
+                  {app.status === 'PENDING' ? (
+                    <div className="application-actions">
+                      <button className="btn-primary" onClick={() => handlePlaceApplication(app)}>
+                        <UserPlus size={15} /> Place in a class
+                      </button>
+                      <button
+                        className="btn-outline reg-btn-danger"
+                        onClick={() => setDeclineModal({ isOpen: true, application: app, staffNotes: '', submitting: false })}
+                      >
+                        <Ban size={15} /> Decline
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted application-reviewed">
+                      {app.status === 'APPROVED' ? 'Placed' : 'Declined'}
+                      {app.reviewedByName && ` by ${app.reviewedByName}`}
+                      {app.reviewedAt && ` on ${formatDateForDisplay(app.reviewedAt)}`}
+                      {app.staffNotes && ` — ${app.staffNotes}`}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── MANUAL REGISTRATION TAB ─────────────────────────────────────── */}
         {activeTab === 'manual' && (
           <div className="manual-reg-view">
@@ -573,6 +808,11 @@ const RegistrationAdmin = () => {
                     {' · '}Class: <strong>{manualResult.result?.className}</strong>
                     {' · '}Email: <strong>{manualResult.emailSent ? '✅ Sent' : '⚠️ Not sent'}</strong>
                   </p>
+                  {manualResult.applicationApproved && (
+                    <p className="text-xs text-muted" style={{ margin: '4px 0 0' }}>
+                      The application is approved and the student is now active.
+                    </p>
+                  )}
                 </div>
                 <button className="btn-outline" onClick={() => setManualResult(null)}>Register Another</button>
               </div>
@@ -586,6 +826,38 @@ const RegistrationAdmin = () => {
                   Bypasses registration windows. Runs the full pricing engine and can send the billing confirmation email automatically.
                 </p>
 
+                {/* Preloaded from the Applications tab. Everything the parent
+                    already told us is in the form; what stays visible here is
+                    what the form has nowhere to put but staff still need while
+                    choosing a class. */}
+                {manualApplication && (
+                  <div className="manual-reg-from-application">
+                    <div className="manual-reg-from-application-head">
+                      <Inbox size={16} />
+                      <strong>Placing {manualApplication.student.fullName}</strong>
+                      <span className="text-muted">from {manualApplication.family?.name}</span>
+                      <button
+                        type="button"
+                        className="btn-text"
+                        style={{ marginLeft: 'auto', fontSize: '12px' }}
+                        onClick={() => { setActiveTab('applications'); }}
+                      >
+                        Back to queue
+                      </button>
+                    </div>
+                    <p className="text-xs">
+                      Asked for: <strong>{manualApplication.interests.length ? manualApplication.interests.map(interestLabel).join(', ') : 'no modality chosen'}</strong>
+                      {manualApplication.scholarship && ' · Step Up scholarship'}
+                    </p>
+                    {manualApplication.parentNotes && (
+                      <p className="text-xs application-notes" style={{ margin: 0 }}>“{manualApplication.parentNotes}”</p>
+                    )}
+                    <p className="text-xs text-muted" style={{ margin: 0 }}>
+                      Completing this registration approves the application and activates the student.
+                    </p>
+                  </div>
+                )}
+
                 <form onSubmit={handleManualSubmit} className="reg-form">
 
                   {/* STUDENT SEARCH */}
@@ -598,7 +870,10 @@ const RegistrationAdmin = () => {
                       value={manualStudentSearch}
                       onChange={e => setManualStudentSearch(e.target.value)}
                     />
-                    {manualStudentSearch.length > 1 && (
+                    {/* Once a student is chosen the search box holds their name,
+                        so an unguarded dropdown would sit there listing the
+                        person already selected right below it. */}
+                    {manualStudentSearch.length > 1 && !manualForm.studentId && (
                       <div className="manual-reg-student-list">
                         {allStudents
                           .filter(s => s.fullName.toLowerCase().includes(manualStudentSearch.toLowerCase()))
@@ -607,7 +882,7 @@ const RegistrationAdmin = () => {
                               key={s.id}
                               type="button"
                               className={`manual-reg-student-item ${manualForm.studentId === s.id ? 'selected' : ''}`}
-                              onClick={() => { updateManualForm({ studentId: s.id }); setManualStudentSearch(s.fullName); }}
+                              onClick={() => selectManualStudent(s)}
                             >
                               <div className="reg-search-avatar">{s.fullName.split(' ').map(n => n[0]).join('').substring(0,2)}</div>
                               <span>{s.fullName}</span>
@@ -620,9 +895,9 @@ const RegistrationAdmin = () => {
                     {manualForm.studentId && (
                       <div className="manual-reg-selected-badge">
                         <CheckCircle size={14} color="var(--primary)" />
-                        {allStudents.find(s => s.id === manualForm.studentId)?.fullName}
+                        {manualStudentName || allStudents.find(s => s.id === manualForm.studentId)?.fullName}
                         <button type="button" className="btn-text" style={{ marginLeft: 'auto', fontSize: '12px' }}
-                          onClick={() => { updateManualForm({ studentId: '' }); setManualStudentSearch(''); }}>
+                          onClick={() => selectManualStudent(null)}>
                           Change
                         </button>
                       </div>
@@ -1458,6 +1733,51 @@ const RegistrationAdmin = () => {
                 {allStudents.filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase())).length === 0 && (
                   <p className="text-muted reg-search-empty">No students found matching "{studentSearch}"</p>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Decline Application Modal */}
+      {declineModal.isOpen && declineModal.application && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-card reg-modal-md">
+            <div className="registration-modal-header">
+              <h2>Decline Application</h2>
+              <button
+                className="icon-btn"
+                onClick={() => setDeclineModal({ isOpen: false, application: null, staffNotes: '', submitting: false })}
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="reg-modal-body">
+              <p className="text-muted reg-modal-text">
+                <strong>{declineModal.application.student.fullName}</strong> stays off every roster and invoice, and the
+                family keeps its login. Nothing is deleted — you can still place the student later from the directory.
+                The family is not emailed automatically.
+              </p>
+              <label className="reg-form-label">Reason (internal note, optional)</label>
+              <textarea
+                className="form-control reg-input-full"
+                rows={3}
+                placeholder="e.g. No spots for this age group this term — call back in Fall"
+                value={declineModal.staffNotes}
+                onChange={(e) => setDeclineModal({ ...declineModal, staffNotes: e.target.value })}
+              />
+              <div className="reg-form-actions">
+                <button
+                  type="button"
+                  className="btn-text"
+                  onClick={() => setDeclineModal({ isOpen: false, application: null, staffNotes: '', submitting: false })}
+                >
+                  Cancel
+                </button>
+                <button type="button" className="btn-primary" onClick={handleConfirmDecline} disabled={declineModal.submitting}>
+                  {declineModal.submitting ? 'Declining...' : 'Decline Application'}
+                </button>
               </div>
             </div>
           </div>

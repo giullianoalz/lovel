@@ -1009,3 +1009,167 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ─── Applications Tab (self-signup review queue) ──────────────────────────── */
+.applications-view {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Pending count riding on the tab label. Loud on purpose: a family sitting in
+   this queue has an account but no classes, and nothing else surfaces that. */
+.admin-tabs .tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #dc2626;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.applications-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+}
+.applications-empty h3 { margin: 4px 0 0; font-size: 17px; }
+.applications-empty p  { margin: 0; font-size: 14px; }
+
+.applications-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 20px;
+}
+@media (max-width: 600px) {
+  .applications-list { grid-template-columns: 1fr; }
+}
+
+.application-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 24px;
+  border-left: 4px solid var(--primary);
+  animation: slideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.application-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.07);
+}
+
+.application-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.application-student {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.application-age {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.04);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.application-family { margin: 4px 0 0; font-size: 13px; }
+.application-scholarship { flex-shrink: 0; }
+
+.application-parent {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+  color: var(--text-main);
+}
+.application-contact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.application-contact:hover { color: var(--primary); text-decoration: underline; }
+
+.application-asks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.application-interest {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0369a1;
+  border: 1px solid rgba(14, 165, 233, 0.25);
+}
+
+.application-medical {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  font-size: 13px;
+}
+.application-medical svg { flex-shrink: 0; margin-top: 2px; }
+.application-medical p   { margin: 0; }
+
+.application-notes {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.03);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.application-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.application-reviewed { margin: 4px 0 0; }
+
+/* Carried context in the manual form when placing a queued application. */
+.manual-reg-from-application {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  margin-bottom: 24px;
+  border-radius: 10px;
+  background: rgba(14, 165, 233, 0.07);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  animation: fadeIn 0.3s ease-out;
+}
+.manual-reg-from-application-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.manual-reg-from-application-head svg { color: #0369a1; flex-shrink: 0; }
+.manual-reg-from-application p { margin: 0; line-height: 1.5; }
+
