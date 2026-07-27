@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft, FileText, Download, CheckCircle2, Check, CheckCheck, MailOpen } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -42,6 +43,12 @@ const ChatHub = () => {
   const activeChatRef = useRef(null);
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
+  // Deep-link support: a chat notification lands here as /chat?thread=<id>.
+  // Open that thread once the thread list has loaded, then strip the param so
+  // a later manual refresh doesn't keep forcing it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkedRef = useRef(false);
+
   const loadThreads = async () => {
     try {
       const response = await api.get('/chat');
@@ -84,9 +91,14 @@ const ChatHub = () => {
       }
       setMessages(prev => {
         const threadMessages = prev[threadId] || [];
-        // Prevent duplicate if we already have it (optimistic check by text and time roughly, or id)
-        // Since optimistic uses timestamp as ID, we can just check if a message with same text exists very recently
-        const isDuplicate = threadMessages.some(m => m.id === message.id || (m.text === message.text && m.type === 'sent'));
+        // Drop the socket echo of our own message: matched by real id once the
+        // POST response has landed, or by text while the optimistic entry still
+        // has its temporary id. Messages from OTHER senders are never dropped —
+        // their text legitimately can repeat ours ("ok", "gracias"...).
+        const isOwnEcho = message.senderId != null && message.senderId === user?.id;
+        const isDuplicate = threadMessages.some(m =>
+          m.id === message.id || (isOwnEcho && m.type === 'sent' && m.text === message.text)
+        );
         if (isDuplicate) return prev;
         
         return {
@@ -128,9 +140,12 @@ const ChatHub = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // Only auto-scroll when the OPEN thread's messages change — a socket message
+  // landing in a background thread must not yank the reader to the bottom.
+  const activeThreadMessages = messages[activeChat];
   useEffect(() => {
     scrollToBottom();
-  }, [messages, activeChat]);
+  }, [activeThreadMessages, activeChat]);
 
   useEffect(() => {
     const loadMessages = async () => {
@@ -165,6 +180,17 @@ const ChatHub = () => {
     setIsTyping(false);
     setIsHeaderMenuOpen(false);
   };
+
+  useEffect(() => {
+    const threadId = searchParams.get('thread');
+    if (!threadId || deepLinkedRef.current) return;
+    if (chatThreads.some(t => t.id === threadId)) {
+      deepLinkedRef.current = true;
+      handleSelectChat(threadId);
+      searchParams.delete('thread');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [chatThreads, searchParams, setSearchParams]);
 
   const handleBackToList = () => {
     setIsMobileChatOpen(false);
@@ -379,16 +405,25 @@ const ChatHub = () => {
   };
 
   // Admin/teacher "start a new conversation with anyone" picker.
-  const searchPeople = async (query) => {
+  // Debounced: typing fires one request 300ms after the last keystroke instead
+  // of one per key, and a stale response never overwrites a newer one.
+  const peopleSearchTimer = useRef(null);
+  const peopleSearchSeq = useRef(0);
+  const searchPeople = (query) => {
+    clearTimeout(peopleSearchTimer.current);
     setPeopleLoading(true);
-    try {
-      const res = await api.get('/users', { params: { search: query, limit: 20 } });
-      setPeople((res.data.users || []).filter(u => u.id !== user?.id));
-    } catch (err) {
-      console.error('Error searching users:', err);
-    } finally {
-      setPeopleLoading(false);
-    }
+    peopleSearchTimer.current = setTimeout(async () => {
+      const seq = ++peopleSearchSeq.current;
+      try {
+        const res = await api.get('/users', { params: { search: query, limit: 20 } });
+        if (seq !== peopleSearchSeq.current) return; // a newer search superseded this one
+        setPeople((res.data.users || []).filter(u => u.id !== user?.id));
+      } catch (err) {
+        console.error('Error searching users:', err);
+      } finally {
+        if (seq === peopleSearchSeq.current) setPeopleLoading(false);
+      }
+    }, query === '' ? 0 : 300);
   };
 
   const handlePickPerson = async (personId) => {
@@ -658,7 +693,7 @@ const ChatHub = () => {
                     placeholder={isUploadingFile ? 'Sending file...' : 'Type your message...'}
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                   />
                   <button className="send-btn" onClick={handleSendMessage}>
                     <Send size={20} />

@@ -44,6 +44,9 @@ export const useNotifications = (role) => {
             author: 'Academy',
             time: new Date(n.createdAt),
             serverRead: !!n.isRead,
+            // Carried through so the bell can deep-link to the activity.
+            referenceType: n.referenceType || null,
+            referenceId: n.referenceId || null,
           }))
         : [];
 

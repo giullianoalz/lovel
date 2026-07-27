@@ -183,6 +183,10 @@
 .notif-drawer-item.unread .notif-item-dot { background: var(--primary); }
 
 .notif-item-body { flex: 1; min-width: 0; }
+.notif-item-body.clickable { cursor: pointer; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; transition: background var(--dur-fast, 0.15s) var(--ease-out, ease); }
+.notif-item-body.clickable:hover { background: var(--primary-light, #f0fdf4); }
+.notif-item-body.clickable:hover .notif-item-title { color: var(--primary, #15803d); }
+.notif-item-body.clickable:focus-visible { outline: 2px solid var(--primary, #15803d); outline-offset: 2px; }
 
 .notif-item-title {
   margin: 0 0 4px;

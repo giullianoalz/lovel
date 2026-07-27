@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   MessageSquare,
@@ -30,10 +30,12 @@ import NotifDrawer from '../Notifications/NotifDrawer';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useToast } from './ToastProvider';
 import { InstallNavItem } from './InstallNavItem';
+import { getNotificationLink } from '../../lib/notificationLink';
 import './Sidebar.css';
 
 const Sidebar = () => {
   const { user, role, logout } = useAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -87,6 +89,15 @@ const Sidebar = () => {
   };
 
   const closeMenu = () => setIsOpen(false);
+
+  // Clicking a notification: mark it read, close the drawer, and jump to the
+  // screen where its activity lives (if there's a sensible one for this role).
+  const handleNotifClick = (item) => {
+    notif.markRead(item.id);
+    setIsNotifOpen(false);
+    const to = getNotificationLink(item, role);
+    if (to) navigate(to);
+  };
 
   return (
     <>
@@ -326,6 +337,7 @@ const Sidebar = () => {
         setActiveTab={setNotifTab}
         anchorRef={bellRef}
         position="sidebar"
+        onItemClick={handleNotifClick}
         inboxItems={notif.inboxItems}
         laterItems={notif.laterItems}
         archiveItems={notif.archiveItems}

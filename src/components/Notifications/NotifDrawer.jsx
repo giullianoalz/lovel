@@ -23,6 +23,7 @@ const NotifDrawer = ({
   markLater,
   restoreToInbox,
   markAllRead,
+  onItemClick,  // optional: (item) => navigate to the item's activity
   anchorRef,    // optional: ref to the trigger button for positioning
   position = 'right', // 'right' (default, slides from right) | 'sidebar' (left of sidebar)
 }) => {
@@ -101,7 +102,13 @@ const NotifDrawer = ({
             currentItems.map(n => (
               <div key={n.id} className={`notif-drawer-item ${!n.isRead && activeTab === 'inbox' ? 'unread' : ''}`}>
                 <div className="notif-item-dot" />
-                <div className="notif-item-body">
+                <div
+                  className={`notif-item-body ${onItemClick ? 'clickable' : ''}`}
+                  onClick={onItemClick ? () => onItemClick(n) : undefined}
+                  role={onItemClick ? 'button' : undefined}
+                  tabIndex={onItemClick ? 0 : undefined}
+                  onKeyDown={onItemClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onItemClick(n); } } : undefined}
+                >
                   <p className="notif-item-title">{n.title}</p>
                   {n.body && (
                     <p className="notif-item-preview">

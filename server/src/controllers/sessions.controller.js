@@ -704,7 +704,7 @@ export const resolveCancellation = async (req, res, next) => {
         type: 'CANCELLATION_RESOLVED',
         title: 'Cancellation charge decided',
         message: `${cancellation.student.fullName}'s cancellation for ${cancellation.session.class.name} was resolved at ${updated.finalChargePercent}%.`,
-        referenceType: 'session_cancellation',
+        referenceType: 'sessionCancellation',
         referenceId: cancellation.id,
         dedupKey: `cancel-resolve-${cancellation.id}`,
       });
