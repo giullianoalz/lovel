@@ -302,6 +302,26 @@ httpServer.listen(PORT, () => {
   // Start all background scheduled jobs (overdue invoices, absences, snack
   // alerts) and catch up on any slot missed while the process was down.
   startCronJobs();
+
+  // ── Keep-alive (Render free tier) ─────────────────────────────────────────
+  // Free instances spin down after ~15 idle minutes; the next visitor then
+  // waits 30-50s for a cold start ("the server is waking up" on the login
+  // page). Pinging our own public URL every 10 minutes counts as inbound
+  // traffic and keeps the instance warm. Render injects RENDER_EXTERNAL_URL
+  // automatically, so this is inert everywhere else (local dev, tests).
+  // It papers over the free tier rather than fixing it: the instance still
+  // cold-starts after every deploy and Render may still recycle it. The real
+  // fix is a paid instance — delete this block the day the service upgrades.
+  const externalUrl = process.env.RENDER_EXTERNAL_URL;
+  if (externalUrl) {
+    const KEEP_ALIVE_MS = 10 * 60 * 1000;
+    const ping = () =>
+      fetch(`${externalUrl}/api/health`).catch((err) =>
+        console.warn('[keep-alive] self-ping failed:', err.message));
+    // unref: a pending timer must never hold the process open on shutdown.
+    setInterval(ping, KEEP_ALIVE_MS).unref();
+    console.log(`  Keep-alive:  pinging ${externalUrl}/api/health every ${KEEP_ALIVE_MS / 60000}m`);
+  }
 });
 
 
