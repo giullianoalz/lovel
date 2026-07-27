@@ -176,6 +176,22 @@
   animation: slideIn 0.3s ease;
 }
 
+/* Confirmation banner — password-reset link sent */
+.login-notice-banner {
+  background-color: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 20px;
+  animation: slideIn 0.3s ease;
+}
+
 @keyframes slideIn {
   from { transform: translateY(-10px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -217,9 +233,11 @@
   margin-bottom: 14px;
 }
 
+/* auto-fit, so a single profile fills the row instead of sitting in a
+   half-width column next to a gap. */
 .dev-bypass-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
 }
 
@@ -297,97 +315,29 @@
   }
 }
 
-/* ── Parent self-registration (Signup) ── */
-.signup-children {
-  margin-top: 4px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-light, #e5e7eb);
-}
-.signup-children-head {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-muted, #64748b);
-  margin-bottom: 10px;
-}
-.signup-children-head span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.signup-child-card {
+/* ── Sign-in help (password reset + how families get an account) ── */
+.login-help-row {
+  margin-top: 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid var(--border-light, #e5e7eb);
-  border-radius: 12px;
-  padding: 10px;
-  margin-bottom: 10px;
-}
-.signup-child-row {
-  display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 8px;
 }
-.signup-child-row input[type="number"] {
-  width: 72px;
-  flex: 0 0 72px;
-}
-.signup-child-row input {
-  flex: 1;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border-light, #e5e7eb);
-  border-radius: 10px;
-  font-size: 14px;
-  background: white;
-}
-.signup-remove-child {
-  flex: 0 0 auto;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #dc2626;
-  border-radius: 10px;
-  padding: 8px;
-  cursor: pointer;
-  display: flex;
-}
-.signup-remove-child:hover:not(:disabled) { background: #fee2e2; }
-.signup-add-child {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.login-link-btn {
   background: none;
-  border: 1px dashed var(--primary, #15803d);
+  border: none;
+  padding: 0;
   color: var(--primary, #15803d);
-  border-radius: 10px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.signup-add-child:hover:not(:disabled) { background: rgba(21, 128, 61, 0.06); }
-.signup-back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: center;
-  width: 100%;
-  color: var(--text-muted, #64748b);
   font-size: 14px;
-  font-weight: 600;
-  text-decoration: none;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
 }
-.signup-back-link:hover { color: var(--text-main, #1e293b); }
+.login-link-btn:hover:not(:disabled) { text-decoration: underline; }
+.login-link-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .login-signup-cta {
   text-align: center;
-  margin-top: 16px;
-  font-size: 14px;
+  margin: 0;
+  font-size: 13px;
   color: var(--text-muted, #64748b);
 }
-.login-signup-cta a {
-  color: var(--primary, #15803d);
-  font-weight: 700;
-  text-decoration: none;
-}
-.login-signup-cta a:hover { text-decoration: underline; }

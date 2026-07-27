@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
@@ -63,21 +62,12 @@ export const AuthProvider = ({ children }) => {
           // If we logged in through Firebase, we sync using the real token (attached by Axios interceptor)
           await syncProfile();
         } catch (error) {
-          console.error('[AuthContext] Failed to sync Firebase user to DB, trying to auto-register:', error);
-          
-          // Try to sync/create in DB if first time
-          try {
-            await api.post('/auth/sync', {
-              role: 'PARENT', // Default role
-              fullName: firebaseUser.displayName || 'New User',
-              phone: firebaseUser.phoneNumber || ''
-            });
-            await syncProfile();
-          } catch (syncError) {
-            console.error('[AuthContext] Registration sync failed completely:', syncError);
-            setUser(null);
-            setRole(null);
-          }
+          // A Firebase account with no matching row is someone the academy
+          // hasn't set up (or hasn't invited yet). We deliberately don't create
+          // the row here — that's what let a signup pick its own role.
+          console.error('[AuthContext] No academy profile for this Firebase account:', error);
+          setUser(null);
+          setRole(null);
         }
       } else {
         setUser(null);
@@ -105,22 +95,15 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Open parent self-registration: create the Firebase account (parent picks
-  // their own password — we never see it), then sync a PARENT user row.
-  const signupParent = async ({ email, password, fullName, phone }) => {
-    setLoading(true);
-    localStorage.removeItem('devUserEmail');
-    setIsDevBypass(false);
+  // Emails a password-reset link. Same mechanism as the staff invite, so a
+  // parent who never opened their invite can also just do this themselves.
+  // Firebase errors are swallowed on purpose: the caller shows the same message
+  // either way, so this can't be used to discover which emails have accounts.
+  const requestPasswordReset = async (email) => {
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(cred.user, { displayName: fullName }).catch(() => {});
-      // Create the DB user as PARENT (the interceptor attaches the fresh token).
-      await api.post('/auth/sync', { role: 'PARENT', fullName, phone: phone || '' });
-      const profile = await syncProfile();
-      return profile;
+      await sendPasswordResetEmail(auth, email);
     } catch (error) {
-      setLoading(false);
-      throw error;
+      console.error('[AuthContext] Password reset request failed:', error);
     }
   };
 
@@ -169,7 +152,7 @@ export const AuthProvider = ({ children }) => {
     isDevBypass,
     loginWithEmail,
     loginAsSeededUser,
-    signupParent,
+    requestPasswordReset,
     logout
   };
 

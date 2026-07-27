@@ -226,6 +226,29 @@
   margin-top: 8px;
 }
 
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  background: white;
+  color: var(--text-muted);
+  transition: background var(--dur, 0.2s) var(--ease-out, ease),
+              color var(--dur, 0.2s) var(--ease-out, ease),
+              border-color var(--dur, 0.2s) var(--ease-out, ease),
+              transform var(--dur-fast, 0.15s) var(--ease-out, ease);
+}
+
+.icon-btn:hover {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
 .action-btn {
   padding: 8px 16px;
   border-radius: 8px;
@@ -366,6 +389,80 @@
   gap: 6px;
 }
 
+
+/* ── Parents & Access tab ── */
+.parent-avatar {
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  color: white;
+}
+
+.access-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.access-tag.active { background: #dcfce7; color: #166534; }
+.access-tag.invited { background: #fef3c7; color: #92400e; }
+.access-tag.none { background: #f1f5f9; color: #64748b; }
+
+.invite-blocked-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.invite-manual-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  animation: fadeInUp 0.3s ease;
+}
+.invite-manual-banner p {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  color: #78350f;
+}
+.invite-manual-banner code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #422006;
+}
+.invite-manual-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.invite-manual-actions .action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* Mobile: keep the directory tabs inside a narrow viewport.
    Placed after the base .dir-tab rules so it wins on source order. */

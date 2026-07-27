@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
 
 /**
  * GET /api/users
@@ -69,7 +70,14 @@ export const listUsers = async (req, res, next) => {
     ]);
 
     res.json({
-      users,
+      // canSignIn / emailUsable are derived, not columns: the directory needs to
+      // show who can actually log in, which depends on whether the row is backed
+      // by a real Firebase account and a deliverable address.
+      users: users.map((user) => ({
+        ...user,
+        canSignIn: hasSignInAccount(user),
+        emailUsable: !isPlaceholderEmail(user.email),
+      })),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -157,6 +165,36 @@ export const updateUserStatus = async (req, res, next) => {
     });
 
     res.json({ message: `User status updated to ${status}.`, user });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/users/:id/invite
+ * Emails this person a link to set their password (Admin only). Also used to
+ * re-send: there is no separate "resend" path, inviting twice just issues a
+ * fresh link, which is what an admin means when the first one expired.
+ */
+export const inviteUser = async (req, res, next) => {
+  try {
+    const result = await sendAccountInvite(req.params.id);
+
+    if (!result.ok) {
+      return res.status(result.message === 'User not found.' ? 404 : 400).json({
+        error: 'Invite Failed',
+        message: result.message,
+      });
+    }
+
+    res.json({
+      message: result.emailed
+        ? `Invite sent to ${result.user.email}.`
+        : `Account ready, but the email could not be sent (${result.deliveryError}). Share the link below yourself.`,
+      emailed: result.emailed,
+      link: result.link || null,
+      user: { ...result.user, canSignIn: hasSignInAccount(result.user), emailUsable: true },
+    });
   } catch (error) {
     next(error);
   }

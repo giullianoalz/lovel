@@ -26,6 +26,11 @@ model User {
   // ID" column of their CSV export) — stable per student across submissions,
   // so once learned it's a much more reliable EMA match than comparing names.
   emaStudentId           String?                   @unique @map("ema_student_id") @db.VarChar(50)
+  // When an admin last emailed this person their "set your password" invite.
+  // Accounts are created by staff (imported or added by hand) before the person
+  // can sign in, so this is what tells the directory "invited, waiting on them"
+  // apart from "never invited".
+  invitedAt              DateTime?                 @map("invited_at") @db.Timestamptz(6)
   createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   baseSalary             Decimal?                  @map("base_salary") @db.Decimal(10, 2)

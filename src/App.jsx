@@ -3,7 +3,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext'
 import Sidebar from './components/Layout/Sidebar'
 import Login from './components/Auth/Login'
-import Signup from './components/Auth/Signup'
 import { ToastProvider } from './components/Layout/ToastProvider'
 import { InstallPromptBanner } from './components/Layout/InstallPromptBanner'
 import ErrorBoundary from './components/Layout/ErrorBoundary'
@@ -85,9 +84,9 @@ function App() {
       <AuthProvider>
         <ToastProvider>
         <Routes>
-          {/* Public Login + Signup Routes */}
+          {/* Public login. There is no public signup: staff create the family
+              and email an invite (see POST /api/users/:id/invite). */}
           <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
 
           {/* Protected Sub-routes inside Main Layout */}
           <Route 

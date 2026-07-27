@@ -130,10 +130,11 @@ Este es el módulo más avanzado. Funciona así:
 
 | Módulo | Endpoint | Método | Función |
 |---|---|---|---|
-| **Auth** | `/api/auth/sync` | POST | Sincroniza login de Firebase con PostgreSQL |
+| **Auth** | `/api/auth/me` | GET | Perfil del usuario autenticado |
 | | `/api/auth/register` | POST | Admin crea cuenta de profesor/padre |
 | **Users** | `/api/users` | GET | Lista paginada y filtrable de usuarios |
 | | `/api/users/:id/status`| PUT | Suspender o activar cuenta |
+| | `/api/users/:id/invite`| POST | Admin envía el link para fijar contraseña |
 | **Students**| `/api/students/:id` | GET | Perfil full (salud, snacks, premios) |
 | | `/api/students/:id/snack-punches` | PUT | Sumar/Restar punches de snacks |
 | **Families**| `/api/families/:id/members`| POST | Agregar parientes a una familia |

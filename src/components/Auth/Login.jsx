@@ -1,23 +1,21 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
-import { 
-  ShieldCheck, 
-  User, 
-  Users, 
-  GraduationCap, 
-  Lock, 
-  Mail, 
+import { useNavigate } from 'react-router-dom';
+import {
+  ShieldCheck,
+  Lock,
+  Mail,
   KeyRound,
   AlertCircle
 } from 'lucide-react';
 import './Login.css';
 
 const Login = () => {
-  const { loginWithEmail, loginAsSeededUser } = useAuth();
+  const { loginWithEmail, loginAsSeededUser, requestPasswordReset } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -28,16 +26,37 @@ const Login = () => {
       return;
     }
     setError('');
+    setNotice('');
     setLoading(true);
     try {
       await loginWithEmail(email, password);
       navigate('/'); // SmartRoot routes each role to its portal
     } catch (err) {
       console.error(err);
-      setError('Invalid credentials. Please try again.');
+      // Firebase accepted the password but we have no profile for them: the
+      // academy hasn't set this person up. Telling them to retry their password
+      // would send them in circles.
+      if (err?.response?.status === 401) {
+        setError('This account is not set up yet. Please contact the academy to receive your invitation.');
+      } else {
+        setError('Invalid credentials. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      setError('Enter your email above first, then tap "Forgot your password?".');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    await requestPasswordReset(email);
+    setLoading(false);
+    // Deliberately the same message whether or not the account exists.
+    setNotice(`If ${email} has an account, a link to set a new password is on its way. Check your spam folder too.`);
   };
 
   const handleDevBypass = async (seededEmail) => {
@@ -54,6 +73,11 @@ const Login = () => {
     }
   };
 
+  // Hardcoded, so every entry here has to be an account that actually exists —
+  // a button for a deleted user just throws "not set up yet" at whoever clicks
+  // it. The demo teachers/parents/students were dropped in the data reset, so
+  // the real admin is all that is left. Re-add rows here if a demo set is
+  // seeded again.
   const seededUsers = [
     {
       name: 'Admin',
@@ -62,70 +86,6 @@ const Login = () => {
       icon: <ShieldCheck size={20} />,
       color: '#dc2626',
       bg: '#fef2f2'
-    },
-    {
-      name: 'Prof. David Brown',
-      role: 'TEACHER',
-      email: 'david.brown@academy.com',
-      icon: <GraduationCap size={20} />,
-      color: '#1d4ed8',
-      bg: '#eff6ff'
-    },
-    {
-      name: 'Prof. Sarah Jenkins',
-      role: 'TEACHER',
-      email: 'sarah.jenkins@academy.com',
-      icon: <GraduationCap size={20} />,
-      color: '#1d4ed8',
-      bg: '#eff6ff'
-    },
-    {
-      name: 'Elena Garcia',
-      role: 'PARENT',
-      email: 'elena.garcia@example.com',
-      icon: <Users size={20} />,
-      color: '#7c3aed',
-      bg: '#f5f3ff'
-    },
-    {
-      name: 'Michael Doe',
-      role: 'PARENT',
-      email: 'michael.doe@example.com',
-      icon: <Users size={20} />,
-      color: '#7c3aed',
-      bg: '#f5f3ff'
-    },
-    {
-      name: 'Carlos Ramirez',
-      role: 'PARENT',
-      email: 'carlos.ramirez@example.com',
-      icon: <Users size={20} />,
-      color: '#7c3aed',
-      bg: '#f5f3ff'
-    },
-    {
-      name: 'Maria Garcia',
-      role: 'STUDENT',
-      email: 'maria.garcia@student.academy.com',
-      icon: <User size={20} />,
-      color: '#15803d',
-      bg: '#f0fdf4'
-    },
-    {
-      name: 'John Doe',
-      role: 'STUDENT',
-      email: 'john.doe@student.academy.com',
-      icon: <User size={20} />,
-      color: '#15803d',
-      bg: '#f0fdf4'
-    },
-    {
-      name: 'Sofia Ramirez',
-      role: 'STUDENT',
-      email: 'sofia.ramirez@student.academy.com',
-      icon: <User size={20} />,
-      color: '#15803d',
-      bg: '#f0fdf4'
     }
   ];
 
@@ -151,6 +111,13 @@ const Login = () => {
           <div className="login-error-banner">
             <AlertCircle size={18} />
             <span>{error}</span>
+          </div>
+        )}
+
+        {notice && (
+          <div className="login-notice-banner">
+            <KeyRound size={18} />
+            <span>{notice}</span>
           </div>
         )}
 
@@ -192,9 +159,14 @@ const Login = () => {
           </button>
         </form>
 
-        <p className="login-signup-cta">
-          New family? <Link to="/signup">Create an account</Link>
-        </p>
+        <div className="login-help-row">
+          <button type="button" className="login-link-btn" onClick={handleForgotPassword} disabled={loading}>
+            Forgot your password?
+          </button>
+          <p className="login-signup-cta">
+            New family? The academy creates your account and emails you an invite.
+          </p>
+        </div>
 
         {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_TEST_LOGIN === 'true') && (
           <>
