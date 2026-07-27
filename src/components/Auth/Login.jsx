@@ -168,7 +168,15 @@ const Login = () => {
           </p>
         </div>
 
-        {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_TEST_LOGIN === 'true') && (
+        {/* Dev builds only. This used to also honor VITE_ENABLE_TEST_LOGIN so a
+            staging deploy could show demo profiles — until the flag ended up set
+            on production and put an "Admin" button on the public login page.
+            The backend rejected those clicks (its own bypass flag was off), but
+            advertising an admin bypass on a page families use is not acceptable
+            even non-functional. import.meta.env.DEV is statically false in any
+            `vite build`, so Vite strips this whole block from production bundles
+            — no env var can turn it back on. */}
+        {import.meta.env.DEV && (
           <>
             <div className="login-divider">
               <span>OR SIGN IN AS A TEST USER</span>
