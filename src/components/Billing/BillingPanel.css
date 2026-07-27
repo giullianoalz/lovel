@@ -473,6 +473,27 @@
   border: 1px solid #dcfce7;
 }
 
+.billing-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-light);
+  background: white;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.billing-search-box input {
+  border: none;
+  outline: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-main);
+  width: 210px;
+  background: transparent;
+}
+
 .btn-auto-invoice {
   width: 100%;
   background: white;

@@ -404,8 +404,7 @@ const CalendarView = () => {
     categorySearchText: '',
     hideFullEvents: false,
     hideEmptyEvents: false,
-    hideUnscheduled: false,
-    substitutesOnly: false
+    hideUnscheduled: false
   });
 
   // Responsive default view detection
@@ -427,7 +426,7 @@ const CalendarView = () => {
     loadStudents();
 
     database.fetchTeachers().then(setTeachers);
-    api.get('/classes?limit=200').then(r => setClassesList(r.data.classes || [])).catch(() => setClassesList([]));
+    api.get('/classes?limit=200&includeRoster=true').then(r => setClassesList(r.data.classes || [])).catch(() => setClassesList([]));
   }, []);
 
   // The visible date range for the current view — this is what actually gets
@@ -452,17 +451,23 @@ const CalendarView = () => {
     return { start, end };
   };
 
+  // Guards against out-of-order responses when the user clicks the nav arrows
+  // quickly: only the latest request is allowed to write its result.
+  const sessionsSeqRef = useRef(0);
   const loadSessions = async (viewMode, date) => {
+    const seq = ++sessionsSeqRef.current;
     setSessionsLoading(true);
     try {
       const { start, end } = getVisibleRange(viewMode, date);
       const res = await api.get(`/sessions?startDate=${toISODate(start)}&endDate=${toISODate(end)}`);
+      if (seq !== sessionsSeqRef.current) return;
       setSessions(res.data.sessions || []);
     } catch (error) {
+      if (seq !== sessionsSeqRef.current) return;
       console.error('Error loading sessions:', error);
       setSessions([]);
     } finally {
-      setSessionsLoading(false);
+      if (seq === sessionsSeqRef.current) setSessionsLoading(false);
     }
   };
 
@@ -480,13 +485,16 @@ const CalendarView = () => {
   const [staffEvents, setStaffEvents] = useState([]);
   const canSeeStaffEvents = role === 'ADMIN' || role === 'TEACHER';
 
+  const staffEventsSeqRef = useRef(0);
   const loadStaffEvents = async (viewMode, date) => {
     if (!canSeeStaffEvents) { setStaffEvents([]); return; }
+    const seq = ++staffEventsSeqRef.current;
     try {
       const { start, end } = getVisibleRange(viewMode, date);
       const res = await api.get(
         `/calendar?showPTO=true&showSharedSpaces=true&orgWide=true&from=${toISODate(start)}&to=${toISODate(end)}`
       );
+      if (seq !== staffEventsSeqRef.current) return;
       const pto = (res.data.ptoRequests || []).map(r => ({
         id: `pto-${r.id}`,
         kind: 'pto',
@@ -510,7 +518,7 @@ const CalendarView = () => {
       });
       setStaffEvents([...pto, ...spaces]);
     } catch {
-      setStaffEvents([]);
+      if (seq === staffEventsSeqRef.current) setStaffEvents([]);
     }
   };
 
@@ -520,7 +528,7 @@ const CalendarView = () => {
 
   const reloadClasses = async () => {
     try {
-      const res = await api.get('/classes?limit=200');
+      const res = await api.get('/classes?limit=200&includeRoster=true');
       setClassesList(res.data.classes || []);
     } catch { /* keep previous list on failure */ }
   };
@@ -552,6 +560,9 @@ const CalendarView = () => {
           students: classInfo._count?.enrollments ?? 0,
           studentList: null, // lazily loaded when the event is opened
           studentIds: [],
+          // Enrolled student names (lowercased) — powers the "By Students"
+          // search filter without waiting for the lazy per-event roster fetch.
+          rosterNames: (classInfo.enrollments || []).map(en => (en.student?.fullName || '').toLowerCase()),
           notes: s.notes?.[0]?.notes || '',
           materials: (s.materials || []).map(m => ({ name: m.name, url: m.fileUrl })),
           meetingUrl: s.class?.meetingUrl || classInfo.meetingUrl || '',
@@ -734,8 +745,7 @@ const CalendarView = () => {
       categorySearchText: '',
       hideFullEvents: false,
       hideEmptyEvents: false,
-      hideUnscheduled: false,
-      substitutesOnly: false
+      hideUnscheduled: false
     });
   };
 
@@ -748,16 +758,39 @@ const CalendarView = () => {
   const getFilteredEvents = () => {
     let filtered = mappedEvents;
 
-    // Filter by Categories
+    // Filter by Categories. Sessions only carry a Virtual/In-Person type, so
+    // each category maps onto that axis — "Online ..." matches virtual classes,
+    // "In-Person ..."/COVE matches in-person ones. Event/Meeting never match a
+    // class session (those are the read-only staff chips, not filterable here).
     if (searchForm.categories.length > 0) {
-      filtered = filtered.filter(e => 
-        searchForm.categories.some(c => c === 'All' || e.type === c)
+      filtered = filtered.filter(e =>
+        searchForm.categories.some(c => {
+          if (c === 'All') return true;
+          const cl = c.toLowerCase();
+          if (cl.includes('online')) return e.type === 'Virtual';
+          if (cl.includes('person') || cl.includes('cove')) return e.type === 'In-Person';
+          return false;
+        })
       );
     }
     
+    // Filter by Students — an event matches if any selected student is on its
+    // class roster. The quick-select group tags expand to every student name
+    // currently in that group.
+    if (searchForm.students.length > 0) {
+      const selectedNames = searchForm.students.flatMap(tag => {
+        if (tag === 'Active Students') return allStudents.filter(s => s.status === 'Active').map(s => s.name);
+        if (tag === 'Trial Students') return allStudents.filter(s => s.status === 'Trial').map(s => s.name);
+        return [tag];
+      }).map(n => n.toLowerCase());
+      filtered = filtered.filter(e =>
+        (e.rosterNames || []).some(rn => selectedNames.includes(rn))
+      );
+    }
+
     // Filter by Tutors
     if (searchForm.tutors.length > 0) {
-      filtered = filtered.filter(e => 
+      filtered = filtered.filter(e =>
         searchForm.tutors.some(t => e.teacher.toLowerCase().includes(t.toLowerCase()))
       );
     }
@@ -1207,7 +1240,9 @@ const CalendarView = () => {
   // Union with teachers who are on PTO today but have no session — otherwise
   // a teacher taking the whole day off (no classes to show) never gets a
   // column, and the "Out" badge below would have nowhere to render.
-  const todaysPtoTeachers = staffEvents
+  // "Hide unscheduled tutors" drops the columns that only exist because of a
+  // PTO badge — a tutor who's out AND has no sessions today is unscheduled.
+  const todaysPtoTeachers = searchForm.hideUnscheduled ? [] : staffEvents
     .filter(se => se.kind === 'pto' && se.dateStr === toISODate(currentDate))
     .map(se => se.teacherName);
   const uniqueTeachers = [...new Set([...events.map(e => e.teacher), ...todaysPtoTeachers])].sort();
@@ -1432,6 +1467,7 @@ const CalendarView = () => {
                           ))
                         ) : (
                           teachers
+                            .filter(t => searchForm.includeInactiveTutors || t.status === 'Active')
                             .map(t => ({ raw: t.name, clean: t.name.replace('Prof. ', '') }))
                             .filter(t => !searchForm.tutors.includes(t.clean))
                             .filter(t => t.raw.toLowerCase().includes(searchForm.tutorSearchText.toLowerCase()))
@@ -1543,8 +1579,7 @@ const CalendarView = () => {
                    {[
                      { id: 'hideFullEvents', label: 'Hide full events' },
                      { id: 'hideEmptyEvents', label: 'Hide empty events' },
-                     { id: 'hideUnscheduled', label: 'Hide unscheduled tutors & locations' },
-                     { id: 'substitutesOnly', label: 'Show only events with substitutes' }
+                     { id: 'hideUnscheduled', label: 'Hide unscheduled tutors (Day view)' }
                    ].map(cb => (
                      <label key={cb.id} className="checkbox-label">
                        <input 

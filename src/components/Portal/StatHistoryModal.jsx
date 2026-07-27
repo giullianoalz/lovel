@@ -23,6 +23,7 @@ const buildView = (kind, { prizeHistory = [], punchHistory = [], behaviorHistory
           meta: fmtDate(p.createdAt),
           delta: `${p.type === 'EARNED' ? '+' : '−'}${p.points}`,
           tone: p.type === 'EARNED' ? 'pos' : 'neg',
+          rowAccent: p.type === 'EARNED' ? '#15803d' : '#b45309',
         })),
       };
     case 'punches':
@@ -38,13 +39,14 @@ const buildView = (kind, { prizeHistory = [], punchHistory = [], behaviorHistory
           meta: fmtDate(h.date),
           delta: `${h.kind === 'added' ? '+' : '−'}${h.amount}`,
           tone: h.kind === 'added' ? 'pos' : 'neg',
+          rowAccent: h.kind === 'added' ? '#15803d' : '#b45309',
         })),
       };
     case 'positive':
       return {
         title: 'Positive notes',
         subtitle: 'Recognition from teachers — and the reason behind each one.',
-        accent: '#16a34a',
+        accent: '#10b981',
         icon: <ThumbsUp size={20} />,
         empty: 'No positive notes yet.',
         rows: behaviorHistory
@@ -55,6 +57,8 @@ const buildView = (kind, { prizeHistory = [], punchHistory = [], behaviorHistory
             detail: b.description,
             meta: `${b.teacherName} · ${fmtDate(b.createdAt)}`,
             tone: 'pos',
+            rowAccent: '#10b981',
+            rowIcon: <ThumbsUp size={14} />,
           })),
       };
     case 'warnings':
@@ -68,12 +72,14 @@ const buildView = (kind, { prizeHistory = [], punchHistory = [], behaviorHistory
           .filter((b) => ['WARNING', 'SLIP'].includes(b.type))
           .map((b) => ({
             id: b.id,
-            title: b.category || 'Warning',
+            title: b.category || (b.type === 'SLIP' ? 'Disciplinary slip' : 'Warning'),
             detail: [b.description, b.ruleBroken ? `Rule: ${b.ruleBroken}` : null]
               .filter(Boolean)
               .join(' — '),
             meta: `${b.teacherName} · ${fmtDate(b.createdAt)}`,
             tone: 'neg',
+            rowAccent: b.type === 'SLIP' ? '#ef4444' : '#f59e0b',
+            rowIcon: <AlertTriangle size={14} />,
           })),
       };
     default:
@@ -104,18 +110,20 @@ const StatHistoryModal = ({ kind, studentName, data, onClose }) => {
           ) : (
             <ul className="shm-list">
               {view.rows.map((row) => (
-                <li key={row.id} className="shm-row">
+                <li key={row.id} className="shm-row" style={{ '--row-accent': row.rowAccent || view.accent }}>
                   <div className="shm-row-main">
                     <span className="shm-row-title">{row.title}</span>
                     {row.detail && <span className="shm-row-detail">{row.detail}</span>}
                     {row.meta && <span className="shm-row-meta">{row.meta}</span>}
                   </div>
-                  {row.delta && (
+                  {row.delta ? (
                     <span className={`shm-delta ${row.tone}`}>
                       {row.tone === 'pos' ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
                       {row.delta}
                     </span>
-                  )}
+                  ) : row.rowIcon ? (
+                    <span className={`shm-tone-chip ${row.tone}`}>{row.rowIcon}</span>
+                  ) : null}
                 </li>
               ))}
             </ul>

@@ -28,6 +28,8 @@ const BillingPanel = () => {
 
   const [selectedFamily, setSelectedFamily] = useState(null);
   const [activeTab, setActiveTab] = useState('Account'); // 'Account' | 'Invoices'
+  const [familySearch, setFamilySearch] = useState('');
+  const [onlyOwing, setOnlyOwing] = useState(false);
 
   // Modal States
   const [isAddTxModalOpen, setIsAddTxModalOpen] = useState(false);
@@ -43,10 +45,13 @@ const BillingPanel = () => {
     setLoading(true);
     setError(null);
     try {
-      const fams = await database.fetchFamilies();
-      const studs = await database.fetchStudents();
-      const txs = await database.fetchAllTransactions();
-      const invs = await database.fetchAllInvoices();
+      // Independent fetches — run them in parallel instead of one at a time.
+      const [fams, studs, txs, invs] = await Promise.all([
+        database.fetchFamilies(),
+        database.fetchStudents(),
+        database.fetchAllTransactions(),
+        database.fetchAllInvoices(),
+      ]);
       setFamilies(fams);
       setStudents(studs);
       setTransactions(txs);
@@ -385,11 +390,26 @@ const BillingPanel = () => {
               <button className="btn-export" style={{background: '#0369a1', color: 'white', borderColor: '#0369a1'}} onClick={() => setIsReconcileOpen(true)}>
                 <CheckCircle size={16} /> Reconcile Payment
               </button>
-              <button className="btn-filter"><Filter size={16} /> Filter</button>
-              <button className="btn-export"><Search size={16} /> Search</button>
+              <button
+                className="btn-filter"
+                onClick={() => setOnlyOwing(v => !v)}
+                style={onlyOwing ? { background: 'var(--primary-light)', color: 'var(--primary)', borderColor: 'var(--primary)' } : undefined}
+                title="Show only families with a balance owing"
+              >
+                <Filter size={16} /> {onlyOwing ? 'Owing only ✓' : 'Owing only'}
+              </button>
+              <div className="billing-search-box">
+                <Search size={16} />
+                <input
+                  type="text"
+                  placeholder="Search family, contact, or tag..."
+                  value={familySearch}
+                  onChange={e => setFamilySearch(e.target.value)}
+                />
+              </div>
             </div>
           </div>
-          
+
           <div className="table-scroll">
             <table className="billing-table">
               <thead>
@@ -402,7 +422,16 @@ const BillingPanel = () => {
                 </tr>
               </thead>
               <tbody>
-                {families.map(f => {
+                {families.filter(f => {
+                  if (onlyOwing && calculateFamilyBalance(f.id) <= 0) return false;
+                  const q = familySearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    f.name.toLowerCase().includes(q) ||
+                    f.contacts.some(c => (c.name || '').toLowerCase().includes(q)) ||
+                    f.tags.some(t => t.toLowerCase().includes(q))
+                  );
+                }).map(f => {
                   const bal = calculateFamilyBalance(f.id);
                   const primary = f.contacts.find(c => c.isInvoiceRecipient) || f.contacts[0];
                   return (
@@ -649,8 +678,8 @@ const BillingPanel = () => {
   let runningBal = 0;
   const ledgerTxs = familyTxs.map(tx => {
     const type = tx.type.toLowerCase();
-    if (type === 'charge') runningBal += tx.amount;
-    if (type === 'payment' || type === 'discount') runningBal -= Math.abs(tx.amount);
+    if (type === 'charge') runningBal += Math.abs(tx.amount);
+    if (type === 'payment' || type === 'discount' || type === 'credit') runningBal -= Math.abs(tx.amount);
     if (type === 'refund') runningBal += Math.abs(tx.amount);
     return { ...tx, runningBalance: runningBal };
   }).reverse(); // Reverse back to newest first for display
@@ -702,7 +731,6 @@ const BillingPanel = () => {
             </div>
           </div>
 
-          <button className="btn-auto-invoice">Enable Auto-Invoicing</button>
         </div>
 
         {/* Right Main Content */}
@@ -761,6 +789,7 @@ const BillingPanel = () => {
                         <td>
                           {type === 'payment' && <span className="tx-payment">Payment ${Math.abs(tx.amount).toFixed(2)}</span>}
                           {type === 'refund' && <span className="tx-refund">Refund ${Math.abs(tx.amount).toFixed(2)}</span>}
+                          {type === 'credit' && <span className="tx-payment">Credit ${Math.abs(tx.amount).toFixed(2)}</span>}
                         </td>
                         <td style={{fontWeight: 700, color: tx.runningBalance > 0 ? '#dc2626' : '#166534'}}>
                           {tx.runningBalance < 0 ? `($${Math.abs(tx.runningBalance).toFixed(2)} credit)` : `$${tx.runningBalance.toFixed(2)}`}

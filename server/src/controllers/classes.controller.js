@@ -34,7 +34,7 @@ const validateClassInput = async ({ maxStudents, teacherId }) => {
  */
 export const listClasses = async (req, res, next) => {
   try {
-    const { teacherId, status, search, page = 1, limit = 50 } = req.query;
+    const { teacherId, status, search, page = 1, limit = 50, includeRoster } = req.query;
 
     const where = {};
     if (teacherId) where.teacherId = teacherId;
@@ -59,6 +59,14 @@ export const listClasses = async (req, res, next) => {
           _count: {
             select: { enrollments: { where: { status: 'active' } } },
           },
+          // The calendar's "By Students" filter needs to know who is enrolled
+          // in each class — opt-in so the default list response stays light.
+          ...(includeRoster === 'true' ? {
+            enrollments: {
+              where: { status: 'active' },
+              select: { student: { select: { id: true, fullName: true } } },
+            },
+          } : {}),
         },
       }),
       prisma.class.count({ where }),
