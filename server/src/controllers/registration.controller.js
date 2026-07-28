@@ -300,7 +300,7 @@ export const submitRegistrationRequest = async (req, res, next) => {
       const electives = electiveIds.length
         ? await tx.elective.findMany({ where: { id: { in: electiveIds } } })
         : [];
-      const billing = calculateRegistrationBilling({ term, groupType: firstClass.groupType, electives, ixlPlan });
+      const billing = calculateRegistrationBilling({ term, groupType: firstClass.groupType, priceOverride: firstClass.priceOverride, electives, ixlPlan });
       const billingData = {
         ixlPlan,
         baseRate: billing.baseRate,
@@ -748,6 +748,9 @@ export const getRegistrationClasses = async (req, res, next) => {
       waitlist: c._count.waitlistEntries,
       meetingUrl: c.meetingUrl || '',
       groupType: c.groupType || 'REGULAR',  // needed by billing preview
+      // Also for the preview: when set, this is the price, not the term rate.
+      // Number() so the client compares an amount rather than Prisma's Decimal.
+      priceOverride: c.priceOverride === null ? null : Number(c.priceOverride),
     }));
 
 
@@ -1134,7 +1137,7 @@ export const adminRegisterStudent = async (req, res, next) => {
         ? await tx.elective.findMany({ where: { id: { in: electiveIds } } })
         : [];
 
-      const billing = calculateRegistrationBilling({ term, groupType: firstClass.groupType, electives, ixlPlan });
+      const billing = calculateRegistrationBilling({ term, groupType: firstClass.groupType, priceOverride: firstClass.priceOverride, electives, ixlPlan });
       const billingData = {
         ixlPlan,
         baseRate: billing.baseRate,
