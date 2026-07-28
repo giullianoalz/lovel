@@ -85,6 +85,11 @@ const deliverExtraChannels = async ({ userId, type, title, message }) => {
  * @param {string}  [opts.referenceType] - e.g. 'invoice', 'student'
  * @param {string|null} [opts.referenceId]
  * @param {string}  [opts.dedupKey]    - Unique key to prevent duplicate alerts
+ * @param {string|null} [opts.link]    - App-relative path the push opens, e.g.
+ *   `/chat?thread=<id>`. Supplied by the caller rather than derived here: the
+ *   right screen for a notification depends on the recipient's role (see
+ *   src/lib/notificationLink.js on the client), and a second copy of that table
+ *   living on the server would drift from it. Omitted means the dashboard.
  */
 export const sendNotification = async ({
   userId,
@@ -94,6 +99,7 @@ export const sendNotification = async ({
   referenceType = null,
   referenceId = null,
   dedupKey = null,
+  link = null,
 }) => {
   try {
     // Deduplication check
@@ -126,6 +132,7 @@ export const sendNotification = async ({
       type,
       referenceType: referenceType || '',
       referenceId: referenceId || '',
+      ...(link ? { link } : {}),
     });
 
     await deliverExtraChannels({ userId, type, title, message });
