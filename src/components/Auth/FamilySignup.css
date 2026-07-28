@@ -138,6 +138,14 @@
   margin-left: 2px;
 }
 
+/* Hint with a leading icon — plain .signup-hint sits the glyph on the text
+   baseline, which reads as misaligned next to 12px copy. */
+.signup-hint-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .signup-form textarea,
 .signup-form select {
   width: 100%;
@@ -318,24 +326,6 @@
   font-weight: 600;
   color: #b45309;
 }
-
-.signup-check {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(6, 78, 59, 0.12);
-  background: rgba(255, 255, 255, 0.7);
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text-main);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.signup-check:hover { border-color: var(--primary, #15803d); }
-.signup-check span { display: inline-flex; align-items: center; gap: 7px; }
-.signup-check input { width: 17px; height: 17px; accent-color: var(--primary, #15803d); }
 
 .signup-fineprint {
   font-size: 12.5px;

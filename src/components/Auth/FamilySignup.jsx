@@ -20,6 +20,16 @@ const IXL_OPTIONS = [
   { value: 'CORE_SPANISH', label: 'IXL Core + Spanish ($10/mo)' },
 ];
 
+// Asked as a required either/or rather than an opt-in checkbox. As a checkbox
+// this defaulted to "no scholarship", which is the wrong way round for a centre
+// where most families are on Step Up — the first eight self-registrations all
+// came back false, and staff had no way to tell "said no" from "never noticed
+// it". Neither option is preselected, so the answer is always the family's.
+const SCHOLARSHIP_OPTIONS = [
+  { value: true,  label: 'Yes, we use Step Up' },
+  { value: false, label: 'No, we pay directly' },
+];
+
 const emptyChild = () => ({
   key: crypto.randomUUID(),
   fullName: '',
@@ -51,7 +61,8 @@ const FamilySignup = () => {
     fullName: '', email: '', phone: '', password: '', confirm: '',
   });
   const [children, setChildren] = useState([emptyChild()]);
-  const [scholarship, setScholarship] = useState(false);
+  // null = not answered yet. See SCHOLARSHIP_OPTIONS for why there is no default.
+  const [scholarship, setScholarship] = useState(null);
   const [notes, setNotes] = useState('');
 
   const setField = (field, value) => setAccount(a => ({ ...a, [field]: value }));
@@ -85,6 +96,9 @@ const FamilySignup = () => {
     return null;
   };
 
+  const validateScholarship = () =>
+    scholarship === null ? 'Let us know whether you use a Step Up scholarship.' : null;
+
   const goNext = () => {
     const problem = step === 1 ? validateAccount() : validateChildren();
     if (problem) { setError(problem); return; }
@@ -98,8 +112,14 @@ const FamilySignup = () => {
     e.preventDefault();
     // Send them back to the step that actually holds the mistake.
     const accountProblem = validateAccount();
-    const problem = accountProblem || validateChildren();
-    if (problem) { setError(problem); setStep(accountProblem ? 1 : 2); return; }
+    const childrenProblem = validateChildren();
+    const scholarshipProblem = validateScholarship();
+    const problem = accountProblem || childrenProblem || scholarshipProblem;
+    if (problem) {
+      setError(problem);
+      setStep(accountProblem ? 1 : childrenProblem ? 2 : 3);
+      return;
+    }
 
     setError('');
     setSubmitting(true);
@@ -324,12 +344,25 @@ const FamilySignup = () => {
                 </ul>
               </div>
 
-              <label className="signup-check">
-                <input type="checkbox" checked={scholarship} onChange={e => setScholarship(e.target.checked)} />
-                <span>
-                  <GraduationCap size={15} /> We use a Step Up for Students scholarship (FES / EMA)
+              <div className="input-group">
+                <label id="su-scholarship-label">
+                  Do you use a Step Up for Students scholarship (FES / EMA)?
+                </label>
+                <div className="signup-interests" role="radiogroup" aria-labelledby="su-scholarship-label">
+                  {SCHOLARSHIP_OPTIONS.map(opt => (
+                    <label key={String(opt.value)}
+                      className={`signup-chip ${scholarship === opt.value ? 'on' : ''}`}>
+                      <input type="radio" name="scholarship"
+                        checked={scholarship === opt.value}
+                        onChange={() => setScholarship(opt.value)} />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+                <span className="signup-hint signup-hint-icon">
+                  <GraduationCap size={13} /> This decides how we bill you, so we need an answer either way.
                 </span>
-              </label>
+              </div>
 
               <div className="input-group">
                 <label htmlFor="su-notes">Anything else you want us to know?</label>
