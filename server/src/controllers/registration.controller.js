@@ -171,6 +171,38 @@ export const seedPriorityHolds = async (req, res, next) => {
 };
 
 /**
+ * Whether `user` may see and act on `studentId`.
+ *
+ * The two parent-facing routes below take the student from the request rather
+ * than from the session — a parent has several children and picks one — so the
+ * link between caller and student has to be proven here. Nothing else does it:
+ * the routes carry `authenticate` but no `requireRole`, so without this check
+ * any signed-in account could register another family's child, take the last
+ * seat in a class and post that family's quarterly CHARGE to their ledger.
+ *
+ * A student matches through their own family row, so self-registration keeps
+ * working. Admins are allowed through even though they have their own
+ * /admin-register, so submitting on a family's behalf never 403s.
+ */
+const canActForStudent = async (user, studentId) => {
+  if (user.role === 'ADMIN') return true;
+
+  const link = await prisma.familyMember.findFirst({
+    where: {
+      userId: studentId,
+      family: { members: { some: { userId: user.id } } },
+    },
+    select: { id: true },
+  });
+  return !!link;
+};
+
+const NOT_YOUR_STUDENT = {
+  error: 'Forbidden',
+  message: 'You can only register students in your own family.',
+};
+
+/**
  * GET /api/registration/status/:studentId
  * Determines which window a student is currently in
  */
@@ -178,6 +210,10 @@ export const getRegistrationStatus = async (req, res, next) => {
   try {
     const { studentId } = req.params;
     const { termId } = req.query;
+
+    if (!(await canActForStudent(req.user, studentId))) {
+      return res.status(403).json(NOT_YOUR_STUDENT);
+    }
 
     const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
     const now = new Date();
@@ -217,6 +253,10 @@ export const getRegistrationStatus = async (req, res, next) => {
 export const submitRegistrationRequest = async (req, res, next) => {
   try {
     const { termId, studentId, firstChoiceClassId, secondChoiceClassId, electiveIds = [], ixlPlan = 'NONE' } = req.body;
+
+    if (!(await canActForStudent(req.user, studentId))) {
+      return res.status(403).json(NOT_YOUR_STUDENT);
+    }
 
     const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
 
