@@ -677,6 +677,7 @@
 
 .reg-form { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
 .reg-form-label { display: block; margin-bottom: 8px; font-size: 14px; }
+.reg-form-hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 .reg-input-full { width: 100%; }
 .reg-form-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px; }
 .reg-modal-body { margin-top: 16px; }

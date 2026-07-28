@@ -31,7 +31,13 @@ const RegistrationAdmin = () => {
   const [coveForm, setCoveForm] = useState({
     name: '',
     capacity: 15,
-    meetingUrl: ''
+    meetingUrl: '',
+    // The two pricing controls. groupType picks which of the term's two rates
+    // applies (regular = Lighthouse / Deep Sea, anchored = Anchored Learning
+    // Group); priceOverride replaces both, for the programmes that carry their
+    // own price. Empty means "use the term rate".
+    groupType: 'REGULAR',
+    priceOverride: ''
   });
   
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -100,7 +106,12 @@ const RegistrationAdmin = () => {
     if (!cls || !term) { setManualPreview(null); return; }
 
     const IXL_PRICES = { NONE: 0, CORE: 5, CORE_SPANISH: 10 };
-    const baseRate = cls.groupType === 'ANCHORED' ? Number(term.anchoredRate || 0) : Number(term.regularRate || 0);
+    // A class may carry its own price, which wins over the term's two rates.
+    // Same null-vs-0 rule as the server: 0 is a free class, null defers.
+    const termRate = cls.groupType === 'ANCHORED' ? Number(term.anchoredRate || 0) : Number(term.regularRate || 0);
+    const baseRate = cls.priceOverride === null || cls.priceOverride === undefined
+      ? termRate
+      : Number(cls.priceOverride);
     const selectedElectives = electives.filter(e => form.electiveIds.includes(e.id));
     const electivesTotal = selectedElectives.reduce((s, e) => s + Number(e.price || 130), 0);
     const ixlTotal = IXL_PRICES[form.ixlPlan] ?? 0;
@@ -533,10 +544,18 @@ const RegistrationAdmin = () => {
   const handleOpenCoveModal = (cove = null) => {
     if (cove) {
       setEditingCove(cove.id);
-      setCoveForm({ name: cove.name, capacity: cove.capacity, meetingUrl: cove.meetingUrl || '' });
+      setCoveForm({
+        name: cove.name,
+        capacity: cove.capacity,
+        meetingUrl: cove.meetingUrl || '',
+        groupType: cove.groupType || 'REGULAR',
+        // null (no own price) has to come back as '' so the input renders empty
+        // and saving an untouched form doesn't write 0.
+        priceOverride: cove.priceOverride === null || cove.priceOverride === undefined ? '' : String(cove.priceOverride),
+      });
     } else {
       setEditingCove(null);
-      setCoveForm({ name: '', capacity: 15, meetingUrl: '' });
+      setCoveForm({ name: '', capacity: 15, meetingUrl: '', groupType: 'REGULAR', priceOverride: '' });
     }
     setShowCoveModal(true);
   };
@@ -544,18 +563,26 @@ const RegistrationAdmin = () => {
   const handleSaveCove = async (e) => {
     e.preventDefault();
     try {
+      // Sent trimmed, so a blank field reaches the API as '' — which it reads as
+      // "no own price": cleared on update, never set on create.
+      const pricing = {
+        groupType: coveForm.groupType,
+        priceOverride: String(coveForm.priceOverride).trim(),
+      };
       if (editingCove) {
         await api.put(`/classes/${editingCove}`, {
           name: coveForm.name,
           maxStudents: parseInt(coveForm.capacity),
-          meetingUrl: coveForm.meetingUrl
+          meetingUrl: coveForm.meetingUrl,
+          ...pricing
         });
       } else {
         await api.post(`/classes`, {
           name: coveForm.name,
           maxStudents: parseInt(coveForm.capacity),
           meetingUrl: coveForm.meetingUrl,
-          termId: selectedTermForRoster
+          termId: selectedTermForRoster,
+          ...pricing
         });
       }
       setShowCoveModal(false);
@@ -1667,6 +1694,35 @@ const RegistrationAdmin = () => {
                   value={coveForm.capacity}
                   onChange={(e) => setCoveForm({...coveForm, capacity: e.target.value})}
                 />
+              </div>
+
+              <div>
+                <label className="reg-form-label">Pricing group</label>
+                <select
+                  className="form-control reg-input-full"
+                  value={coveForm.groupType}
+                  onChange={(e) => setCoveForm({...coveForm, groupType: e.target.value})}
+                >
+                  <option value="REGULAR">Regular — uses the term&apos;s regular rate</option>
+                  <option value="ANCHORED">Anchored — uses the term&apos;s anchored rate</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="reg-form-label">Own price (optional)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="form-control reg-input-full"
+                  placeholder="Leave empty to use the term rate"
+                  value={coveForm.priceOverride}
+                  onChange={(e) => setCoveForm({...coveForm, priceOverride: e.target.value})}
+                />
+                <span className="reg-form-hint">
+                  For classes priced on their own rather than by the term — Biology, Algebra&nbsp;1,
+                  the 8th grade programme. When set it replaces the pricing group above.
+                </span>
               </div>
 
               <div>

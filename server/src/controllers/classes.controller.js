@@ -7,11 +7,21 @@ const MAX_STUDENTS_CAP = 100;
 // null if the input is valid. Catches typos (maxStudents=0, a stray letter)
 // and a teacherId that doesn't point to an actual active-ish teacher before
 // they become a class nobody can enroll into or a foreign-key crash.
-const validateClassInput = async ({ maxStudents, teacherId }) => {
+const validateClassInput = async ({ maxStudents, teacherId, priceOverride }) => {
   if (maxStudents !== undefined && maxStudents !== null && maxStudents !== '') {
     const n = Number(maxStudents);
     if (!Number.isInteger(n) || n < 1 || n > MAX_STUDENTS_CAP) {
       return `maxStudents must be a whole number between 1 and ${MAX_STUDENTS_CAP}.`;
+    }
+  }
+
+  // Anything that isn't a clearing value has to be a real, non-negative amount:
+  // this figure is charged to a family's ledger, so a typo landing as NaN or a
+  // negative would post a credit nobody authorised.
+  if (priceOverride !== undefined && priceOverride !== null && priceOverride !== '') {
+    const p = Number(priceOverride);
+    if (!Number.isFinite(p) || p < 0) {
+      return 'priceOverride must be a non-negative number, or empty to use the term rate.';
     }
   }
 
@@ -126,13 +136,13 @@ export const getClass = async (req, res, next) => {
  */
 export const createClass = async (req, res, next) => {
   try {
-    const { name, subject, teacherId, type, meetingUrl, maxStudents, termId, groupType } = req.body;
+    const { name, subject, teacherId, type, meetingUrl, maxStudents, termId, groupType, priceOverride } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Validation Error', message: 'Class name is required.' });
     }
 
-    const validationError = await validateClassInput({ maxStudents, teacherId });
+    const validationError = await validateClassInput({ maxStudents, teacherId, priceOverride });
     if (validationError) {
       return res.status(400).json({ error: 'Validation Error', message: validationError });
     }
@@ -149,6 +159,11 @@ export const createClass = async (req, res, next) => {
         // screen; otherwise it stays null (standalone class).
         ...(termId && { termId }),
         ...(groupType && { groupType }),
+        // '' is how a cleared form field arrives; treat it as "use the term rate"
+        // rather than as the number 0, which would make the class free.
+        ...(priceOverride !== undefined && priceOverride !== null && priceOverride !== ''
+          ? { priceOverride: Number(priceOverride) }
+          : {}),
       },
       include: {
         teacher: { select: { fullName: true } },
@@ -168,12 +183,18 @@ export const createClass = async (req, res, next) => {
  */
 export const updateClass = async (req, res, next) => {
   try {
-    const { name, subject, teacherId, type, meetingUrl, maxStudents, status } = req.body;
+    const { name, subject, teacherId, type, meetingUrl, maxStudents, status, groupType, priceOverride } = req.body;
 
-    const validationError = await validateClassInput({ maxStudents, teacherId });
+    const validationError = await validateClassInput({ maxStudents, teacherId, priceOverride });
     if (validationError) {
       return res.status(400).json({ error: 'Validation Error', message: validationError });
     }
+
+    // Unlike create, an explicitly empty priceOverride is meaningful here: it is
+    // how the admin takes a class back off its own price and returns it to the
+    // term rate. Omitting the key entirely still leaves the value untouched.
+    const clearsPrice = priceOverride === null || priceOverride === '';
+    const setsPrice = priceOverride !== undefined && !clearsPrice;
 
     const updatedClass = await prisma.class.update({
       where: { id: req.params.id },
@@ -185,6 +206,9 @@ export const updateClass = async (req, res, next) => {
         ...(meetingUrl !== undefined && { meetingUrl }),
         ...(maxStudents && { maxStudents: parseInt(maxStudents) }),
         ...(status && { status }),
+        ...(groupType && { groupType }),
+        ...(clearsPrice ? { priceOverride: null } : {}),
+        ...(setsPrice ? { priceOverride: Number(priceOverride) } : {}),
       },
     });
 

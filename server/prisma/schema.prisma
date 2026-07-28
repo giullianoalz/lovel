@@ -128,6 +128,12 @@ model Class {
   teacherId        String?               @map("teacher_id") @db.Uuid
   type             ClassType             @default(IN_PERSON)
   groupType        GroupType             @default(REGULAR) @map("group_type")
+  // A term carries exactly two rates (regular / anchored), which covers the
+  // Discovery Coves and nothing else: Biology, Algebra 1 and the 8th grade
+  // programme are three more prices in the same period. When set, this wins
+  // over whichever term rate groupType would have selected. Left null, the
+  // class prices exactly as before.
+  priceOverride    Decimal?              @map("price_override") @db.Decimal(10, 2)
   meetingUrl       String?               @map("meeting_url")
   maxStudents      Int                   @default(10) @map("max_students")
   status           String                @default("active") @db.VarChar(20)
@@ -428,24 +434,24 @@ model Payment {
 /// accounts recorded income should be deposited into (anchor) and categorised
 /// under (income). A missing row means "Wave is not connected".
 model WaveConnection {
-  id                 String    @id @default(uuid()) @db.Uuid
+  id                String    @id @default(uuid()) @db.Uuid
   // Wave business the tokens belong to.
-  businessId         String?   @map("business_id") @db.VarChar(255)
-  businessName       String?   @map("business_name") @db.VarChar(255)
+  businessId        String?   @map("business_id") @db.VarChar(255)
+  businessName      String?   @map("business_name") @db.VarChar(255)
   // AES-GCM encrypted OAuth tokens — never returned to the client.
-  accessToken        String?   @map("access_token")
-  refreshToken       String?   @map("refresh_token")
-  tokenExpiresAt     DateTime? @map("token_expires_at") @db.Timestamptz(6)
-  scope              String?   @db.VarChar(255)
+  accessToken       String?   @map("access_token")
+  refreshToken      String?   @map("refresh_token")
+  tokenExpiresAt    DateTime? @map("token_expires_at") @db.Timestamptz(6)
+  scope             String?   @db.VarChar(255)
   // Account mapping for income transactions (chosen by the admin post-connect).
-  anchorAccountId    String?   @map("anchor_account_id") @db.VarChar(255)
-  anchorAccountName  String?   @map("anchor_account_name") @db.VarChar(255)
-  incomeAccountId    String?   @map("income_account_id") @db.VarChar(255)
-  incomeAccountName  String?   @map("income_account_name") @db.VarChar(255)
-  connectedById      String?   @map("connected_by") @db.Uuid
-  connectedAt        DateTime? @map("connected_at") @db.Timestamptz(6)
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  anchorAccountId   String?   @map("anchor_account_id") @db.VarChar(255)
+  anchorAccountName String?   @map("anchor_account_name") @db.VarChar(255)
+  incomeAccountId   String?   @map("income_account_id") @db.VarChar(255)
+  incomeAccountName String?   @map("income_account_name") @db.VarChar(255)
+  connectedById     String?   @map("connected_by") @db.Uuid
+  connectedAt       DateTime? @map("connected_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("wave_connection")
 }
