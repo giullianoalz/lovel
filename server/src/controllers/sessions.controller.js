@@ -21,6 +21,45 @@ const NO_SHOW_SUGGESTED_PERCENT = 50;
 const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
 
 /**
+ * Which sessions this user is allowed to see.
+ *
+ * `GET /sessions` and `GET /sessions/:id` carry `authenticate` and nothing
+ * else, because /calendar is open to every role. That made the whole academy's
+ * timetable readable by any signed-in account, and the detail route returned
+ * each session's `attendance` — the full class roster, every child's id and
+ * name — to students and parents alike.
+ *
+ * Returns a Prisma filter, so it composes with the caller's own filters
+ * (date range, classId, teacherId) instead of replacing them.
+ */
+const sessionScope = async (user) => {
+  if (user.role === 'ADMIN') return {};
+  if (user.role === 'TEACHER') return { class: { teacherId: user.id } };
+
+  // A student sees their own classes; a parent sees their children's. Both
+  // resolve to a set of student ids, so they share one branch.
+  let studentIds = [user.id];
+  if (user.role === 'PARENT') {
+    const familyMembers = await prisma.familyMember.findMany({
+      where: { userId: user.id },
+      select: { familyId: true },
+    });
+    const children = await prisma.familyMember.findMany({
+      where: {
+        familyId: { in: familyMembers.map((f) => f.familyId) },
+        user: { role: 'STUDENT' },
+      },
+      select: { userId: true },
+    });
+    studentIds = children.map((c) => c.userId);
+  }
+
+  return {
+    class: { enrollments: { some: { studentId: { in: studentIds }, status: 'active' } } },
+  };
+};
+
+/**
  * GET /api/sessions
  * List sessions, typically filtered by date range for a calendar view
  */
@@ -38,8 +77,13 @@ export const listSessions = async (req, res, next) => {
       where.class = { teacherId };
     }
 
+    // AND rather than merging keys: both sides can constrain `class`, and the
+    // caller's filter must never widen what the scope allows.
+    const scope = await sessionScope(req.user);
+    const scopedWhere = Object.keys(scope).length ? { AND: [where, scope] } : where;
+
     const sessions = await prisma.session.findMany({
-      where,
+      where: scopedWhere,
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
       include: {
         class: {
@@ -62,17 +106,25 @@ export const listSessions = async (req, res, next) => {
  */
 export const getSession = async (req, res, next) => {
   try {
-    const session = await prisma.session.findUniqueOrThrow({
-      where: { id: req.params.id },
+    const scope = await sessionScope(req.user);
+    const isStaff = ['ADMIN', 'TEACHER'].includes(req.user.role);
+
+    const session = await prisma.session.findFirstOrThrow({
+      where: { id: req.params.id, ...scope },
       include: {
         class: {
           include: { teacher: { select: { id: true, fullName: true } } },
         },
-        attendance: {
-          include: {
-            student: { select: { id: true, fullName: true, avatarUrl: true } },
+        // The roster is staff-only. A parent opening a session on the calendar
+        // needs its time, notes and materials — not the name of every other
+        // child in the room. (The frontend reads only notes/materials here.)
+        ...(isStaff ? {
+          attendance: {
+            include: {
+              student: { select: { id: true, fullName: true, avatarUrl: true } },
+            },
           },
-        },
+        } : {}),
         notes: true,
         materials: true,
       },

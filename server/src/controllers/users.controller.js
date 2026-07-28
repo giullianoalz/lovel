@@ -2,6 +2,50 @@ import prisma from '../config/database.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
 
 /**
+ * What one staff member may learn about another.
+ *
+ * These two endpoints used to return the whole Prisma row. Two kinds of column
+ * rode along that shouldn't have:
+ *
+ *  - `baseSalary` / `perSessionRate` — every colleague's pay. Not theoretical:
+ *    the Teachers tab of /students renders both, and that screen is open to
+ *    TEACHER as well as ADMIN, so each teacher could read the whole payroll.
+ *  - `firebaseUid` / `fcmToken` — handles that identify the account and its
+ *    push device rather than describing the person. The UI never needs them;
+ *    it needs `canSignIn`, which is derived from the uid below.
+ *
+ * Admins keep the full row: payroll and account administration are their job.
+ */
+const STAFF_VISIBLE_USER_FIELDS = [
+  'id', 'fullName', 'email', 'phone', 'avatarUrl', 'role', 'status',
+  'age', 'createdAt', 'updatedAt', 'familyMembers',
+];
+
+/**
+ * Shapes one user row for `viewer`. `canSignIn`/`emailUsable` are derived, not
+ * columns: the directory needs to show who can actually log in, which depends
+ * on whether the row is backed by a real Firebase account and a deliverable
+ * address.
+ */
+const presentUser = (user, viewer) => {
+  const base = {
+    canSignIn: hasSignInAccount(user),
+    emailUsable: !isPlaceholderEmail(user.email),
+  };
+
+  if (viewer.role === 'ADMIN') {
+    // eslint-disable-next-line no-unused-vars
+    const { firebaseUid, fcmToken, ...rest } = user;
+    return { ...rest, ...base };
+  }
+
+  for (const field of STAFF_VISIBLE_USER_FIELDS) {
+    if (user[field] !== undefined) base[field] = user[field];
+  }
+  return base;
+};
+
+/**
  * GET /api/users
  * List all users with optional filtering
  */
@@ -70,14 +114,7 @@ export const listUsers = async (req, res, next) => {
     ]);
 
     res.json({
-      // canSignIn / emailUsable are derived, not columns: the directory needs to
-      // show who can actually log in, which depends on whether the row is backed
-      // by a real Firebase account and a deliverable address.
-      users: users.map((user) => ({
-        ...user,
-        canSignIn: hasSignInAccount(user),
-        emailUsable: !isPlaceholderEmail(user.email),
-      })),
+      users: users.map((user) => presentUser(user, req.user)),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -104,7 +141,11 @@ export const getUser = async (req, res, next) => {
       },
     });
 
-    res.json({ user });
+    // Reading your own row is never a disclosure — and the sidebar's quiet-hours
+    // panel loads it this way — so self is returned whole, like an admin's view.
+    // A teacher looking at someone else gets the trimmed projection.
+    const isSelf = user.id === req.user.id;
+    res.json({ user: isSelf ? user : presentUser(user, req.user) });
   } catch (error) {
     next(error);
   }
