@@ -49,17 +49,26 @@ export const errorHandler = (err, req, res, _next) => {
     });
   }
 
-  // Default error
+  // Default error.
+  //
+  // Detail is opt-in, not opt-out. Asking "is this production?" meant an
+  // environment that simply never set NODE_ENV — a typo, a new staging box, a
+  // host that doesn't inject it — served raw `err.message` to callers, which
+  // for an unhandled Prisma error is the failing query's shape: table and
+  // column names, constraint names, sometimes the offending value. Asking "is
+  // this explicitly development?" makes the unset case fall to the safe side.
+  // Same reasoning as the test-login bypass in middleware/auth.js: a missing
+  // variable must never be what turns a protection off.
+  //
+  // The full error, including the stack, is already on the server's own log
+  // above — nothing is lost for debugging, it just stops being a response.
+  const isDev = process.env.NODE_ENV === 'development';
   const statusCode = err.statusCode || err.status || 500;
-  const message =
-    process.env.NODE_ENV === 'production'
-      ? 'An internal server error occurred.'
-      : err.message || 'Unknown error';
 
   res.status(statusCode).json({
     error: 'Internal Server Error',
-    message,
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+    message: isDev ? (err.message || 'Unknown error') : 'An internal server error occurred.',
+    ...(isDev && { stack: err.stack }),
   });
 };
 
