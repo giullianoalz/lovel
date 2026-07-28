@@ -2,6 +2,22 @@ import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
 
 /**
+ * Prisma filter limiting a teacher to the students they actually teach.
+ *
+ * Role alone was the only gate here, so any teacher could list — and open the
+ * profile of — every child in the academy, including `allergies` and
+ * `medicalNotes`. The intent to narrow their view already existed one level
+ * down (getStudent strips `familyMembers` for teachers so contact details stay
+ * out of reach); this applies the same intent to which rows they get at all.
+ *
+ * Admins are unfiltered: placement, billing and health records are their job.
+ */
+const rosterScope = (user) =>
+  user.role === 'TEACHER'
+    ? { enrollments: { some: { status: 'active', class: { teacherId: user.id } } } }
+    : {};
+
+/**
  * GET /api/students/export
  * Downloads every student as a CSV whose columns mirror the importer
  * (see import.controller.js), so an admin can export → edit → re-import
@@ -80,6 +96,7 @@ export const listStudents = async (req, res, next) => {
 
     const where = {
       role: 'STUDENT',
+      ...rosterScope(req.user),
     };
     if (status) where.status = status.toUpperCase();
     if (search) {
@@ -144,8 +161,11 @@ export const listStudents = async (req, res, next) => {
  */
 export const getStudent = async (req, res, next) => {
   try {
-    const student = await prisma.user.findUniqueOrThrow({
-      where: { id: req.params.id, role: 'STUDENT' },
+    // findFirst + rosterScope rather than findUnique: a teacher asking for a
+    // student they don't teach gets the same 404 as one who doesn't exist, so
+    // the response can't be used to confirm who is enrolled at the academy.
+    const student = await prisma.user.findFirstOrThrow({
+      where: { id: req.params.id, role: 'STUDENT', ...rosterScope(req.user) },
       include: {
         familyMembers: {
           include: {
@@ -284,6 +304,18 @@ export const updateSnackPunches = async (req, res, next) => {
  */
 export const getAttendanceSummary = async (req, res, next) => {
   try {
+    // Same roster rule as getStudent — attendance is a student record too, and
+    // this route is reachable by any teacher.
+    if (req.user.role === 'TEACHER') {
+      const onRoster = await prisma.user.findFirst({
+        where: { id: req.params.id, ...rosterScope(req.user) },
+        select: { id: true },
+      });
+      if (!onRoster) {
+        return res.status(404).json({ error: 'Not Found', message: 'Student not found.' });
+      }
+    }
+
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 

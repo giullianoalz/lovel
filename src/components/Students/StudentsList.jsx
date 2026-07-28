@@ -366,19 +366,26 @@ const StudentsList = () => {
                   <span className="detail-label">Email:</span>
                   <span style={{ fontSize: '13px' }}>{teacher.email}</span>
                 </div>
-                <div className="detail-item">
-                  <span className="detail-label">Salary:</span>
-                  <span className="salary-badge">
-                    <DollarSign size={14} />
-                    ${teacher.baseSalary?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'} /mo
-                  </span>
-                </div>
-                <div className="detail-item">
-                  <span className="detail-label">Per Session:</span>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
-                    ${teacher.perSessionRate?.toFixed(2) || '0.00'}
-                  </span>
-                </div>
+                {/* Pay is management information: the API only sends it to
+                    admins, so a teacher would otherwise read "$0.00 /mo" for
+                    every colleague. */}
+                {role === 'ADMIN' && (
+                  <>
+                    <div className="detail-item">
+                      <span className="detail-label">Salary:</span>
+                      <span className="salary-badge">
+                        <DollarSign size={14} />
+                        ${teacher.baseSalary?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'} /mo
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Per Session:</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
+                        ${teacher.perSessionRate?.toFixed(2) || '0.00'}
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="card-actions">
