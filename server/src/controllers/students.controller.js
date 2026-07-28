@@ -266,8 +266,12 @@ export const updateSnackPunches = async (req, res, next) => {
       });
     }
 
-    const student = await prisma.user.findUniqueOrThrow({
-      where: { id: req.params.id },
+    // Same roster rule as the read paths — this is the write counterpart, and
+    // the route is open to every teacher. `role: 'STUDENT'` matters too: the id
+    // was matched against any user row, so a punch balance could be written
+    // onto a teacher's or an admin's account.
+    const student = await prisma.user.findFirstOrThrow({
+      where: { id: req.params.id, role: 'STUDENT', ...rosterScope(req.user) },
     });
 
     const newPunches =
