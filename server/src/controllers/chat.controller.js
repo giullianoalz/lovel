@@ -34,6 +34,10 @@ async function notifyOtherParticipants({ io, threadId, senderId, senderName, pre
         message: preview,
         referenceType: 'chat_thread',
         referenceId: threadId,
+        // Same destination the in-app bell uses (src/lib/notificationLink.js);
+        // ChatHub opens the thread from ?thread=. Without it the push lands on
+        // the dashboard and the reader has to find the conversation themselves.
+        link: `/chat?thread=${threadId}`,
         dedupKey: `chat-message:${messageId}:${recipientId}`,
       })
     ));
