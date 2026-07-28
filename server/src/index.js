@@ -11,7 +11,7 @@ import { firebaseAuth } from './config/firebase-admin.js';
 import prisma from './config/database.js';
 
 // Middleware
-import { apiLimiter } from './middleware/rateLimit.js';
+import { apiLimiter, ipLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { cacheStats } from './middleware/cache.js';
 import { isTestLoginAuthorized } from './middleware/auth.js';
@@ -47,6 +47,15 @@ import { startCronJobs } from './jobs/cron.jobs.js';
 
 const app = express();
 const httpServer = createServer(app);
+
+// Render (and any similar host) puts a load balancer in front of us, so the
+// socket address is the balancer's, not the caller's. Without this every
+// request shares one `req.ip` — which silently made authLimiter a *global*
+// 10-attempts-per-15-minutes budget for the whole internet, and would do the
+// same to ipLimiter. `1` trusts exactly one hop: the client cannot forge
+// X-Forwarded-For past the balancer, which `true` would allow. Inert locally,
+// where no such header arrives.
+app.set('trust proxy', 1);
 
 // Allows phones/other devices on the same Wi-Fi, and any localhost port
 // (Vite auto-increments when 5173 is busy — e.g. multiple sandboxed preview
@@ -162,10 +171,22 @@ app.use('/api/payments/stripe/webhook', express.raw({ type: 'application/json' }
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve uploaded files (marketing photos, etc.)
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+// Academy Feed media only. Feed posts render straight from this path
+// (AcademyFeed.jsx builds `MEDIA_BASE + url`), so it has to stay reachable
+// without a token.
+//
+// Scoped to that one subfolder on purpose: mounting all of `uploads/` here
+// served chat attachments and marketing photos of students to anyone holding
+// the URL, which silently defeated the authenticated routes that exist to gate
+// exactly those files (getAttachmentFile, getPhotoFile — both check thread
+// participation / role before streaming a byte). The frontend already fetches
+// both through those routes, so nothing reads them from here.
+app.use('/uploads/announcements', express.static(path.join(process.cwd(), 'uploads', 'announcements')));
 
-// Rate limiting
+// Rate limiting — the IP backstop runs first so a caller who evades the
+// credential bucket (by varying the Authorization header, which is unverified
+// this early) still hits a ceiling. See middleware/rateLimit.js.
+app.use('/api/', ipLimiter);
 app.use('/api/', apiLimiter);
 
 // ===========================================
