@@ -43,6 +43,38 @@ const Sidebar = () => {
   const notif = useNotifications(role);
   const bellRef = useRef(null);
 
+  // Per-nav-item counts, derived from the same feed that drives the bell —
+  // no extra requests needed. referenceType values come from
+  // notificationLink.js, which already maps them to these same screens.
+  const alertsUnread = notif.inboxItems.filter(n => ['classAlert', 'sessionCancellation', 'snackReload'].includes(n.referenceType)).length;
+  const announcementsUnread = notif.inboxItems.filter(n => n.source === 'announcement').length;
+  const chatUnread = notif.inboxItems.filter(n => n.referenceType === 'chat_thread').length;
+
+  // Teacher Portal dot: lights up when one of today's classes starts within
+  // 15 minutes. Rechecked every minute against the schedule fetched on mount.
+  const [classStartingSoon, setClassStartingSoon] = useState(false);
+  useEffect(() => {
+    if (role !== 'TEACHER' && role !== 'ADMIN') return;
+    let schedule = [];
+    const checkSoon = () => {
+      const now = new Date();
+      setClassStartingSoon(schedule.some(cls => {
+        if (!cls.startTime) return false;
+        const [h, m] = cls.startTime.split(':').map(Number);
+        const start = new Date(now);
+        start.setHours(h, m, 0, 0);
+        const diffMin = (start - now) / 60000;
+        return diffMin >= 0 && diffMin <= 15;
+      }));
+    };
+    api.get('/portal/teacher').then(r => {
+      schedule = r.data.schedule || [];
+      checkSoon();
+    }).catch(() => {});
+    const interval = setInterval(checkSoon, 60000);
+    return () => clearInterval(interval);
+  }, [role]);
+
   /* Push Notifications (FCM) — register device token once per session, show toast for foreground pushes */
   useEffect(() => {
     if (!user?.id) return;
@@ -172,21 +204,25 @@ const Sidebar = () => {
               <NavLink to="/alerts" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Bell size={20} />
                 <span>Front Desk Alerts</span>
+                {alertsUnread > 0 && <span className="nav-item-badge">{alertsUnread > 9 ? '9+' : alertsUnread}</span>}
               </NavLink>
             )}
             {(role === 'TEACHER' || role === 'ADMIN') && (
               <NavLink to="/portal/teacher" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Compass size={20} />
                 <span>Teacher Portal</span>
+                {classStartingSoon && <span className="nav-item-dot" title="A class is starting soon" />}
               </NavLink>
             )}
             <NavLink to="/feed" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <Megaphone size={20} />
               <span>Announcements</span>
+              {announcementsUnread > 0 && <span className="nav-item-badge">{announcementsUnread > 9 ? '9+' : announcementsUnread}</span>}
             </NavLink>
             <NavLink to="/chat" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <MessageSquare size={20} />
               <span>Chat Hub</span>
+              {chatUnread > 0 && <span className="nav-item-badge">{chatUnread > 9 ? '9+' : chatUnread}</span>}
             </NavLink>
             <NavLink to="/calendar" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <Calendar size={20} />

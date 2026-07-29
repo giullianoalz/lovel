@@ -262,6 +262,36 @@
   text-align: center;
 }
 
+/* Per-nav-item indicators: a count pill (unread alerts/announcements/chats)
+   or a plain dot (Teacher Portal — a class is starting soon). Pushed to the
+   end of the flex row so the icon/label keep their normal layout. */
+.nav-item-badge {
+  margin-left: auto;
+  background: #ef4444;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 99px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.nav-item.active .nav-item-badge {
+  background: white;
+  color: var(--primary);
+}
+
+.nav-item-dot {
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+}
+
 @media (max-width: 1100px) {
   .mobile-header {
     display: flex;
