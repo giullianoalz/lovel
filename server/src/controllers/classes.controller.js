@@ -220,6 +220,43 @@ export const updateClass = async (req, res, next) => {
 };
 
 /**
+ * DELETE /api/classes/:id
+ * Delete a class. Blocked while it still has active enrollments, so an
+ * admin can't accidentally drop students off their roster by deleting the
+ * class out from under them.
+ */
+export const deleteClass = async (req, res, next) => {
+  try {
+    const activeCount = await prisma.classEnrollment.count({
+      where: { classId: req.params.id, status: 'active' },
+    });
+
+    if (activeCount > 0) {
+      return res.status(400).json({
+        error: 'Class Not Empty',
+        message: `This class still has ${activeCount} enrolled student${activeCount === 1 ? '' : 's'}. Remove them before deleting the class.`,
+      });
+    }
+
+    await prisma.class.delete({ where: { id: req.params.id } });
+
+    invalidate('classes:*', 'registration:classes:*');
+    res.json({ message: 'Class deleted successfully.' });
+  } catch (error) {
+    // Foreign key violation — the class still has registration requests,
+    // priority holds, or other history referencing it that isn't safe to
+    // cascade away silently.
+    if (error.code === 'P2003') {
+      return res.status(400).json({
+        error: 'Class In Use',
+        message: 'This class cannot be deleted because it has registration history (requests, holds, or sessions) tied to it.',
+      });
+    }
+    next(error);
+  }
+};
+
+/**
  * POST /api/classes/:id/enrollments
  * Enroll a student in a class
  */

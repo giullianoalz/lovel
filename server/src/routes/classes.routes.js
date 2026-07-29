@@ -7,6 +7,7 @@ import {
   getClass,
   createClass,
   updateClass,
+  deleteClass,
   enrollStudent,
   unenrollStudent,
 } from '../controllers/classes.controller.js';
@@ -30,6 +31,9 @@ router.post('/', authenticate, requireRole('ADMIN'), createClass);
 
 // PUT /api/classes/:id — Update a class (Admin)
 router.put('/:id', authenticate, requireRole('ADMIN'), updateClass);
+
+// DELETE /api/classes/:id — Delete a class (Admin)
+router.delete('/:id', authenticate, requireRole('ADMIN'), deleteClass);
 
 // POST /api/classes/:id/enrollments — Enroll student (Admin)
 router.post('/:id/enrollments', authenticate, requireRole('ADMIN'), enrollStudent);

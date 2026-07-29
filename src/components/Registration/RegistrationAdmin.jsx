@@ -642,6 +642,18 @@ const RegistrationAdmin = () => {
     }
   };
 
+  const handleDeleteCove = (coveId, coveName) => {
+    showAlert(`Are you sure you want to delete "${coveName}"? This cannot be undone.`, 'Delete Class', 'confirm', async () => {
+      try {
+        await api.delete(`/classes/${coveId}`);
+        setShowCoveModal(false);
+        loadClasses();
+      } catch (error) {
+        showAlert(error.response?.data?.message || 'Error deleting class', 'Error', 'warning');
+      }
+    });
+  };
+
   const handleManualAddStudent = async (student) => {
     if (!selectedCove) return;
     try {
@@ -1854,6 +1866,12 @@ const RegistrationAdmin = () => {
               </div>
 
               <div className="reg-form-actions">
+                {editingCove && (
+                  <button type="button" className="btn-text elective-delete" style={{ marginRight: 'auto' }}
+                    onClick={() => handleDeleteCove(editingCove, coveForm.name)}>
+                    Delete Class
+                  </button>
+                )}
                 <button type="button" className="btn-text" onClick={() => setShowCoveModal(false)}>Cancel</button>
                 <button type="submit" className="btn-primary">{editingCove ? 'Save Changes' : 'Create Class'}</button>
               </div>
