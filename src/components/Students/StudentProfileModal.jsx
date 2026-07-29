@@ -211,6 +211,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
           <div className="profile-col">
             <div className="info-card">
               <h3>Health & Details</h3>
+              {student.createdAt && <p style={{ marginBottom: '8px' }}><strong>Registered:</strong> {new Date(student.createdAt).toLocaleDateString()}</p>}
               <p style={{ marginBottom: '8px' }}><strong>Allergies:</strong> {student.allergies || 'None'}</p>
 
               {!isTeacher && (
