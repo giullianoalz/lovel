@@ -21,6 +21,9 @@ import {
   resendBillingEmail,
   adminRegisterStudent,
   getTermElectives,
+  createElective,
+  updateElective,
+  deleteElective,
   getEnrollmentApplications,
   declineApplication,
 } from '../controllers/registration.controller.js';
@@ -38,6 +41,11 @@ router.get('/classes/:id/roster', authenticate, requireRole('ADMIN'), getClassRo
 
 // Electives for a specific term (used by Manual Registration UI)
 router.get('/terms/:id/electives', authenticate, requireRole('ADMIN'), getTermElectives);
+router.post('/terms/:id/electives', authenticate, requireRole('ADMIN'), createElective);
+// Keyed by the elective itself — it already knows its term, and repeating the
+// term in the path would let the two disagree.
+router.put('/electives/:electiveId', authenticate, requireRole('ADMIN'), updateElective);
+router.delete('/electives/:electiveId', authenticate, requireRole('ADMIN'), deleteElective);
 
 router.post('/promote/:classId', authenticate, requireRole('ADMIN'), promoteFromWaitlist);
 

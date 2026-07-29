@@ -28,6 +28,10 @@ const RegistrationAdmin = () => {
   
   const [showCoveModal, setShowCoveModal] = useState(false);
   const [editingCove, setEditingCove] = useState(null);
+  // Electives for the term currently selected on the Rosters tab.
+  const [termElectives, setTermElectives] = useState([]);
+  const [electiveForm, setElectiveForm] = useState({ id: null, name: '', price: '' });
+  const [electiveSaving, setElectiveSaving] = useState(false);
   const [coveForm, setCoveForm] = useState({
     name: '',
     capacity: 15,
@@ -273,6 +277,48 @@ const RegistrationAdmin = () => {
     }
   };
 
+  const loadTermElectives = async () => {
+    if (!selectedTermForRoster) return setTermElectives([]);
+    try {
+      const res = await api.get(`/registration/terms/${selectedTermForRoster}/electives`);
+      setTermElectives(res.data.electives || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSaveElective = async (e) => {
+    e.preventDefault();
+    if (!electiveForm.name.trim()) return;
+    setElectiveSaving(true);
+    try {
+      const payload = { name: electiveForm.name.trim(), price: String(electiveForm.price).trim() };
+      if (electiveForm.id) {
+        await api.put(`/registration/electives/${electiveForm.id}`, payload);
+      } else {
+        await api.post(`/registration/terms/${selectedTermForRoster}/electives`, payload);
+      }
+      setElectiveForm({ id: null, name: '', price: '' });
+      loadTermElectives();
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Error saving the elective', 'Error', 'warning');
+    } finally {
+      setElectiveSaving(false);
+    }
+  };
+
+  const handleDeleteElective = async (elective) => {
+    try {
+      await api.delete(`/registration/electives/${elective.id}`);
+      // Deleting the row being edited would otherwise leave the form pointing at
+      // an id that no longer exists.
+      if (electiveForm.id === elective.id) setElectiveForm({ id: null, name: '', price: '' });
+      loadTermElectives();
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Error deleting the elective', 'Error', 'warning');
+    }
+  };
+
   const loadRoster = async (coveId) => {
     try {
       const res = await api.get(`/registration/classes/${coveId}/roster`);
@@ -328,6 +374,10 @@ const RegistrationAdmin = () => {
   useEffect(() => {
     if (activeTab === 'rosters') {
       loadClasses();
+      loadTermElectives();
+      // Switching term abandons whatever elective was mid-edit; keeping it would
+      // save into the term the admin just navigated away from.
+      setElectiveForm({ id: null, name: '', price: '' });
     }
     if (activeTab === 'billing') {
       loadBillingSummary();
@@ -1186,6 +1236,70 @@ const RegistrationAdmin = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="electives-panel glass-card">
+              <div className="electives-panel-head">
+                <h3>Electives</h3>
+                <span className="reg-form-hint">
+                  Add-ons a family can pick on top of their class. Each one is charged on
+                  the registration total for this term.
+                </span>
+              </div>
+
+              {termElectives.length > 0 ? (
+                <ul className="electives-list">
+                  {termElectives.map(el => (
+                    <li key={el.id} className={electiveForm.id === el.id ? 'editing' : ''}>
+                      <span className="elective-name">{el.name}</span>
+                      <span className="elective-price">${Number(el.price).toFixed(2)}</span>
+                      <button type="button" className="btn-text"
+                        onClick={() => setElectiveForm({ id: el.id, name: el.name, price: String(el.price) })}>
+                        Edit
+                      </button>
+                      <button type="button" className="btn-text elective-delete"
+                        onClick={() => handleDeleteElective(el)}>
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted text-sm electives-empty">
+                  {selectedTermForRoster ? 'No electives for this term yet.' : 'Pick a term first.'}
+                </p>
+              )}
+
+              <form className="electives-form" onSubmit={handleSaveElective}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Elective name — e.g. Art, Chess, Spanish"
+                  value={electiveForm.name}
+                  onChange={(e) => setElectiveForm({ ...electiveForm, name: e.target.value })}
+                  disabled={!selectedTermForRoster}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="form-control electives-price-input"
+                  placeholder="130.00"
+                  value={electiveForm.price}
+                  onChange={(e) => setElectiveForm({ ...electiveForm, price: e.target.value })}
+                  disabled={!selectedTermForRoster}
+                />
+                <button type="submit" className="btn-primary"
+                  disabled={!selectedTermForRoster || electiveSaving || !electiveForm.name.trim()}>
+                  {electiveForm.id ? 'Save' : <><Plus size={14} /> Add</>}
+                </button>
+                {electiveForm.id && (
+                  <button type="button" className="btn-text"
+                    onClick={() => setElectiveForm({ id: null, name: '', price: '' })}>
+                    Cancel
+                  </button>
+                )}
+              </form>
             </div>
           </div>
         )}

@@ -676,6 +676,37 @@
 .reg-modal-lg { max-width: 500px; }
 
 .reg-form { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+/* ── Electives panel (Rosters tab) ── */
+.electives-panel { margin-top: 20px; padding: 20px; }
+.electives-panel-head { margin-bottom: 14px; }
+.electives-panel-head h3 { margin: 0 0 4px; font-size: 16px; }
+
+.electives-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.electives-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(6, 78, 59, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.electives-list li.editing { border-color: var(--primary, #15803d); background: rgba(21, 128, 61, 0.06); }
+.elective-name { flex: 1; font-weight: 600; font-size: 14px; }
+.elective-price { font-variant-numeric: tabular-nums; font-weight: 600; color: #0369a1; }
+.elective-delete { color: #dc2626; }
+.electives-empty { margin: 0 0 16px; }
+
+.electives-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.electives-form .form-control { flex: 1; min-width: 200px; }
+.electives-form .electives-price-input { flex: 0 0 130px; min-width: 110px; }
+
+@media (max-width: 640px) {
+  .electives-form .form-control,
+  .electives-form .electives-price-input { flex: 1 1 100%; }
+}
+
 .reg-form-label { display: block; margin-bottom: 8px; font-size: 14px; }
 .reg-form-hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 .reg-input-full { width: 100%; }
