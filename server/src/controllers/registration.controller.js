@@ -677,6 +677,91 @@ export const getTermElectives = async (req, res, next) => {
   }
 };
 
+/**
+ * Name and price for a new or edited elective. The price is charged to a
+ * family, so a blank or negative one must not reach the ledger — but an
+ * omitted price on create is fine, since Elective.price defaults to 130.
+ */
+const validateElectiveInput = ({ name, price }, { priceRequired = false } = {}) => {
+  if (!name || !String(name).trim()) return 'An elective name is required.';
+  const missing = price === undefined || price === null || price === '';
+  if (missing) return priceRequired ? 'A price is required.' : null;
+  const p = Number(price);
+  if (!Number.isFinite(p) || p < 0) return 'Price must be a non-negative number.';
+  return null;
+};
+
+// POST /api/registration/terms/:id/electives
+export const createElective = async (req, res, next) => {
+  try {
+    const { name, price } = req.body;
+    const problem = validateElectiveInput({ name, price });
+    if (problem) return res.status(400).json({ error: 'Validation Error', message: problem });
+
+    // Fails with P2025 -> 404 if the term doesn't exist, rather than leaving an
+    // elective pointing at nothing.
+    await prisma.registrationTerm.findUniqueOrThrow({ where: { id: req.params.id } });
+
+    const elective = await prisma.elective.create({
+      data: {
+        termId: req.params.id,
+        name: String(name).trim(),
+        // Left out, the schema default ($130, one quarter) applies.
+        ...(price === undefined || price === null || price === '' ? {} : { price: Number(price) }),
+      },
+    });
+
+    res.status(201).json({ elective: { id: elective.id, name: elective.name, price: Number(elective.price) } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/registration/electives/:electiveId
+export const updateElective = async (req, res, next) => {
+  try {
+    const { name, price } = req.body;
+    const problem = validateElectiveInput({ name: name ?? 'unchanged', price });
+    if (problem) return res.status(400).json({ error: 'Validation Error', message: problem });
+
+    const elective = await prisma.elective.update({
+      where: { id: req.params.electiveId },
+      data: {
+        ...(name !== undefined ? { name: String(name).trim() } : {}),
+        ...(price === undefined || price === null || price === '' ? {} : { price: Number(price) }),
+      },
+    });
+
+    res.json({ elective: { id: elective.id, name: elective.name, price: Number(elective.price) } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// DELETE /api/registration/electives/:electiveId
+export const deleteElective = async (req, res, next) => {
+  try {
+    // Families who already chose this elective were billed for it, so removing
+    // the row would rewrite what their invoice was made of. Blocked outright:
+    // the fix for "we're not offering it any more" is to stop listing it on the
+    // next term, not to erase it from the one that was charged.
+    const chosen = await prisma.registrationElectiveChoice.count({
+      where: { electiveId: req.params.electiveId },
+    });
+    if (chosen > 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: `This elective is already part of ${chosen} registration(s) and can't be deleted. Edit its name or price instead.`,
+      });
+    }
+
+    await prisma.elective.delete({ where: { id: req.params.electiveId } });
+    res.json({ message: 'Elective deleted.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 /**
  * PUT /api/registration/terms/:id
