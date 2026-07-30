@@ -15,6 +15,8 @@ import {
   getRegistrationClasses,
   getClassRoster,
   revokeHold,
+  moveRosterStudent,
+  removeFromWaitlist,
   sweepHolds,
   remindHolds,
   getBillingSummary,
@@ -52,6 +54,8 @@ router.post('/promote/:classId', authenticate, requireRole('ADMIN'), promoteFrom
 router.delete('/holds/:id', authenticate, requireRole('ADMIN'), revokeHold);
 router.post('/classes/:id/holds/sweep', authenticate, requireRole('ADMIN'), sweepHolds);
 router.post('/classes/:id/holds/remind', authenticate, requireRole('ADMIN'), remindHolds);
+router.post('/classes/:id/roster/:studentId/move', authenticate, requireRole('ADMIN'), moveRosterStudent);
+router.delete('/waitlist/:studentId', authenticate, requireRole('ADMIN'), removeFromWaitlist);
 
 router.get('/billing-summary', authenticate, requireRole('ADMIN'), getBillingSummary);
 router.post('/requests/:id/resend-email', authenticate, requireRole('ADMIN'), resendBillingEmail);

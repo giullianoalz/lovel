@@ -729,6 +729,8 @@
 .reg-roster-actions { display: flex; gap: 8px; margin-bottom: 16px; }
 .reg-btn-sm { font-size: 12px; padding: 4px 8px; }
 .reg-btn-danger { color: #dc2626; border-color: rgba(220, 38, 38, 0.2); }
+.reg-row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.reg-row-actions .btn-text.reg-btn-sm { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
 .reg-label-strong { display: block; margin-bottom: 8px; font-weight: 600; }
 
 /* Custom alert modal */

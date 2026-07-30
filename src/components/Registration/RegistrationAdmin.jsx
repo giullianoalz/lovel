@@ -523,6 +523,40 @@ const RegistrationAdmin = () => {
     }
   };
 
+  const handleMoveRosterStudent = async (studentId, destination) => {
+    try {
+      await api.post(`/registration/classes/${selectedCove}/roster/${studentId}/move`, { destination });
+      loadRoster(selectedCove);
+      loadClasses();
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Error moving student', 'Error', 'warning');
+    }
+  };
+
+  const handleRemoveFromWaitlist = (studentId, studentName) => {
+    showAlert(`Remove ${studentName} from the waitlist? This can't be undone.`, 'Remove from Waitlist', 'confirm', async () => {
+      try {
+        await api.delete(`/registration/waitlist/${studentId}?classId=${selectedCove}`);
+        loadRoster(selectedCove);
+        loadClasses();
+      } catch (error) {
+        console.error(error);
+      }
+    });
+  };
+
+  const handleRemoveFromRoster = (studentId, studentName) => {
+    showAlert(`Remove ${studentName} from this class? Use this only if they were added by mistake — it does not queue them for a hold or waitlist spot.`, 'Remove Student', 'confirm', async () => {
+      try {
+        await api.delete(`/classes/${selectedCove}/enrollments/${studentId}`);
+        loadRoster(selectedCove);
+        loadClasses();
+      } catch (error) {
+        console.error(error);
+      }
+    });
+  };
+
   const handleSweepHolds = (coveId) => {
     const holdsCount = rosterDetails.holds?.length || 0;
     if (holdsCount === 0) return showAlert('No expired holds to sweep.', 'Notice', 'warning');
@@ -1351,7 +1385,17 @@ const RegistrationAdmin = () => {
                         <User size={16} className="text-muted" />
                         <span>{student.name}</span>
                       </div>
-                      <span className="badge active">Enrolled</span>
+                      <div className="reg-row-actions">
+                        <button className="btn-text reg-btn-sm" title="Move to priority holds" onClick={() => handleMoveRosterStudent(student.id, 'hold')}>
+                          <Clock size={13} /> Hold
+                        </button>
+                        <button className="btn-text reg-btn-sm" title="Move to waitlist" onClick={() => handleMoveRosterStudent(student.id, 'waitlist')}>
+                          <Users size={13} /> Waitlist
+                        </button>
+                        <button className="btn-text reg-btn-sm reg-btn-danger" title="Unenroll from this class" onClick={() => handleRemoveFromRoster(student.id, student.name)}>
+                          <Trash2 size={13} /> Remove
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -1379,7 +1423,12 @@ const RegistrationAdmin = () => {
                         <Clock size={16} className="text-warning" />
                         <span>{student.name}</span>
                       </div>
-                      <button className="btn-text reg-btn-sm" onClick={() => handleRevokeHold(student.id)}>Revoke Hold</button>
+                      <div className="reg-row-actions">
+                        <button className="btn-text reg-btn-sm" title="Move to waitlist" onClick={() => handleMoveRosterStudent(student.id, 'waitlist')}>
+                          <Users size={13} /> Waitlist
+                        </button>
+                        <button className="btn-text reg-btn-sm" onClick={() => handleRevokeHold(student.id)}>Revoke Hold</button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -1404,6 +1453,14 @@ const RegistrationAdmin = () => {
                           <span>{student.name}</span>
                           <p className="text-xs text-muted" style={{ margin: 0 }}>Requested: {formatDateForDisplay(student.requestedAt)}</p>
                         </div>
+                      </div>
+                      <div className="reg-row-actions">
+                        <button className="btn-text reg-btn-sm" title="Move to priority holds" onClick={() => handleMoveRosterStudent(student.id, 'hold')}>
+                          <Clock size={13} /> Hold
+                        </button>
+                        <button className="btn-text reg-btn-sm reg-btn-danger" title="Remove (added by mistake)" onClick={() => handleRemoveFromWaitlist(student.id, student.name)}>
+                          <Trash2 size={13} />
+                        </button>
                       </div>
                     </li>
                   ))}

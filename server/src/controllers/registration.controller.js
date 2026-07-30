@@ -902,6 +902,78 @@ export const revokeHold = async (req, res, next) => {
 };
 
 /**
+ * POST /api/registration/classes/:id/roster/:studentId/move
+ * Pull a student out of a class's active roster and drop them into either the
+ * priority-hold queue or the waitlist for the same class — for a seat that was
+ * confirmed by mistake and needs to go back through the normal claim/queue flow
+ * instead of being enrolled outright.
+ */
+export const moveRosterStudent = async (req, res, next) => {
+  try {
+    const { id: classId, studentId } = req.params;
+    const { destination } = req.body; // 'hold' | 'waitlist'
+
+    if (!['hold', 'waitlist'].includes(destination)) {
+      return res.status(400).json({ message: "destination must be 'hold' or 'waitlist'." });
+    }
+
+    const classInfo = await prisma.class.findUniqueOrThrow({
+      where: { id: classId },
+      include: { term: true },
+    });
+
+    await prisma.$transaction(async (tx) => {
+      await tx.classEnrollment.updateMany({
+        where: { classId, studentId, status: 'active' },
+        data: { status: 'inactive' },
+      });
+
+      if (destination === 'hold') {
+        await tx.priorityHold.upsert({
+          where: { termId_studentId_classId: { termId: classInfo.termId, studentId, classId } },
+          update: { status: 'pending', expiresAt: classInfo.term.window2OpensAt },
+          create: { termId: classInfo.termId, studentId, classId, expiresAt: classInfo.term.window2OpensAt },
+        });
+      } else {
+        await tx.waitlistEntry.upsert({
+          where: { classId_studentId: { classId, studentId } },
+          update: { status: 'waiting', addedAt: new Date() },
+          create: { classId, studentId, status: 'waiting' },
+        });
+      }
+    });
+
+    invalidate('registration:classes:*');
+    res.json({ message: destination === 'hold' ? 'Student moved to priority holds.' : 'Student moved to the waitlist.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/registration/waitlist/:studentId?classId=
+ * Remove a student from a class's waitlist — for an entry added by mistake,
+ * mirrors revokeHold below for priority holds.
+ */
+export const removeFromWaitlist = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    const { classId } = req.query;
+
+    if (!classId) return res.status(400).json({ message: 'classId is required' });
+
+    await prisma.waitlistEntry.deleteMany({
+      where: { studentId, classId, status: 'waiting' },
+    });
+
+    invalidate('registration:classes:*');
+    res.json({ message: 'Removed from waitlist' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/registration/classes/:id/holds/sweep
  * Revoke all expired/unclaimed holds for a class
  */
