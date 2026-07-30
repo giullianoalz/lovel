@@ -53,6 +53,12 @@ const RegistrationAdmin = () => {
   const [allStudents, setAllStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
 
+  /* Quarterly tuition — preview first, then commit. */
+  const [quarterToBill, setQuarterToBill] = useState(1);
+  const [creditDeposit, setCreditDeposit] = useState(false);
+  const [quarterPreview, setQuarterPreview] = useState(null);
+  const [quarterLoading, setQuarterLoading] = useState(false);
+
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleMode, setScheduleMode] = useState('recurring'); // 'recurring' | 'single'
   const [scheduleForm, setScheduleForm] = useState({ startDate: '', endDate: '', weekdays: [], startTime: '10:00', endTime: '11:00' });
@@ -362,6 +368,46 @@ const RegistrationAdmin = () => {
     loadApplications();
   }, []);
 
+  const loadQuarterPreview = async () => {
+    if (!selectedTermForRoster) return;
+    setQuarterLoading(true);
+    try {
+      const res = await api.get('/registration/quarter-charges', {
+        params: { termId: selectedTermForRoster, quarter: quarterToBill, creditDeposit },
+      });
+      setQuarterPreview(res.data);
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Could not work out this quarter’s charges.', 'Error', 'warning');
+    }
+    setQuarterLoading(false);
+  };
+
+  // Money leaves a preview and lands on real ledgers here, so it asks first.
+  const handleGenerateQuarterCharges = () => {
+    if (!quarterPreview) return;
+    const { billable, total } = quarterPreview.summary;
+    showAlert(
+      `Raise ${billable} charge${billable === 1 ? '' : 's'} totalling $${total.toFixed(2)} for Quarter ${quarterToBill}? They'll appear on each family's account.`,
+      'Raise quarterly charges',
+      'confirm',
+      async () => {
+        setQuarterLoading(true);
+        try {
+          const res = await api.post('/registration/quarter-charges', {
+            termId: selectedTermForRoster,
+            quarter: quarterToBill,
+            creditDeposit,
+          });
+          showAlert(res.data.message, 'Done', 'info');
+          await loadQuarterPreview();
+        } catch (error) {
+          showAlert(error.response?.data?.message || 'Could not raise the charges.', 'Error', 'warning');
+        }
+        setQuarterLoading(false);
+      }
+    );
+  };
+
   const loadBillingSummary = async () => {
     if (!selectedTermForRoster) return;
     setBillingLoading(true);
@@ -485,6 +531,7 @@ const RegistrationAdmin = () => {
       regularRate: term.regularRate ?? '',
       anchoredRate: term.anchoredRate ?? '',
       depositDueDate: term.depositDueDate ? formatDateForInput(term.depositDueDate) : '',
+      quarter2StartsAt: term.quarter2StartsAt ? formatDateForInput(term.quarter2StartsAt) : '',
     });
     setEditTermModal(true);
   };
@@ -503,6 +550,7 @@ const RegistrationAdmin = () => {
         regularRate: editTermForm.regularRate,
         anchoredRate: editTermForm.anchoredRate,
         depositDueDate: editTermForm.depositDueDate || null,
+        quarter2StartsAt: editTermForm.quarter2StartsAt ? new Date(editTermForm.quarter2StartsAt).toISOString() : null,
       });
       setEditTermModal(false);
       loadTerms();
@@ -1529,6 +1577,107 @@ const RegistrationAdmin = () => {
               </button>
             </div>
 
+            {/* Quarterly tuition. A term is billed twice at the same rate, and
+                the amounts come off the roster as it stands right now — which
+                is what makes a drop or a class switch come out right. */}
+            <div className="glass-card quarter-charge-panel">
+              <div className="qc-head">
+                <div>
+                  <h3>Quarterly tuition</h3>
+                  <p className="text-muted text-xs" style={{ margin: '4px 0 0' }}>
+                    Charges are worked out from who is enrolled <strong>today</strong>. Make sure drops and
+                    class changes are recorded before you raise them.
+                  </p>
+                </div>
+                <div className="qc-controls">
+                  <select className="form-control" value={quarterToBill} onChange={(e) => { setQuarterToBill(Number(e.target.value)); setQuarterPreview(null); }}>
+                    <option value={1}>Quarter 1</option>
+                    <option value={2}>Quarter 2</option>
+                  </select>
+                  <label className="qc-check">
+                    <input
+                      type="checkbox"
+                      checked={creditDeposit}
+                      onChange={(e) => { setCreditDeposit(e.target.checked); setQuarterPreview(null); }}
+                      disabled={quarterToBill !== 1}
+                    />
+                    <span>Deduct the deposit already paid</span>
+                  </label>
+                  <button className="btn-outline" onClick={loadQuarterPreview} disabled={quarterLoading || !selectedTermForRoster}>
+                    {quarterLoading ? 'Working…' : 'Preview charges'}
+                  </button>
+                </div>
+              </div>
+
+              {quarterPreview && (
+                <>
+                  <div className="qc-summary">
+                    <span><strong>{quarterPreview.summary.billable}</strong> to charge</span>
+                    <span className="qc-total">${quarterPreview.summary.total.toFixed(2)}</span>
+                    {quarterPreview.summary.alreadyCharged > 0 && (
+                      <span className="badge active">{quarterPreview.summary.alreadyCharged} already charged</span>
+                    )}
+                    {quarterPreview.summary.missingFamily > 0 && (
+                      <span className="badge danger">{quarterPreview.summary.missingFamily} without a family</span>
+                    )}
+                  </div>
+
+                  {quarterPreview.lines.length === 0 ? (
+                    <p className="text-muted reg-search-empty">No active enrolments in this term yet.</p>
+                  ) : (
+                    <table className="data-table qc-table">
+                      <thead>
+                        <tr>
+                          <th>Student</th>
+                          <th>Enrolled in</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {quarterPreview.lines.map(l => (
+                          <tr key={l.studentId} className={l.alreadyCharged || l.missingFamily ? 'qc-row-muted' : ''}>
+                            <td className="font-semibold">{l.studentName}</td>
+                            <td className="text-sm">
+                              {l.classes.map(c => c.name).join(', ')}
+                              {l.electivesTotal > 0 && ` · electives $${l.electivesTotal.toFixed(2)}`}
+                              {l.ixlTotal > 0 && ` · IXL $${l.ixlTotal.toFixed(2)}`}
+                            </td>
+                            <td>
+                              ${l.amount.toFixed(2)}
+                              {l.depositCredit > 0 && (
+                                <span className="text-xs text-muted"> (−${l.depositCredit.toFixed(2)} deposit)</span>
+                              )}
+                            </td>
+                            <td>
+                              {l.alreadyCharged
+                                ? <span className="badge active">Charged ${Number(l.chargedAmount).toFixed(2)}</span>
+                                : l.missingFamily
+                                  ? <span className="badge danger">No family on file</span>
+                                  : <span className="badge pending">To charge</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  <div className="qc-actions">
+                    <button
+                      className="btn-primary"
+                      disabled={quarterLoading || quarterPreview.summary.billable === 0}
+                      onClick={handleGenerateQuarterCharges}
+                    >
+                      Raise {quarterPreview.summary.billable} charge{quarterPreview.summary.billable === 1 ? '' : 's'} (${quarterPreview.summary.total.toFixed(2)})
+                    </button>
+                    <span className="text-xs text-muted">
+                      Adds them to each family&apos;s ledger. Already-charged students are skipped, so this is safe to repeat.
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+
             <div className="rosters-table-container glass-card">
               <table className="rosters-table">
                 <thead>
@@ -1633,10 +1782,20 @@ const RegistrationAdmin = () => {
                     <input type="number" min="0" step="0.01" required className="form-control" value={editTermForm.anchoredRate} onChange={(e) => setEditTermForm({...editTermForm, anchoredRate: e.target.value})} />
                   </div>
                 </div>
-                <div>
-                  <label className="reg-form-label">Deposit Due Date (optional)</label>
-                  <input type="date" className="form-control" value={editTermForm.depositDueDate} onChange={(e) => setEditTermForm({...editTermForm, depositDueDate: e.target.value})} />
+                <div className="reg-date-row">
+                  <div>
+                    <label className="reg-form-label">Deposit Due Date (optional)</label>
+                    <input type="date" className="form-control" value={editTermForm.depositDueDate} onChange={(e) => setEditTermForm({...editTermForm, depositDueDate: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="reg-form-label">Second Quarter Starts</label>
+                    <input type="date" className="form-control" value={editTermForm.quarter2StartsAt} onChange={(e) => setEditTermForm({...editTermForm, quarter2StartsAt: e.target.value})} />
+                  </div>
                 </div>
+                <span className="reg-form-hint">
+                  The rates above are per quarter, and a term is billed twice. The second date is when
+                  that second round is due — raise it from Billing → Quarterly tuition.
+                </span>
               </div>
 
               <div className="reg-form-actions">

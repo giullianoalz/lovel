@@ -21,6 +21,8 @@ import {
   remindHolds,
   getBillingSummary,
   resendBillingEmail,
+  previewQuarterCharges,
+  generateQuarterCharges,
   adminRegisterStudent,
   getTermElectives,
   createElective,
@@ -58,6 +60,12 @@ router.post('/classes/:id/roster/:studentId/move', authenticate, requireRole('AD
 router.delete('/waitlist/:studentId', authenticate, requireRole('ADMIN'), removeFromWaitlist);
 
 router.get('/billing-summary', authenticate, requireRole('ADMIN'), getBillingSummary);
+
+// Quarterly tuition. The preview is read-only; the POST is what commits money,
+// so both stay admin-only and neither is cached — an amount has to reflect the
+// roster as it is right now, not a minute ago.
+router.get('/quarter-charges', authenticate, requireRole('ADMIN'), previewQuarterCharges);
+router.post('/quarter-charges', authenticate, requireRole('ADMIN'), generateQuarterCharges);
 router.post('/requests/:id/resend-email', authenticate, requireRole('ADMIN'), resendBillingEmail);
 
 // Self-signup review queue. Deliberately uncached: a placement made from this

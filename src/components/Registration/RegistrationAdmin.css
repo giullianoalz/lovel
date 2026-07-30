@@ -729,6 +729,28 @@
 .reg-roster-actions { display: flex; gap: 8px; margin-bottom: 16px; }
 .reg-btn-sm { font-size: 12px; padding: 4px 8px; }
 .reg-btn-danger { color: #dc2626; border-color: rgba(220, 38, 38, 0.2); }
+/* ─── Quarterly tuition panel (Billing tab) ─────────────────────────────── */
+.quarter-charge-panel { padding: 20px; margin-bottom: 20px; }
+.qc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.qc-head h3 { margin: 0; font-size: 16px; }
+.qc-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.qc-controls .form-control { width: auto; }
+.qc-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+.qc-check input { accent-color: var(--primary); }
+.qc-check input:disabled + span { opacity: 0.45; }
+
+.qc-summary {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-top: 16px; padding: 12px 14px;
+  background: var(--primary-light); border-radius: 10px; font-size: 14px;
+}
+.qc-total { font-size: 20px; font-weight: 700; color: var(--primary); }
+
+.qc-table { margin-top: 14px; }
+.qc-row-muted { opacity: 0.55; }
+
+.qc-actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+
 .reg-row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .reg-row-actions .btn-text.reg-btn-sm { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
 .reg-label-strong { display: block; margin-bottom: 8px; font-weight: 600; }

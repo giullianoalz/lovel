@@ -3,6 +3,7 @@ import prisma from '../config/database.js';
 import { hasRole } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
 import { calculateRegistrationBilling } from '../services/registrationPricing.service.js';
+import { buildQuarterCharges } from '../services/quarterlyBilling.service.js';
 import { sendRegistrationBillingEmail } from '../services/email.service.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 
@@ -771,7 +772,7 @@ export const deleteElective = async (req, res, next) => {
 export const updateTerm = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses, regularRate, anchoredRate, depositDueDate } = req.body;
+    const { name, window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses, regularRate, anchoredRate, depositDueDate, quarter2StartsAt } = req.body;
 
     const orderError = validateWindowOrder({ window1OpensAt, window2OpensAt, window3OpensAt, registrationCloses });
     if (orderError) return res.status(400).json({ message: orderError });
@@ -794,6 +795,7 @@ export const updateTerm = async (req, res, next) => {
         ...(regularRate !== undefined && { regularRate: Number(regularRate) }),
         ...(anchoredRate !== undefined && { anchoredRate: Number(anchoredRate) }),
         ...(depositDueDate !== undefined && { depositDueDate: depositDueDate ? new Date(depositDueDate) : null }),
+        ...(quarter2StartsAt !== undefined && { quarter2StartsAt: quarter2StartsAt ? new Date(quarter2StartsAt) : null }),
       }
     });
     invalidate('registration:terms');
@@ -974,6 +976,78 @@ export const removeFromWaitlist = async (req, res, next) => {
 
     invalidate('registration:classes:*');
     res.json({ message: 'Removed from waitlist' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/registration/quarter-charges?termId=&quarter=&creditDeposit=
+ * What each enrolled student would be charged for this quarter. Read-only —
+ * this is the sheet an admin checks before any money is committed.
+ */
+export const previewQuarterCharges = async (req, res, next) => {
+  try {
+    const { termId, quarter, creditDeposit } = req.query;
+    if (!termId) return res.status(400).json({ message: 'termId is required.' });
+
+    const q = Number(quarter);
+    if (![1, 2].includes(q)) return res.status(400).json({ message: 'quarter must be 1 or 2.' });
+
+    const preview = await buildQuarterCharges(termId, q, { creditDeposit: creditDeposit === 'true' });
+    res.json(preview);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/registration/quarter-charges
+ * Body: { termId, quarter, creditDeposit? }
+ * Raises the quarter's tuition as Transactions, which is what the existing
+ * invoicing screen bundles into an invoice.
+ *
+ * Recomputed here rather than trusting amounts posted by the client: the
+ * browser must not be able to name the price. Re-running is safe — the unique
+ * index on (studentId, termId, quarter) refuses a second charge for the same
+ * quarter, so a double click or a retry after a timeout can't bill twice.
+ */
+export const generateQuarterCharges = async (req, res, next) => {
+  try {
+    const { termId, quarter, creditDeposit = false } = req.body;
+    if (!termId) return res.status(400).json({ message: 'termId is required.' });
+
+    const q = Number(quarter);
+    if (![1, 2].includes(q)) return res.status(400).json({ message: 'quarter must be 1 or 2.' });
+
+    const { term, lines } = await buildQuarterCharges(termId, q, { creditDeposit: !!creditDeposit });
+    const billable = lines.filter(l => !l.alreadyCharged && !l.missingFamily && l.amount > 0);
+
+    if (billable.length === 0) {
+      return res.json({ message: 'Nothing to charge — every enrolled student is already billed for this quarter.', created: 0 });
+    }
+
+    const created = await prisma.transaction.createMany({
+      data: billable.map(l => ({
+        studentId: l.studentId,
+        familyId: l.familyId,
+        amount: l.amount,
+        type: 'CHARGE',
+        description: `${term.name} — Quarter ${q} tuition`,
+        termId,
+        quarter: q,
+      })),
+      // Belt and braces alongside the unique index: a concurrent second run
+      // skips what it finds rather than failing the whole batch.
+      skipDuplicates: true,
+    });
+
+    const skipped = lines.length - billable.length;
+    res.json({
+      message: `Raised ${created.count} charge${created.count === 1 ? '' : 's'} for Quarter ${q}.`,
+      created: created.count,
+      skipped,
+    });
   } catch (error) {
     next(error);
   }

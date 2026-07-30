@@ -359,6 +359,12 @@ model Transaction {
   type        TransactionType
   description String?
   date        DateTime        @default(now()) @db.Date
+  // Set only on tuition raised by the quarterly billing run. The unique index
+  // below is what makes that run safe to repeat: a second attempt for the same
+  // student and quarter is refused by the database rather than double-charged.
+  // Postgres treats NULLs as distinct, so every other transaction is untouched.
+  termId      String?         @map("term_id") @db.Uuid
+  quarter     Int?
   invoiceId   String?         @map("invoice_id") @db.Uuid
   paymentId   String?         @map("payment_id") @db.Uuid
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -367,6 +373,7 @@ model Transaction {
   payment     Payment?        @relation(fields: [paymentId], references: [id])
   student     User?           @relation(fields: [studentId], references: [id])
 
+  @@unique([studentId, termId, quarter])
   @@index([familyId])
   @@index([date])
   @@map("transactions")
@@ -657,6 +664,11 @@ model RegistrationTerm {
   registrationCloses DateTime              @map("registration_closes") @db.Timestamptz(6)
   regularRate        Decimal               @default(0) @map("regular_rate") @db.Decimal(10, 2)
   anchoredRate       Decimal               @default(0) @map("anchored_rate") @db.Decimal(10, 2)
+  // A term is billed in two quarters at the same rate. Q1 runs from startDate;
+  // this is when Q2 begins, and so when the quarter's charges are raised again
+  // — off the roster as it stands that day, which is what makes an eight-week
+  // student or a mid-term class switch come out right.
+  quarter2StartsAt   DateTime?             @map("quarter2_starts_at") @db.Timestamptz(6)
   depositDueDate     DateTime?             @map("deposit_due_date") @db.Date
   calendarAssetUrl   String?               @map("calendar_asset_url")
   createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
