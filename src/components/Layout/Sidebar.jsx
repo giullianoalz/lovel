@@ -33,8 +33,15 @@ import { InstallNavItem } from './InstallNavItem';
 import { getNotificationLink } from '../../lib/notificationLink';
 import './Sidebar.css';
 
+const ROLE_LABELS = {
+  ADMIN: 'Administrator',
+  TEACHER: 'Teacher',
+  PARENT: 'Parent',
+  STUDENT: 'Student',
+};
+
 const Sidebar = () => {
-  const { user, role, logout } = useAuth();
+  const { user, role, roles, hasRole, logout } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const [isOpen, setIsOpen] = useState(false);
@@ -54,7 +61,7 @@ const Sidebar = () => {
   // 15 minutes. Rechecked every minute against the schedule fetched on mount.
   const [classStartingSoon, setClassStartingSoon] = useState(false);
   useEffect(() => {
-    if (role !== 'TEACHER' && role !== 'ADMIN') return;
+    if (!hasRole('TEACHER', 'ADMIN')) return;
     let schedule = [];
     const checkSoon = () => {
       const now = new Date();
@@ -94,7 +101,7 @@ const Sidebar = () => {
   const [quietSaving, setQuietSaving] = useState(false);
 
   useEffect(() => {
-    if (role === 'TEACHER' && user?.id) {
+    if (hasRole('TEACHER') && user?.id) {
       api.get(`/users/${user.id}`).then(r => {
         const u = r.data.user || r.data;
         if (u.quietHoursStart) {
@@ -188,26 +195,26 @@ const Sidebar = () => {
         <nav className="sidebar-nav">
           <div className="nav-section">
             <p className="nav-label">Main</p>
-            {role === 'STUDENT' && (
+            {hasRole('STUDENT') && (
               <NavLink to="/portal/student" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <UserCircle size={20} />
                 <span>My Portal</span>
               </NavLink>
             )}
-            {role === 'PARENT' && (
+            {hasRole('PARENT') && (
               <NavLink to="/portal/parent" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Users size={20} />
                 <span>Family Portal</span>
               </NavLink>
             )}
-            {user?.role === 'ADMIN' && (
+            {hasRole('ADMIN') && (
               <NavLink to="/alerts" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Bell size={20} />
                 <span>Front Desk Alerts</span>
                 {alertsUnread > 0 && <span className="nav-item-badge">{alertsUnread > 9 ? '9+' : alertsUnread}</span>}
               </NavLink>
             )}
-            {(role === 'TEACHER' || role === 'ADMIN') && (
+            {hasRole('TEACHER', 'ADMIN') && (
               <NavLink to="/portal/teacher" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Compass size={20} />
                 <span>Teacher Portal</span>
@@ -228,13 +235,13 @@ const Sidebar = () => {
               <Calendar size={20} />
               <span>Calendar</span>
             </NavLink>
-            {(role === 'ADMIN' || role === 'TEACHER') && (
+            {hasRole('ADMIN', 'TEACHER') && (
               <NavLink to="/students" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Users size={20} />
                 <span>Directory</span>
               </NavLink>
             )}
-            {role === 'TEACHER' && (
+            {hasRole('TEACHER') && (
               <NavLink to="/my-payroll" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Wallet size={20} />
                 <span>My Payroll</span>
@@ -243,10 +250,10 @@ const Sidebar = () => {
             <InstallNavItem onNavigate={closeMenu} />
           </div>
 
-          {(role === 'ADMIN' || role === 'TEACHER') && (
+          {hasRole('ADMIN', 'TEACHER') && (
             <div className="nav-section">
               <p className="nav-label">Administration</p>
-              {role === 'ADMIN' && (
+              {hasRole('ADMIN') && (
                 <>
                   <NavLink to="/billing" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                     <CreditCard size={20} />
@@ -267,31 +274,31 @@ const Sidebar = () => {
                 <Camera size={20} />
                 <span>Marketing Hub</span>
               </NavLink>
-              {role === 'ADMIN' && (
+              {hasRole('ADMIN') && (
                 <NavLink to="/supervision" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                   <BookOpenCheck size={20} />
                   <span>Academic Supervision</span>
                 </NavLink>
               )}
-              {role === 'ADMIN' && (
+              {hasRole('ADMIN') && (
                 <NavLink to="/medical" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                   <Heart size={20} />
                   <span>Medical Incidents</span>
                 </NavLink>
               )}
-              {role === 'ADMIN' && (
+              {hasRole('ADMIN') && (
                 <NavLink to="/lesson-plans" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                   <BookOpen size={20} />
                   <span>Lesson Plans</span>
                 </NavLink>
               )}
-              {role === 'ADMIN' && (
+              {hasRole('ADMIN') && (
                 <NavLink to="/settings/notifications" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                   <Bell size={20} />
                   <span>Notification Settings</span>
                 </NavLink>
               )}
-              {role === 'ADMIN' && (
+              {hasRole('ADMIN') && (
                 <NavLink to="/settings/integrations" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                   <Plug size={20} />
                   <span>Integrations</span>
@@ -301,7 +308,7 @@ const Sidebar = () => {
           )}
         </nav>
 
-        {role === 'TEACHER' && (
+        {hasRole('TEACHER') && (
           <div className="quiet-hours-section">
             <button className={`quiet-toggle-btn ${quietActive ? 'active' : ''}`} onClick={() => setQuietOpen(!quietOpen)}>
               <MoonStar size={16} />
@@ -351,11 +358,10 @@ const Sidebar = () => {
             </div>
             <div className="user-info">
               <p className="user-name">{user ? user.fullName : 'User'}</p>
+              {/* Every hat, not just the primary one — someone who teaches and
+                  has a child here should see both named back to them. */}
               <p className="user-role">
-                {role === 'ADMIN' && 'Administrator'}
-                {role === 'TEACHER' && 'Teacher'}
-                {role === 'PARENT' && 'Parent'}
-                {role === 'STUDENT' && 'Student'}
+                {roles.map(r => ROLE_LABELS[r] || r).join(' · ')}
               </p>
             </div>
           </div>

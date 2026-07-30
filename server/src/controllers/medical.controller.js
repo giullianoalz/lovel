@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { isOnly } from '../utils/roles.js';
 import { notifyAdmins, sendNotification } from '../jobs/notification.helper.js';
 
 export const createMedicalLog = async (req, res, next) => {
@@ -55,7 +56,7 @@ export const listMedicalLogs = async (req, res, next) => {
     if (studentId) where.studentId = studentId;
     if (status) where.status = status;
 
-    if (req.user.role === 'TEACHER') {
+    if (isOnly(req.user, 'TEACHER')) {
       where.teacherId = req.user.id;
     }
 

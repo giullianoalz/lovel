@@ -10,7 +10,7 @@ import './ChatHub.css';
 const MEDIA_BASE = SOCKET_URL;
 
 const ChatHub = () => {
-  const { role, user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [activeChat, setActiveChat] = useState(null);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -472,16 +472,16 @@ const ChatHub = () => {
               <button className="chat-new-msg-btn" onClick={() => setShowNewMsgMenu(!showNewMsgMenu)}>+ New</button>
               {showNewMsgMenu && (
                 <div className="chat-new-msg-menu">
-                  {role === 'PARENT' && (
+                  {hasRole('PARENT') && (
                     <button onClick={() => handleNewMessage('teacher')}>Message Teacher</button>
                   )}
-                  {role !== 'ADMIN' && (
+                  {!hasRole('ADMIN') && (
                     <button onClick={() => handleNewMessage('management')}>Message Management</button>
                   )}
-                  {(role === 'TEACHER' || role === 'ADMIN') && (
+                  {hasRole('TEACHER', 'ADMIN') && (
                     <button onClick={() => handleNewMessage('ocean-navigators')}>Ocean Navigators</button>
                   )}
-                  {(role === 'ADMIN' || role === 'TEACHER') && (
+                  {hasRole('ADMIN', 'TEACHER') && (
                     <button onClick={() => handleNewMessage('people')}>New Conversation</button>
                   )}
                 </div>

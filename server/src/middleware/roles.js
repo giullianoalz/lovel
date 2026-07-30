@@ -5,7 +5,12 @@
  * Usage:
  *   router.get('/admin-only', authenticate, requireRole('ADMIN'), handler)
  *   router.get('/staff', authenticate, requireRole('ADMIN', 'TEACHER'), handler)
+ *
+ * Both guards below match against every role the account holds, not just its
+ * primary one, so a teacher who is also a parent reaches both sets of routes.
  */
+
+import { allRoles, hasRole } from '../utils/roles.js';
 
 /**
  * Requires the authenticated user to have one of the specified roles
@@ -20,10 +25,10 @@ export const requireRole = (...allowedRoles) => {
       });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    if (!hasRole(req.user, allowedRoles)) {
       return res.status(403).json({
         error: 'Forbidden',
-        message: `Access denied. Required role: ${allowedRoles.join(' or ')}. Your role: ${req.user.role}`,
+        message: `Access denied. Required role: ${allowedRoles.join(' or ')}. Your role: ${allRoles(req.user).join(', ')}`,
       });
     }
 
@@ -45,9 +50,9 @@ export const requireSelfOrRole = (...allowedRoles) => {
     }
 
     const isOwner = req.params.id === req.user.id;
-    const hasRole = allowedRoles.includes(req.user.role);
+    const elevated = hasRole(req.user, allowedRoles);
 
-    if (!isOwner && !hasRole) {
+    if (!isOwner && !elevated) {
       return res.status(403).json({
         error: 'Forbidden',
         message: 'You can only access your own resources, or you need an elevated role.',

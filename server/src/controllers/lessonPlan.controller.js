@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { isOnly } from '../utils/roles.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 
 export const createLessonPlan = async (req, res, next) => {
@@ -73,7 +74,7 @@ export const listLessonPlans = async (req, res, next) => {
     if (teacherId) where.teacherId = teacherId;
     if (status) where.status = status;
     if (weekOf) where.weekOf = new Date(weekOf);
-    if (req.user.role === 'TEACHER') where.teacherId = req.user.id;
+    if (isOnly(req.user, 'TEACHER')) where.teacherId = req.user.id;
 
     const lessonPlans = await prisma.lessonPlan.findMany({
       where,

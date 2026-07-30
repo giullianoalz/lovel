@@ -9,10 +9,13 @@ import './StudentProfileModal.css';
 
 const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => {
   const toast = useToast();
-  const { role } = useAuth();
+  const { hasRole } = useAuth();
   // Teachers only see academic/behavioral info — parent contact and billing stay
   // inside the app so families can't be solicited directly outside of it.
-  const isTeacher = role === 'TEACHER';
+  // The server is the authority on that and simply omits what this viewer may
+  // not have, so the contact blocks follow the data: a teacher-parent looking at
+  // her own child does get it back, without this component having to know why.
+  const isTeacher = hasRole('TEACHER') && !hasRole('ADMIN');
   const [student, setStudent] = useState(initialStudent);
   const [, setLoading] = useState(true);
   const [showCabinet, setShowCabinet] = useState(false);
@@ -236,7 +239,10 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                 </div>
               )}
 
-              {!isTeacher && (
+              {/* Shown whenever the server sent contact details — it withholds
+                  them from teachers except for their own children, so following
+                  the data is what lets a teacher-parent see her own family. */}
+              {(!isTeacher || student.parentName) && (
                 <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
                   <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'No Parent Assigned'}</p>

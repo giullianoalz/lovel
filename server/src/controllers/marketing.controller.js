@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { hasRole, isOnly } from '../utils/roles.js';
 import path from 'path';
 import fs from 'fs';
 import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
@@ -50,7 +51,7 @@ export const listSubmissions = async (req, res, next) => {
     const where = {};
 
     // Teachers only see their own submissions
-    if (req.user.role === 'TEACHER') {
+    if (isOnly(req.user, 'TEACHER')) {
       where.teacherId = req.user.id;
     }
 
@@ -112,7 +113,7 @@ export const uploadPhotos = async (req, res, next) => {
       return res.status(404).json({ error: 'Not Found', message: 'Submission not found.' });
     }
 
-    if (req.user.role !== 'ADMIN' && submission.teacherId !== req.user.id) {
+    if (!hasRole(req.user, 'ADMIN') && submission.teacherId !== req.user.id) {
       return res.status(403).json({ error: 'Forbidden', message: 'You can only upload to your own submissions.' });
     }
 

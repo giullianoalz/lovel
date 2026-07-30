@@ -14,7 +14,7 @@ const STAT_CARDS = [
 
 const MedicalIncidents = () => {
   const toast = useToast();
-  const { role } = useAuth();
+  const { hasRole } = useAuth();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -143,8 +143,8 @@ const MedicalIncidents = () => {
                 return (
                   <tr
                     key={log.id}
-                    onClick={() => role === 'ADMIN' && openReview(log)}
-                    className={`${role === 'ADMIN' ? 'mi-row-clickable' : ''} ${isUnreviewed ? 'mi-row-unreviewed' : 'mi-row-reviewed'}`}
+                    onClick={() => hasRole('ADMIN') && openReview(log)}
+                    className={`${hasRole('ADMIN') ? 'mi-row-clickable' : ''} ${isUnreviewed ? 'mi-row-unreviewed' : 'mi-row-reviewed'}`}
                   >
                     <td>
                       <div className="mi-td-date-main">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>

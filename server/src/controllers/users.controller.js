@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { isOnly } from '../utils/roles.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
 
 /**
@@ -70,7 +71,7 @@ export const listUsers = async (req, res, next) => {
     // families of students currently enrolled in their own classes — never
     // the whole parent/student directory, which would let a teacher find and
     // privately message a family that isn't theirs.
-    if (req.user.role === 'TEACHER') {
+    if (isOnly(req.user, 'TEACHER')) {
       const enrollments = await prisma.classEnrollment.findMany({
         where: { status: 'active', class: { teacherId: req.user.id } },
         select: { studentId: true },

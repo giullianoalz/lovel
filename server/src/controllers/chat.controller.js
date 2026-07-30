@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import prisma from '../config/database.js';
+import { hasRole } from '../utils/roles.js';
 import { generateAssistantReply } from '../services/ai.service.js';
 import { findContactInfo } from '../utils/contentFilter.js';
 import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
@@ -255,11 +256,11 @@ export const createThread = async (req, res, next) => {
     // This endpoint only creates direct 1:1 threads — group threads must go
     // through POST /api/chat/group, which builds its own participant list
     // server-side instead of trusting a client-supplied array.
-    if (!isBot && allParticipants.length !== 2 && req.user.role !== 'ADMIN') {
+    if (!isBot && allParticipants.length !== 2 && !hasRole(req.user, 'ADMIN')) {
       return res.status(403).json({ error: 'Only admins can start a thread with multiple participants directly.' });
     }
 
-    if (!isBot && allParticipants.length === 2 && req.user.role !== 'ADMIN') {
+    if (!isBot && allParticipants.length === 2 && !hasRole(req.user, 'ADMIN')) {
       const [a, b] = allParticipants;
       const allowed = await canOpenDirectThread(a, b);
       if (!allowed) {
@@ -325,7 +326,7 @@ export const createGroupThread = async (req, res, next) => {
     // to message each other), and OCEAN_NAVIGATORS is the internal staff
     // channel — neither is something a parent or student should be able to
     // spin up. MANAGEMENT stays open to everyone: reaching admins is allowed.
-    if ((groupType === 'CLASS' || groupType === 'OCEAN_NAVIGATORS') && !['TEACHER', 'ADMIN'].includes(req.user.role)) {
+    if ((groupType === 'CLASS' || groupType === 'OCEAN_NAVIGATORS') && !hasRole(req.user, 'TEACHER', 'ADMIN')) {
       return res.status(403).json({ error: 'Not allowed to create this group thread.' });
     }
 
@@ -338,10 +339,14 @@ export const createGroupThread = async (req, res, next) => {
       
       const parents = await prisma.familyMember.findMany({
         where: { userId: { in: students } },
-        select: { family: { select: { members: { select: { userId: true, user: { select: { role: true } } } } } } }
+        select: { family: { select: { members: { select: { userId: true, user: { select: { role: true, secondaryRoles: true } } } } } } }
       });
-      
-      participantIds = parents.flatMap(f => f.family.members.filter(m => m.user.role === 'PARENT').map(m => m.userId));
+
+      // Matched on any role held, not just the primary one: a teacher whose own
+      // child is on this roster is a parent of this class too, and filtering on
+      // `role` alone would silently leave her out of her child's thread.
+      participantIds = parents.flatMap(f =>
+        f.family.members.filter(m => hasRole(m.user, 'PARENT')).map(m => m.userId));
       name = `Class ${enrollments[0]?.class?.name || 'Announcements'}`;
     } else if (groupType === 'MANAGEMENT') {
       const managers = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true } });
@@ -533,7 +538,7 @@ export const sendMessage = async (req, res, next) => {
     // Quiet Hours: if any other participant (a teacher) has quiet hours active right
     // now, send their auto-response once per thread per day and flag the manager if
     // the teacher hasn't replied within 1 business day.
-    if (!participant.thread.isBot && req.user.role !== 'TEACHER') {
+    if (!participant.thread.isBot && !hasRole(req.user, 'TEACHER')) {
       (async () => {
         try {
           const otherParticipants = await prisma.chatParticipant.findMany({
@@ -541,7 +546,7 @@ export const sendMessage = async (req, res, next) => {
             include: { user: true },
           });
           const quietTeacher = otherParticipants.find(p =>
-            p.user.role === 'TEACHER' &&
+            hasRole(p.user, 'TEACHER') &&
             isWithinQuietHours(p.user.quietHoursStart, p.user.quietHoursEnd)
           );
           if (!quietTeacher) return;

@@ -83,9 +83,9 @@ const MediaCarousel = ({ media, alt }) => {
 };
 
 const AcademyFeed = () => {
-  const { user, role } = useAuth();
+  const { user, hasRole } = useAuth();
   const toast = useToast();
-  const canPost = role === 'ADMIN';
+  const canPost = hasRole('ADMIN');
 
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -247,7 +247,7 @@ const AcademyFeed = () => {
               {AUDIENCES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
             </select>
 
-            {role === 'ADMIN' && (
+            {hasRole('ADMIN') && (
               <label className="composer-pin-toggle">
                 <input
                   type="checkbox"
@@ -284,7 +284,7 @@ const AcademyFeed = () => {
           posts.map(post => {
             const cat = categoryMeta(post.category);
             const Icon = cat.icon;
-            const canDelete = role === 'ADMIN' || post.authorId === user?.id;
+            const canDelete = hasRole('ADMIN') || post.authorId === user?.id;
             return (
               <div key={post.id} className={`feed-card ${post.isPinned ? 'pinned' : ''}`}>
                 {post.isPinned && <div className="feed-pinned-tag"><Pin size={12} /> Pinned</div>}

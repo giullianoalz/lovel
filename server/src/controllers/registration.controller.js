@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../config/database.js';
+import { hasRole } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
 import { calculateRegistrationBilling } from '../services/registrationPricing.service.js';
 import { sendRegistrationBillingEmail } from '../services/email.service.js';
@@ -185,7 +186,7 @@ export const seedPriorityHolds = async (req, res, next) => {
  * /admin-register, so submitting on a family's behalf never 403s.
  */
 const canActForStudent = async (user, studentId) => {
-  if (user.role === 'ADMIN') return true;
+  if (hasRole(user, 'ADMIN')) return true;
 
   const link = await prisma.familyMember.findFirst({
     where: {

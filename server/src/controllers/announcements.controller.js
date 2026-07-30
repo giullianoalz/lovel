@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { allRoles, hasRole } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
 
 export const createAnnouncement = async (req, res, next) => {
@@ -10,7 +11,7 @@ export const createAnnouncement = async (req, res, next) => {
     }
 
     // Only admins may pin a post to the top of the feed.
-    const canPin = req.user.role === 'ADMIN';
+    const canPin = hasRole(req.user, 'ADMIN');
     const files = req.files || [];
     const isVideo = (mimetype) => mimetype.startsWith('video/');
 
@@ -52,7 +53,11 @@ export const createAnnouncement = async (req, res, next) => {
       where: {
         status: 'ACTIVE',
         id: { not: req.user.id },
-        ...(roleFilter ? { role: roleFilter } : {}),
+        // Secondary roles count too, or a teacher who is also a parent would
+        // never be pushed the announcements aimed at families.
+        ...(roleFilter
+          ? { OR: [{ role: roleFilter }, { secondaryRoles: { has: roleFilter } }] }
+          : {}),
       },
       select: { id: true },
     }).then(recipients => {
@@ -79,7 +84,7 @@ export const deleteAnnouncement = async (req, res, next) => {
     if (!existing) return res.status(404).json({ error: 'Not Found' });
 
     const isAuthor = existing.authorId === req.user.id;
-    if (req.user.role !== 'ADMIN' && !isAuthor) {
+    if (!hasRole(req.user, 'ADMIN') && !isAuthor) {
       return res.status(403).json({ error: 'Forbidden', message: 'You can only delete your own posts.' });
     }
 
@@ -95,13 +100,12 @@ export const listAnnouncements = async (req, res, next) => {
   try {
     const userId = req.user.id;
     
-    const baseWhere = req.user.role === 'ADMIN' 
-      ? {} 
+    // Matched against every role the account holds, so a teacher who is also a
+    // parent sees both the staff feed and the one meant for families.
+    const baseWhere = hasRole(req.user, 'ADMIN')
+      ? {}
       : {
-          OR: [
-            { targetAudience: 'all' },
-            { targetAudience: req.user.role.toLowerCase() }
-          ]
+          targetAudience: { in: ['all', ...allRoles(req.user).map(r => r.toLowerCase())] },
         };
 
     const announcements = await prisma.announcement.findMany({

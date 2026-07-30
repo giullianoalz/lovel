@@ -54,9 +54,11 @@ const SmartDashboard = () => {
   return <Dashboard />;
 };
 
-// Helper component to restrict access based on authentication status and roles
+// Helper component to restrict access based on authentication status and roles.
+// Matches on every role the account holds, so a teacher who is also a parent
+// reaches both the Teacher Portal and her own family's.
 const ProtectedRoute = ({ children, allowedRoles }) => {
-  const { user, role, loading } = useAuth();
+  const { user, hasRole, loading } = useAuth();
 
   if (loading) {
     return (
@@ -72,7 +74,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(role)) {
+  if (allowedRoles && !hasRole(allowedRoles)) {
     return <Navigate to="/dashboard" replace />;
   }
 

@@ -197,9 +197,18 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   };
 
+  // An account can wear more than one hat — a teacher who also enrols her own
+  // children, say — because sign-in is tied 1:1 to a Firebase email and she
+  // can't hold two accounts. `role` stays the primary one (it decides where
+  // she lands); `roles` is what anything gating on capability should read.
+  const roles = user ? [user.role, ...(user.secondaryRoles || [])].filter(Boolean) : [];
+  const hasRole = (...wanted) => wanted.flat().some(r => roles.includes(r));
+
   const value = {
     user,
     role,
+    roles,
+    hasRole,
     loading,
     isDevBypass,
     loginWithEmail,

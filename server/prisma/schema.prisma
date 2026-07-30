@@ -13,7 +13,14 @@ model User {
   firebaseUid            String                    @unique @map("firebase_uid") @db.VarChar(128)
   email                  String                    @unique @db.VarChar(255)
   fullName               String                    @map("full_name") @db.VarChar(255)
+  // Primary role: decides where this account lands after signing in, and stays
+  // the single answer for the many places that only need one.
   role                   UserRole
+  // Extra hats the same person wears. Staff who are also parents here (a
+  // teacher enrolling her own children) can't be two accounts: sign-in is tied
+  // 1:1 to a Firebase email. Permission checks read primary + secondary
+  // together via hasRole(); see server/src/utils/roles.js.
+  secondaryRoles         UserRole[]                @default([]) @map("secondary_roles")
   phone                  String?                   @db.VarChar(20)
   avatarUrl              String?                   @map("avatar_url")
   status                 UserStatus                @default(ACTIVE)

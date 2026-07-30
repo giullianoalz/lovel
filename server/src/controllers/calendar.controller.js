@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import prisma from '../config/database.js';
+import { hasRole } from '../utils/roles.js';
 
 export const getCalendarData = async (req, res, next) => {
   try {
@@ -13,7 +14,7 @@ export const getCalendarData = async (req, res, next) => {
     // where front desk/admins need to see everyone's time off at a glance.
     // It's gated to staff roles and never used by the self-service "My PTO"
     // panel, which always omits it and stays scoped to the caller only.
-    const isOrgWide = orgWide === 'true' && ['ADMIN', 'TEACHER'].includes(req.user.role);
+    const isOrgWide = orgWide === 'true' && hasRole(req.user, 'ADMIN', 'TEACHER');
 
     let sessions = [];
     let ptoRequests = [];

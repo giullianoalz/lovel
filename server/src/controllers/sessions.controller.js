@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { hasRole } from '../utils/roles.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 import {
@@ -33,30 +34,43 @@ const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
  * (date range, classId, teacherId) instead of replacing them.
  */
 const sessionScope = async (user) => {
-  if (user.role === 'ADMIN') return {};
-  if (user.role === 'TEACHER') return { class: { teacherId: user.id } };
+  if (hasRole(user, 'ADMIN')) return {};
 
-  // A student sees their own classes; a parent sees their children's. Both
-  // resolve to a set of student ids, so they share one branch.
-  let studentIds = [user.id];
-  if (user.role === 'PARENT') {
-    const familyMembers = await prisma.familyMember.findMany({
-      where: { userId: user.id },
-      select: { familyId: true },
-    });
-    const children = await prisma.familyMember.findMany({
-      where: {
-        familyId: { in: familyMembers.map((f) => f.familyId) },
-        user: { role: 'STUDENT' },
-      },
-      select: { userId: true },
-    });
-    studentIds = children.map((c) => c.userId);
+  // Each role the account holds contributes what it may see, and the branches
+  // are ORed: a teacher who is also a parent watches her own classes *and* her
+  // children's, which a single-branch scope would have forced her to choose
+  // between.
+  const branches = [];
+
+  if (hasRole(user, 'TEACHER')) {
+    branches.push({ class: { teacherId: user.id } });
   }
 
-  return {
-    class: { enrollments: { some: { studentId: { in: studentIds }, status: 'active' } } },
-  };
+  if (hasRole(user, 'STUDENT', 'PARENT')) {
+    // A student sees their own classes; a parent sees their children's. Both
+    // resolve to a set of student ids, so they share one branch.
+    let studentIds = hasRole(user, 'STUDENT') ? [user.id] : [];
+    if (hasRole(user, 'PARENT')) {
+      const familyMembers = await prisma.familyMember.findMany({
+        where: { userId: user.id },
+        select: { familyId: true },
+      });
+      const children = await prisma.familyMember.findMany({
+        where: {
+          familyId: { in: familyMembers.map((f) => f.familyId) },
+          user: { role: 'STUDENT' },
+        },
+        select: { userId: true },
+      });
+      studentIds = [...new Set([...studentIds, ...children.map((c) => c.userId)])];
+    }
+    branches.push({
+      class: { enrollments: { some: { studentId: { in: studentIds }, status: 'active' } } },
+    });
+  }
+
+  if (branches.length === 0) return { id: { in: [] } }; // no role, nothing visible
+  return branches.length === 1 ? branches[0] : { OR: branches };
 };
 
 /**
@@ -107,7 +121,7 @@ export const listSessions = async (req, res, next) => {
 export const getSession = async (req, res, next) => {
   try {
     const scope = await sessionScope(req.user);
-    const isStaff = ['ADMIN', 'TEACHER'].includes(req.user.role);
+    const isStaff = hasRole(req.user, 'ADMIN', 'TEACHER');
 
     const session = await prisma.session.findFirstOrThrow({
       where: { id: req.params.id, ...scope },

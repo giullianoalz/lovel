@@ -1,5 +1,6 @@
 import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
+import { hasRole, isOnly } from '../utils/roles.js';
 
 /**
  * Prisma filter limiting a teacher to the students they actually teach.
@@ -10,12 +11,26 @@ import { canUseSnackPunches } from '../utils/snackEligibility.js';
  * down (getStudent strips `familyMembers` for teachers so contact details stay
  * out of reach); this applies the same intent to which rows they get at all.
  *
- * Admins are unfiltered: placement, billing and health records are their job.
+ * Admins are unfiltered: placement, billing and health records are their job —
+ * `isOnly` rather than `hasRole` so an admin who also teaches keeps that.
+ *
+ * A teacher who is also a parent gets their own children on top of their
+ * roster: the filter widens rather than replaces, or enrolling your child at
+ * your own workplace would hide them from you.
  */
-const rosterScope = (user) =>
-  user.role === 'TEACHER'
-    ? { enrollments: { some: { status: 'active', class: { teacherId: user.id } } } }
-    : {};
+const rosterScope = (user) => {
+  if (!isOnly(user, 'TEACHER')) return {};
+
+  const taught = { enrollments: { some: { status: 'active', class: { teacherId: user.id } } } };
+  if (!hasRole(user, 'PARENT')) return taught;
+
+  return {
+    OR: [
+      taught,
+      { familyMembers: { some: { family: { members: { some: { userId: user.id } } } } } },
+    ],
+  };
+};
 
 /**
  * Prisma `include` that reaches a student's family and everyone in it, so the
@@ -29,7 +44,7 @@ const familyWithMembers = {
         members: {
           include: {
             user: {
-              select: { id: true, fullName: true, email: true, phone: true, role: true },
+              select: { id: true, fullName: true, email: true, phone: true, role: true, secondaryRoles: true },
             },
           },
         },
@@ -47,10 +62,13 @@ const familyWithMembers = {
  * while other call sites wrote 'PARENT'/'Mother'/'Father', so matching on it
  * silently found nobody and every student rendered "No Parent Assigned".
  * The invoice recipient wins when a family has more than one parent.
+ *
+ * Any role counts, not just the primary one — a teacher's own child would
+ * otherwise come back with no parent at all, since her primary role is TEACHER.
  */
 const withParentContact = (student) => {
   const members = student.familyMembers?.[0]?.family?.members || [];
-  const parents = members.filter(m => m.user?.role === 'PARENT');
+  const parents = members.filter(m => hasRole(m.user, 'PARENT'));
   const parent = (parents.find(m => m.isInvoiceRecipient) || parents[0])?.user || null;
 
   return {
@@ -142,22 +160,30 @@ export const exportStudentsCsv = async (req, res, next) => {
 export const listStudents = async (req, res, next) => {
   try {
     const { status, search, familyId, page = 1, limit = 50 } = req.query;
-    const isTeacher = req.user.role === 'TEACHER';
+    // Parent contact stays out of any teacher's reach unless they're also an
+    // admin — being a parent yourself doesn't earn you other families' details.
+    const hideParentContact = hasRole(req.user, 'TEACHER') && !hasRole(req.user, 'ADMIN');
+
+    // Every clause is ANDed rather than merged onto one object: rosterScope can
+    // itself be an OR (a teacher who is also a parent), and assigning
+    // `where.OR` for the search would silently replace it — handing them the
+    // whole directory instead of their own roster.
+    const filters = [rosterScope(req.user)].filter(f => Object.keys(f).length > 0);
+    if (search) {
+      filters.push({
+        OR: [
+          { fullName: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      });
+    }
+    if (familyId) filters.push({ familyMembers: { some: { familyId } } });
 
     const where = {
       role: 'STUDENT',
-      ...rosterScope(req.user),
+      ...(status ? { status: status.toUpperCase() } : {}),
+      ...(filters.length ? { AND: filters } : {}),
     };
-    if (status) where.status = status.toUpperCase();
-    if (search) {
-      where.OR = [
-        { fullName: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-    if (familyId) {
-      where.familyMembers = { some: { familyId } };
-    }
 
     const [students, total] = await Promise.all([
       prisma.user.findMany({
@@ -166,7 +192,7 @@ export const listStudents = async (req, res, next) => {
         take: parseInt(limit),
         orderBy: { fullName: 'asc' },
         include: {
-          familyMembers: isTeacher ? { include: { family: true } } : familyWithMembers,
+          familyMembers: hideParentContact ? { include: { family: true } } : familyWithMembers,
           enrollments: {
             where: { status: 'active' },
             include: {
@@ -188,7 +214,7 @@ export const listStudents = async (req, res, next) => {
     ]);
 
     res.json({
-      students: isTeacher ? students : students.map(withParentContact),
+      students: hideParentContact ? students : students.map(withParentContact),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -245,7 +271,12 @@ export const getStudent = async (req, res, next) => {
 
     // Teachers get academic/behavioral data only — parent contact info and family
     // billing stay out of their view so all communication routes through the app.
-    if (req.user.role === 'TEACHER') {
+    // Their own children are the exception: a teacher-parent looking at their
+    // own child is looking at their own contact details.
+    const ownChild = (student.familyMembers || []).some(fm =>
+      (fm.family?.members || []).some(m => m.userId === req.user.id));
+
+    if (hasRole(req.user, 'TEACHER') && !hasRole(req.user, 'ADMIN') && !ownChild) {
       delete student.familyMembers;
       return res.json({ student });
     }
@@ -337,7 +368,7 @@ export const getAttendanceSummary = async (req, res, next) => {
   try {
     // Same roster rule as getStudent — attendance is a student record too, and
     // this route is reachable by any teacher.
-    if (req.user.role === 'TEACHER') {
+    if (isOnly(req.user, 'TEACHER')) {
       const onRoster = await prisma.user.findFirst({
         where: { id: req.params.id, ...rosterScope(req.user) },
         select: { id: true },

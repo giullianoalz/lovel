@@ -7,7 +7,7 @@ import ProtectedImage from '../Layout/ProtectedImage';
 import './MarketingHub.css';
 
 const MarketingHub = () => {
-  const { role } = useAuth();
+  const { hasRole } = useAuth();
   const toast = useToast();
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -397,7 +397,7 @@ const MarketingHub = () => {
                         <span><User size={12} /> {sub.teacher?.fullName}</span>
                         <span><Clock size={12} /> {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                       </div>
-                      {role === 'ADMIN' && (
+                      {hasRole('ADMIN') && (
                         <div className="gallery-actions">
                           {sub.status === 'submitted' && (
                             <button className="approve-btn" onClick={() => handleApprove(sub.id)}>

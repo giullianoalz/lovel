@@ -15,7 +15,7 @@ import './StudentsList.css';
 
 const StudentsList = () => {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { hasRole } = useAuth();
   const toast = useToast();
   const [exporting, setExporting] = useState(false);
   const [activeTab, setActiveTab] = useState('students');
@@ -76,7 +76,7 @@ const StudentsList = () => {
   useEffect(() => {
     loadData();
     loadTeachers();
-    if (role === 'ADMIN') loadParents();
+    if (hasRole('ADMIN')) loadParents();
     const loadFamilies = async () => {
       try {
         const fams = await database.fetchFamilies();
@@ -168,7 +168,7 @@ const StudentsList = () => {
                 <ShoppingBag size={18} />
                 <span className="desk-only">Snack Cabinet</span>
               </button>
-              {role === 'ADMIN' && (
+              {hasRole('ADMIN') && (
                 <>
                   <button
                     className="action-btn outline"
@@ -212,7 +212,7 @@ const StudentsList = () => {
           <span>Students</span>
           <span className="tab-count">{students.length}</span>
         </button>
-        {role === 'ADMIN' && (
+        {hasRole('ADMIN') && (
           <>
             <button
               className={`dir-tab ${activeTab === 'teachers' ? 'active' : ''}`}
@@ -317,7 +317,7 @@ const StudentsList = () => {
                   </div>
 
                   <div className="card-actions">
-                    {role !== 'TEACHER' && student.parentEmail && student.parentEmail !== 'N/A' && (
+                    {student.parentEmail && student.parentEmail !== 'N/A' && (
                       <a
                         className="icon-btn"
                         href={`mailto:${student.parentEmail}`}
@@ -369,7 +369,7 @@ const StudentsList = () => {
                 {/* Pay is management information: the API only sends it to
                     admins, so a teacher would otherwise read "$0.00 /mo" for
                     every colleague. */}
-                {role === 'ADMIN' && (
+                {hasRole('ADMIN') && (
                   <>
                     <div className="detail-item">
                       <span className="detail-label">Salary:</span>

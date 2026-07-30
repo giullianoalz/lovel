@@ -17,7 +17,7 @@ const SEVERITIES = ['MINOR', 'MODERATE', 'SEVERE'];
 
 const BehaviorTracker = () => {
   const toast = useToast();
-  const { role } = useAuth();
+  const { hasRole } = useAuth();
   const [reviewLog, setReviewLog] = useState(null);
   const [classification, setClassification] = useState('Verbal Warning');
   const [reviewNotes, setReviewNotes] = useState('');
@@ -202,14 +202,14 @@ const BehaviorTracker = () => {
                 <th>Severity</th>
                 <th>Description</th>
                 <th>Logged By</th>
-                {role === 'ADMIN' && <th>Status</th>}
+                {hasRole('ADMIN') && <th>Status</th>}
               </tr>
             </thead>
             <tbody>
               {filteredLogs.map(log => {
                 const tc = typeConfig(log.type);
                 const date = new Date(log.createdAt);
-                const isReviewable = role === 'ADMIN' && log.type !== 'POSITIVE';
+                const isReviewable = hasRole('ADMIN') && log.type !== 'POSITIVE';
                 return (
                   <tr
                     key={log.id}
@@ -247,7 +247,7 @@ const BehaviorTracker = () => {
                     </td>
                     <td className="desc-cell">{log.description}</td>
                     <td className="teacher-cell">{log.teacher?.fullName || 'System'}</td>
-                    {role === 'ADMIN' && (
+                    {hasRole('ADMIN') && (
                       <td>
                         {log.type !== 'POSITIVE' && (
                           <span className={`behavior-status-badge ${(log.status || 'RECORDED').toLowerCase()}`}>

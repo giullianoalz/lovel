@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { isOnly } from '../utils/roles.js';
 
 // POST /api/class-fit — Submit a class-fit flag
 export const createClassFitReport = async (req, res, next) => {
@@ -60,7 +61,7 @@ export const listClassFitReports = async (req, res, next) => {
     if (classId) where.classId = classId;
 
     // Teachers only see their own reports
-    if (req.user.role === 'TEACHER') {
+    if (isOnly(req.user, 'TEACHER')) {
       where.teacherId = req.user.id;
     }
 

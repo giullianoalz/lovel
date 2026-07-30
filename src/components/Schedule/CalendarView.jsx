@@ -160,9 +160,9 @@ const MultiDatePicker = ({ selectedDates, onChange }) => {
 };
 
 const CalendarView = () => {
-  const { role } = useAuth();
+  const { role, hasRole } = useAuth();
   const toast = useToast();
-  const canAddEvents = role === 'ADMIN';
+  const canAddEvents = hasRole('ADMIN');
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
   const [currentDate, setCurrentDate] = useState(new Date());
   const [sessions, setSessions] = useState([]);
@@ -182,7 +182,7 @@ const CalendarView = () => {
   
   // Only staff can edit/delete scheduled classes or manage the Zoom link —
   // parents/students only get to view the calendar.
-  const isAdmin = role === 'ADMIN' || role === 'TEACHER';
+  const isAdmin = hasRole('ADMIN', 'TEACHER');
 
   // Advanced Search States
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -483,7 +483,7 @@ const CalendarView = () => {
   // instead of digging through the separate PTO/Spaces side panels. Staff-only —
   // students/parents don't get teacher absence info on their calendar.
   const [staffEvents, setStaffEvents] = useState([]);
-  const canSeeStaffEvents = role === 'ADMIN' || role === 'TEACHER';
+  const canSeeStaffEvents = hasRole('ADMIN', 'TEACHER');
 
   const staffEventsSeqRef = useRef(0);
   const loadStaffEvents = async (viewMode, date) => {
@@ -1069,7 +1069,7 @@ const CalendarView = () => {
   };
 
   const handleDragStart = (e, eventItem) => {
-    if (role !== 'ADMIN') {
+    if (!hasRole('ADMIN')) {
       e.preventDefault();
       return;
     }
@@ -1605,7 +1605,7 @@ const CalendarView = () => {
             <button className={`view-btn ${view === 'week' ? 'active' : ''}`} onClick={() => setView('week')}>Week</button>
             <button className={`view-btn ${view === 'month' ? 'active' : ''}`} onClick={() => setView('month')}>Month</button>
           </div>
-          {role === 'TEACHER' && (
+          {hasRole('TEACHER') && (
             <div className="view-toggle" style={{marginLeft: 8}}>
               <button className={`view-btn ${calPanel === 'pto' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'pto' ? null : 'pto')}>PTO</button>
               <button className={`view-btn ${calPanel === 'spaces' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'spaces' ? null : 'spaces')}>Spaces</button>
@@ -1738,9 +1738,9 @@ const CalendarView = () => {
                             <div
                               key={item.id}
                               className={`agenda-event ${isStaff ? item.kind : item.subject}`}
-                              style={{ cursor: isStaff ? 'default' : (role === 'ADMIN' ? 'grab' : 'pointer') }}
+                              style={{ cursor: isStaff ? 'default' : (hasRole('ADMIN') ? 'grab' : 'pointer') }}
                               title={isStaff ? `${item.title} · ${item.time}` : `${item.title} · ${item.time} · ${item.teacher}`}
-                              draggable={!isStaff && role === 'ADMIN'}
+                              draggable={!isStaff && hasRole('ADMIN')}
                               onDragStart={!isStaff ? (evt) => handleDragStart(evt, item) : undefined}
                               onClick={!isStaff ? () => handleEventClick(item) : undefined}
                             >
@@ -1837,8 +1837,8 @@ const CalendarView = () => {
                            <div
                              key={e.id}
                              className={`positioned-event ${e.subject}`}
-                             style={{...getPositionStyles(e.time), ...getOverlapStyles(e, teacherLayout), cursor: role === 'ADMIN' ? 'grab' : 'pointer'}}
-                             draggable={role === 'ADMIN'}
+                             style={{...getPositionStyles(e.time), ...getOverlapStyles(e, teacherLayout), cursor: hasRole('ADMIN') ? 'grab' : 'pointer'}}
+                             draggable={hasRole('ADMIN')}
                              onDragStart={(evt) => handleDragStart(evt, e)}
                              onClick={() => handleEventClick(e)}
                            >
@@ -1912,10 +1912,10 @@ const CalendarView = () => {
                                 key={item.id}
                                 className={`mini-event ${isStaff ? item.kind : item.subject}`}
                                 title={`${item.time} — ${item.title}`}
-                                draggable={!isStaff && role === 'ADMIN'}
+                                draggable={!isStaff && hasRole('ADMIN')}
                                 onDragStart={!isStaff ? (evt) => handleDragStart(evt, item) : undefined}
                                 onClick={!isStaff ? () => handleEventClick(item) : undefined}
-                                style={{ cursor: isStaff ? 'default' : (role === 'ADMIN' ? 'grab' : 'pointer') }}
+                                style={{ cursor: isStaff ? 'default' : (hasRole('ADMIN') ? 'grab' : 'pointer') }}
                               >
                                 <span className="mini-event-time">{item.time}</span>
                                 <span className="mini-event-title">{item.title}</span>
