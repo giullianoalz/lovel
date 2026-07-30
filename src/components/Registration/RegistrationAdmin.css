@@ -762,6 +762,7 @@
   transition: background 0.2s;
 }
 .search-result-item:hover { background: rgba(0, 0, 0, 0.02); }
+.search-result-item.selected { background: var(--primary-light); }
 .search-result-item .reg-search-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   background: #e0f2fe; color: #0369a1;
@@ -770,7 +771,18 @@
 }
 .search-result-item .reg-search-name { font-weight: 500; }
 .search-result-item .reg-search-spacer { flex: 1; }
+.search-result-item .reg-search-checkbox { width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--primary); pointer-events: none; }
 .reg-search-empty { text-align: center; padding: 20px; }
+
+.registration-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
 
 /* ─── Manual Registration Tab ──────────────────────────────────────────────── */
 .manual-reg-view {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone } from 'lucide-react';
+import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone } from 'lucide-react';
 import api from '../../lib/api';
 import { interestLabel } from '../../lib/enrollmentInterests';
 import './RegistrationAdmin.css';
@@ -45,6 +45,8 @@ const RegistrationAdmin = () => {
   });
   
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
+  const [addingStudents, setAddingStudents] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
   const [allStudents, setAllStudents] = useState([]);
 
@@ -688,16 +690,35 @@ const RegistrationAdmin = () => {
     });
   };
 
-  const handleManualAddStudent = async (student) => {
-    if (!selectedCove) return;
-    try {
-      await api.post(`/classes/${selectedCove}/enrollments`, { studentId: student.id });
-      setShowAddStudentModal(false);
-      setStudentSearch('');
-      loadRoster(selectedCove);
-      loadClasses();
-    } catch (error) {
-      showAlert(error.response?.data?.message || 'Error adding student', 'Error', 'warning');
+  const toggleStudentSelection = (studentId) => {
+    setSelectedStudentIds(prev =>
+      prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId]
+    );
+  };
+
+  // Enrolls one at a time (not Promise.all) so the class-full check inside the
+  // endpoint sees each prior enrollment before the next call — batching in
+  // parallel would let every request read the same "N seats left" and overbook.
+  const handleAddSelectedStudents = async () => {
+    if (!selectedCove || selectedStudentIds.length === 0 || addingStudents) return;
+    setAddingStudents(true);
+    const failures = [];
+    for (const studentId of selectedStudentIds) {
+      try {
+        await api.post(`/classes/${selectedCove}/enrollments`, { studentId });
+      } catch (error) {
+        const name = allStudents.find(s => s.id === studentId)?.fullName || studentId;
+        failures.push(`${name}: ${error.response?.data?.message || 'Error adding student'}`);
+      }
+    }
+    setAddingStudents(false);
+    setShowAddStudentModal(false);
+    setStudentSearch('');
+    setSelectedStudentIds([]);
+    loadRoster(selectedCove);
+    loadClasses();
+    if (failures.length > 0) {
+      showAlert(failures.join('\n'), 'Some students could not be added', 'warning');
     }
   };
 
@@ -1942,8 +1963,8 @@ const RegistrationAdmin = () => {
         <div className="modal-overlay">
           <div className="modal-content glass-card reg-modal-md">
             <div className="registration-modal-header">
-              <h2>Add Student to Roster</h2>
-              <button className="icon-btn" onClick={() => { setShowAddStudentModal(false); setStudentSearch(''); }} aria-label="Close">
+              <h2>Add Students to Roster</h2>
+              <button className="icon-btn" onClick={() => { setShowAddStudentModal(false); setStudentSearch(''); setSelectedStudentIds([]); }} aria-label="Close">
                 <X size={20} />
               </button>
             </div>
@@ -1960,25 +1981,39 @@ const RegistrationAdmin = () => {
               <div className="student-search-results reg-search-results">
                 {allStudents
                   .filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase()))
-                  .map(student => (
-                    <button
-                      key={student.id}
-                      className="search-result-item"
-                      onClick={() => handleManualAddStudent(student)}
-                    >
-                      <div className="reg-search-avatar">
-                        {student.fullName.split(' ').map(n => n[0]).join('').substring(0, 2)}
-                      </div>
-                      <span className="reg-search-name">{student.fullName}</span>
-                      <div className="reg-search-spacer"></div>
-                      <Plus size={16} className="text-muted" />
-                    </button>
-                  ))
+                  .map(student => {
+                    const checked = selectedStudentIds.includes(student.id);
+                    return (
+                      <button
+                        key={student.id}
+                        className={`search-result-item ${checked ? 'selected' : ''}`}
+                        onClick={() => toggleStudentSelection(student.id)}
+                      >
+                        <input type="checkbox" checked={checked} readOnly className="reg-search-checkbox" />
+                        <div className="reg-search-avatar">
+                          {student.fullName.split(' ').map(n => n[0]).join('').substring(0, 2)}
+                        </div>
+                        <span className="reg-search-name">{student.fullName}</span>
+                        <div className="reg-search-spacer"></div>
+                        {checked ? <Check size={16} className="text-primary" /> : <Plus size={16} className="text-muted" />}
+                      </button>
+                    );
+                  })
                 }
                 {allStudents.filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase())).length === 0 && (
                   <p className="text-muted reg-search-empty">No students found matching "{studentSearch}"</p>
                 )}
               </div>
+            </div>
+            <div className="registration-modal-footer">
+              <span className="text-muted text-xs">{selectedStudentIds.length} selected</span>
+              <button
+                className="btn-primary"
+                disabled={selectedStudentIds.length === 0 || addingStudents}
+                onClick={handleAddSelectedStudents}
+              >
+                {addingStudents ? 'Adding...' : `Add ${selectedStudentIds.length || ''} Student${selectedStudentIds.length === 1 ? '' : 's'}`}
+              </button>
             </div>
           </div>
         </div>
