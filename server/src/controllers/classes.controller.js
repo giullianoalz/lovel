@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { hasRole } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
 
 const MAX_STUDENTS_CAP = 100;
@@ -26,8 +27,13 @@ const validateClassInput = async ({ maxStudents, teacherId, priceOverride }) => 
   }
 
   if (teacherId) {
-    const teacher = await prisma.user.findUnique({ where: { id: teacherId }, select: { role: true, status: true } });
-    if (!teacher || teacher.role !== 'TEACHER') {
+    const teacher = await prisma.user.findUnique({
+      where: { id: teacherId },
+      select: { role: true, secondaryRoles: true, status: true },
+    });
+    // Any role held counts: an admin who also teaches, or a teacher whose
+    // primary hat is something else, is still someone who can run a class.
+    if (!teacher || !hasRole(teacher, 'TEACHER')) {
       return 'teacherId must reference an existing teacher account.';
     }
     if (teacher.status === 'SUSPENDED') {
@@ -151,7 +157,9 @@ export const createClass = async (req, res, next) => {
       data: {
         name,
         subject,
-        teacherId,
+        // '' from an unset picker would hit the foreign key as a literal empty
+        // string; null is how a class starts life without a teacher.
+        teacherId: teacherId || null,
         type: type || 'IN_PERSON',
         meetingUrl,
         maxStudents: maxStudents ? parseInt(maxStudents) : 10,
@@ -196,12 +204,16 @@ export const updateClass = async (req, res, next) => {
     const clearsPrice = priceOverride === null || priceOverride === '';
     const setsPrice = priceOverride !== undefined && !clearsPrice;
 
+    // "No teacher" arrives from the picker as an empty string, which would hit
+    // the foreign key as a literal ''. Null is how a class goes unassigned.
+    const nextTeacherId = teacherId === '' ? null : teacherId;
+
     const updatedClass = await prisma.class.update({
       where: { id: req.params.id },
       data: {
         ...(name && { name }),
         ...(subject !== undefined && { subject }),
-        ...(teacherId !== undefined && { teacherId }),
+        ...(teacherId !== undefined && { teacherId: nextTeacherId }),
         ...(type && { type }),
         ...(meetingUrl !== undefined && { meetingUrl }),
         ...(maxStudents && { maxStudents: parseInt(maxStudents) }),

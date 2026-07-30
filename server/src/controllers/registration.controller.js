@@ -815,6 +815,7 @@ export const getRegistrationClasses = async (req, res, next) => {
     const classes = await prisma.class.findMany({
       where: whereClause,
       include: {
+        teacher: { select: { id: true, fullName: true } },
         _count: {
           select: {
             enrollments: { where: { status: 'active' } },
@@ -833,6 +834,10 @@ export const getRegistrationClasses = async (req, res, next) => {
       holds: c._count.priorityHolds,
       waitlist: c._count.waitlistEntries,
       meetingUrl: c.meetingUrl || '',
+      // Who runs it: '' rather than null so the picker's "Unassigned" option
+      // matches, and the name so the roster list can show it without a lookup.
+      teacherId: c.teacherId || '',
+      teacherName: c.teacher?.fullName || null,
       groupType: c.groupType || 'REGULAR',  // needed by billing preview
       // Also for the preview: when set, this is the price, not the term rate.
       // Number() so the client compares an amount rather than Prisma's Decimal.

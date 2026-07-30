@@ -55,7 +55,12 @@ export const listUsers = async (req, res, next) => {
     const { role, status, search, page = 1, limit = 50 } = req.query;
 
     const andClauses = [];
-    if (role) andClauses.push({ role: role.toUpperCase() });
+    // Matches secondary roles too, so filtering for TEACHER also turns up an
+    // admin who teaches — otherwise they'd be missing from every teacher picker.
+    if (role) {
+      const wanted = role.toUpperCase();
+      andClauses.push({ OR: [{ role: wanted }, { secondaryRoles: { has: wanted } }] });
+    }
     if (status) andClauses.push({ status: status.toUpperCase() });
     if (search) {
       andClauses.push({

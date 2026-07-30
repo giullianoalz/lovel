@@ -41,7 +41,9 @@ const RegistrationAdmin = () => {
     // Group); priceOverride replaces both, for the programmes that carry their
     // own price. Empty means "use the term rate".
     groupType: 'REGULAR',
-    priceOverride: ''
+    priceOverride: '',
+    // '' means unassigned — a class with no teacher shows on nobody's portal.
+    teacherId: ''
   });
   
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -49,6 +51,7 @@ const RegistrationAdmin = () => {
   const [addingStudents, setAddingStudents] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
   const [allStudents, setAllStudents] = useState([]);
+  const [teachers, setTeachers] = useState([]);
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleMode, setScheduleMode] = useState('recurring'); // 'recurring' | 'single'
@@ -339,9 +342,21 @@ const RegistrationAdmin = () => {
     }
   };
 
+  // Anyone who can run a class — the endpoint matches secondary roles, so an
+  // admin who also teaches shows up here too.
+  const loadTeachers = async () => {
+    try {
+      const res = await api.get('/users?role=TEACHER');
+      setTeachers(res.data.users || []);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   useEffect(() => {
     loadTerms();
     loadAllStudents();
+    loadTeachers();
     // On mount too, not just on the tab: the pending count rides on the tab
     // label, and a family waiting to be placed shouldn't need a click to notice.
     loadApplications();
@@ -638,6 +653,7 @@ const RegistrationAdmin = () => {
         // null (no own price) has to come back as '' so the input renders empty
         // and saving an untouched form doesn't write 0.
         priceOverride: cove.priceOverride === null || cove.priceOverride === undefined ? '' : String(cove.priceOverride),
+        teacherId: cove.teacherId || '',
       });
     } else {
       setEditingCove(null);
@@ -660,6 +676,7 @@ const RegistrationAdmin = () => {
           name: coveForm.name,
           maxStudents: parseInt(coveForm.capacity),
           meetingUrl: coveForm.meetingUrl,
+          teacherId: coveForm.teacherId,
           ...pricing
         });
       } else {
@@ -667,6 +684,7 @@ const RegistrationAdmin = () => {
           name: coveForm.name,
           maxStudents: parseInt(coveForm.capacity),
           meetingUrl: coveForm.meetingUrl,
+          teacherId: coveForm.teacherId,
           termId: selectedTermForRoster,
           ...pricing
         });
@@ -1238,6 +1256,7 @@ const RegistrationAdmin = () => {
                 <thead>
                   <tr>
                     <th>Class / Cove Day</th>
+                    <th>Teacher</th>
                     <th>Enrolled</th>
                     <th>Priority Holds</th>
                     <th>Waitlist</th>
@@ -1246,7 +1265,7 @@ const RegistrationAdmin = () => {
                 </thead>
                 <tbody>
                   {rosterSearchQuery && coves.length > 0 && coves.filter(cove => cove.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).length === 0 && (
-                    <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>No classes match "{rosterSearchQuery}".</td></tr>
+                    <tr><td colSpan={6} style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>No classes match "{rosterSearchQuery}".</td></tr>
                   )}
                   {coves.filter(cove => cove.name.toLowerCase().includes(rosterSearchQuery.toLowerCase())).map(cove => {
                     const totalOccupied = cove.enrolled + cove.holds;
@@ -1258,6 +1277,11 @@ const RegistrationAdmin = () => {
                     return (
                       <tr key={cove.id}>
                         <td className="font-semibold">{cove.name}</td>
+                        <td>
+                          {cove.teacherName
+                            ? <span className="text-sm">{cove.teacherName}</span>
+                            : <span className="badge pending">Unassigned</span>}
+                        </td>
                         <td>
                           <div className="progress-bar-container">
                             <div className="progress-fill active" style={{ width: `${enrolledPercent}%` }}></div>
@@ -1898,6 +1922,24 @@ const RegistrationAdmin = () => {
                   value={coveForm.capacity}
                   onChange={(e) => setCoveForm({...coveForm, capacity: e.target.value})}
                 />
+              </div>
+
+              <div>
+                <label className="reg-form-label">Teacher</label>
+                <select
+                  className="form-control reg-input-full"
+                  value={coveForm.teacherId}
+                  onChange={(e) => setCoveForm({...coveForm, teacherId: e.target.value})}
+                >
+                  <option value="">Unassigned</option>
+                  {teachers.map(t => (
+                    <option key={t.id} value={t.id}>{t.fullName}</option>
+                  ))}
+                </select>
+                <p className="reg-form-hint">
+                  The class only appears on this teacher&apos;s portal and calendar. Left
+                  unassigned, it shows on nobody&apos;s.
+                </p>
               </div>
 
               <div>
