@@ -99,6 +99,9 @@ model User {
 model Family {
   id           String                    @id @default(uuid()) @db.Uuid
   name         String                    @db.VarChar(255)
+  // Residential address, asked on the registration form. Lives on the family
+  // rather than the user because siblings share a household.
+  address      String?
   tags         String[]                  @default([])
   createdAt    DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   members      FamilyMember[]
