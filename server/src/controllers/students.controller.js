@@ -18,6 +18,50 @@ const rosterScope = (user) =>
     : {};
 
 /**
+ * Prisma `include` that reaches a student's family and everyone in it, so the
+ * guardian's contact details can be resolved. Teachers never get this — parent
+ * contact stays inside the app so families can't be solicited directly.
+ */
+const familyWithMembers = {
+  include: {
+    family: {
+      include: {
+        members: {
+          include: {
+            user: {
+              select: { id: true, fullName: true, email: true, phone: true, role: true },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+/**
+ * Flattens a student's guardian onto `parentName` / `parentEmail` / `parentPhone`,
+ * which is the shape the directory and profile modal read.
+ *
+ * The guardian is picked by the *user's* role rather than the free-form
+ * `FamilyMember.role` string: the importer writes that as lowercase 'parent'
+ * while other call sites wrote 'PARENT'/'Mother'/'Father', so matching on it
+ * silently found nobody and every student rendered "No Parent Assigned".
+ * The invoice recipient wins when a family has more than one parent.
+ */
+const withParentContact = (student) => {
+  const members = student.familyMembers?.[0]?.family?.members || [];
+  const parents = members.filter(m => m.user?.role === 'PARENT');
+  const parent = (parents.find(m => m.isInvoiceRecipient) || parents[0])?.user || null;
+
+  return {
+    ...student,
+    parentName: parent?.fullName || null,
+    parentEmail: parent?.email || null,
+    parentPhone: parent?.phone || null,
+  };
+};
+
+/**
  * GET /api/students/export
  * Downloads every student as a CSV whose columns mirror the importer
  * (see import.controller.js), so an admin can export → edit → re-import
@@ -31,7 +75,9 @@ export const exportStudentsCsv = async (req, res, next) => {
       select: {
         fullName: true,
         email: true,
+        phone: true,
         age: true,
+        birthday: true,
         allergies: true,
         status: true,
         familyMembers: {
@@ -52,7 +98,7 @@ export const exportStudentsCsv = async (req, res, next) => {
     });
 
     const headers = [
-      'studentName', 'studentEmail', 'age', 'allergies', 'status',
+      'studentName', 'studentEmail', 'studentPhone', 'age', 'birthday', 'allergies', 'status',
       'parentName', 'parentEmail', 'parentPhone', 'familyName', 'tags',
     ];
 
@@ -66,7 +112,10 @@ export const exportStudentsCsv = async (req, res, next) => {
       lines.push([
         s.fullName,
         s.email,
+        s.phone ?? '',
         s.age ?? '',
+        // Emitted as YYYY-MM-DD, which is exactly what the importer parses back.
+        s.birthday ? s.birthday.toISOString().slice(0, 10) : '',
         s.allergies ?? '',
         s.status,
         parent?.fullName ?? '',
@@ -93,6 +142,7 @@ export const exportStudentsCsv = async (req, res, next) => {
 export const listStudents = async (req, res, next) => {
   try {
     const { status, search, familyId, page = 1, limit = 50 } = req.query;
+    const isTeacher = req.user.role === 'TEACHER';
 
     const where = {
       role: 'STUDENT',
@@ -116,11 +166,7 @@ export const listStudents = async (req, res, next) => {
         take: parseInt(limit),
         orderBy: { fullName: 'asc' },
         include: {
-          familyMembers: {
-            include: {
-              family: true,
-            },
-          },
+          familyMembers: isTeacher ? { include: { family: true } } : familyWithMembers,
           enrollments: {
             where: { status: 'active' },
             include: {
@@ -142,7 +188,7 @@ export const listStudents = async (req, res, next) => {
     ]);
 
     res.json({
-      students,
+      students: isTeacher ? students : students.map(withParentContact),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -167,27 +213,7 @@ export const getStudent = async (req, res, next) => {
     const student = await prisma.user.findFirstOrThrow({
       where: { id: req.params.id, role: 'STUDENT', ...rosterScope(req.user) },
       include: {
-        familyMembers: {
-          include: {
-            family: {
-              include: {
-                members: {
-                  include: {
-                    user: {
-                      select: {
-                        id: true,
-                        fullName: true,
-                        email: true,
-                        phone: true,
-                        role: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        familyMembers: familyWithMembers,
         enrollments: {
           include: {
             class: {
@@ -221,9 +247,10 @@ export const getStudent = async (req, res, next) => {
     // billing stay out of their view so all communication routes through the app.
     if (req.user.role === 'TEACHER') {
       delete student.familyMembers;
+      return res.json({ student });
     }
 
-    res.json({ student });
+    res.json({ student: withParentContact(student) });
   } catch (error) {
     next(error);
   }

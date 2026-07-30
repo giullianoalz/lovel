@@ -170,18 +170,20 @@ export const database = {
     try {
       const response = await api.get('/students?limit=100');
       
-      // Mapear el formato del backend (Prisma) al formato que espera el frontend actual
+      // Mapear el formato del backend (Prisma) al formato que espera el frontend actual.
+      // El padre lo resuelve el backend (withParentContact) — buscarlo aquí por
+      // FamilyMember.role fallaba siempre: el importador lo guarda en minúscula.
       const realStudents = response.data.students.map(dbStudent => {
-        // Encontrar el padre principal
-        const mainParent = dbStudent.familyMembers?.[0]?.family?.members?.find(m => m.role === 'PARENT' || m.role === 'Father' || m.role === 'Mother')?.user;
-
         return {
           id: dbStudent.id,
           name: dbStudent.fullName,
+          email: dbStudent.email || 'N/A',
+          phone: dbStudent.phone || 'N/A',
           age: dbStudent.age || 0,
-          parentName: mainParent ? mainParent.fullName : 'No Parent Assigned',
-          parentPhone: mainParent ? mainParent.phone : 'N/A',
-          parentEmail: mainParent ? mainParent.email : 'N/A',
+          birthday: dbStudent.birthday || null,
+          parentName: dbStudent.parentName || 'No Parent Assigned',
+          parentPhone: dbStudent.parentPhone || 'N/A',
+          parentEmail: dbStudent.parentEmail || 'N/A',
           allergies: dbStudent.allergies || 'None',
           snackAuthorized: dbStudent.snackAuthorized,
           snackPunches: dbStudent.snackPunches,

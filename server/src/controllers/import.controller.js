@@ -12,9 +12,22 @@ const mapStatus = (s) => {
 };
 
 /**
+ * Accepts a YYYY-MM-DD birth date (what <input type="date"> submits) and stores
+ * it at UTC midnight, matching the DATE column. Anything unparseable is dropped
+ * rather than failing the whole row — a bad date shouldn't lose a student.
+ */
+const parseBirthday = (v) => {
+  const s = clean(v).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00.000Z`);
+  return isNaN(d) ? null : d;
+};
+
+/**
  * POST /api/import/students
- * Body: { rows: [{ studentName, studentEmail?, age?, allergies?, status?,
- *                  parentName?, parentEmail?, parentPhone?, familyName?, tags? }] }
+ * Body: { rows: [{ studentName, studentEmail?, studentPhone?, age?, birthday?,
+ *                  allergies?, status?, parentName?, parentEmail?, parentPhone?,
+ *                  familyName?, tags? }] }
  * Idempotent: matches families by name and users by email, so re-running won't duplicate.
  */
 export const importStudents = async (req, res, next) => {
@@ -79,18 +92,28 @@ export const importStudents = async (req, res, next) => {
 
           // --- Student ---
           const studentEmail = (clean(row.studentEmail) || `student.${slug(studentName)}.${family.id.slice(0, 6)}@import.local`).toLowerCase();
+          const birthday = parseBirthday(row.birthday);
+          const studentPhone = clean(row.studentPhone) || null;
           const studentData = {
             fullName: studentName,
             role: 'STUDENT',
             status: mapStatus(row.status),
             age: row.age && !isNaN(parseInt(row.age)) ? parseInt(row.age) : null,
+            birthday,
+            phone: studentPhone,
             allergies: clean(row.allergies) || null,
           };
 
           const existing = await tx.user.findUnique({ where: { email: studentEmail } });
           let student;
           if (existing) {
-            student = await tx.user.update({ where: { id: existing.id }, data: studentData });
+            // Only overwrite birthday/phone when the row actually carries one.
+            // The export → edit → re-import round trip would otherwise wipe a
+            // birthday recorded through the UI just because the CSV omitted it.
+            const updateData = { ...studentData };
+            if (!birthday) delete updateData.birthday;
+            if (!studentPhone) delete updateData.phone;
+            student = await tx.user.update({ where: { id: existing.id }, data: updateData });
             summary.studentsUpdated++;
           } else {
             student = await tx.user.create({

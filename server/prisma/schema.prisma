@@ -18,6 +18,10 @@ model User {
   avatarUrl              String?                   @map("avatar_url")
   status                 UserStatus                @default(ACTIVE)
   age                    Int?
+  // Real date of birth. `age` above is a plain integer that goes stale every
+  // year; this is what the directory shows and what age should be derived from
+  // once every student has one backfilled.
+  birthday               DateTime?                 @db.Date
   allergies              String?
   snackAuthorized        Boolean                   @default(false) @map("snack_authorized")
   snackPunches           Int                       @default(0) @map("snack_punches")

@@ -151,6 +151,8 @@ const AddStudentModal = ({ onClose, onSaved, families = [] }) => {
     const row = {
       studentName: `${student.firstName} ${student.lastName}`.trim(),
       studentEmail: student.email.trim(),
+      studentPhone: student.phone.trim(),
+      birthday: student.birthday,
       age: ageFromBirthday(student.birthday),
       allergies: student.allergies.trim(),
       status: student.status,

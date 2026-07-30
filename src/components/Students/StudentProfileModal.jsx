@@ -115,6 +115,16 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
 
   const redeemExceedsBalance = Number(redeemCost) > (student.seashells || 0);
 
+  /* `birthday` is a pure DATE column, so it arrives as UTC midnight. Feeding
+     that straight to `new Date()` renders the day before anywhere west of
+     Greenwich — anchor it at local noon instead, which never rolls over. */
+  const formatBirthday = (value) => {
+    if (!value) return null;
+    const d = new Date(`${String(value).slice(0, 10)}T12:00:00`);
+    return isNaN(d) ? null : d.toLocaleDateString();
+  };
+  const birthdayLabel = formatBirthday(student.birthday);
+
   const handleRedeem = async () => {
     if (!redeemItem || !redeemCost || redeeming || redeemExceedsBalance) return;
     setRedeeming(true);
@@ -150,7 +160,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
             <div className="student-avatar large">{(student.name || '?')[0]}</div>
             <div>
               <h2 className="student-name" style={{fontSize: '24px', margin: '0 0 4px 0'}}>{student.name || 'Student'}</h2>
-              {student.birthday && <span className="text-muted" style={{fontSize: '12px'}}>🎂 {new Date(student.birthday).toLocaleDateString()}</span>}
+              {birthdayLabel && <span className="text-muted" style={{fontSize: '12px'}}>🎂 {birthdayLabel}</span>}
               {student.status && (
                 <span className={`status-tag ${student.status.replace(' ', '').toLowerCase()}`}>
                   {student.status}
@@ -211,13 +221,25 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
           <div className="profile-col">
             <div className="info-card">
               <h3>Health & Details</h3>
-              {student.createdAt && <p style={{ marginBottom: '8px' }}><strong>Registered:</strong> {new Date(student.createdAt).toLocaleDateString()}</p>}
+              {student.createdAt && <p style={{ marginBottom: '4px' }}><strong>Registered:</strong> {new Date(student.createdAt).toLocaleDateString()}</p>}
+              <p style={{ marginBottom: '4px' }}><strong>Date of Birth:</strong> {birthdayLabel || 'Not recorded'}</p>
+              <p style={{ marginBottom: '4px' }}><strong>Age:</strong> {student.age ? `${student.age} years old` : 'Not recorded'}</p>
               <p style={{ marginBottom: '8px' }}><strong>Allergies:</strong> {student.allergies || 'None'}</p>
+
+              {/* Contact details stay out of the teacher view — same reason the
+                  parent block does: communication routes through the app. */}
+              {!isTeacher && (
+                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Student Contact</h4>
+                  <p style={{ marginBottom: '4px' }}><strong>Email:</strong> {student.email || 'N/A'}</p>
+                  <p style={{ marginBottom: '0' }}><strong>Phone:</strong> {student.phone || 'N/A'}</p>
+                </div>
+              )}
 
               {!isTeacher && (
                 <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
-                  <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'N/A'}</p>
+                  <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'No Parent Assigned'}</p>
                   <p style={{ marginBottom: '4px' }}><strong>Phone:</strong> {student.parentPhone || 'N/A'}</p>
                   <p style={{ marginBottom: '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
                 </div>

@@ -8,7 +8,9 @@ import './ImportStudentsModal.css';
 const FIELDS = [
   { key: 'studentName', label: 'Student Name', required: true, hints: ['student name', 'student', 'child', 'nombre', 'name', 'first name'] },
   { key: 'studentEmail', label: 'Student Email', hints: ['student email', 'email'] },
+  { key: 'studentPhone', label: 'Student Phone', hints: ['student phone', 'student mobile'] },
   { key: 'age', label: 'Age', hints: ['age', 'edad'] },
+  { key: 'birthday', label: 'Date of Birth (YYYY-MM-DD)', hints: ['birth', 'dob', 'nacimiento', 'cumple'] },
   { key: 'allergies', label: 'Allergies', hints: ['allerg', 'alerg'] },
   { key: 'status', label: 'Status (Active/Inactive)', hints: ['status', 'estado', 'active'] },
   { key: 'parentName', label: 'Parent/Guardian Name', hints: ['parent name', 'parent', 'guardian', 'padre', 'madre', 'contact'] },
