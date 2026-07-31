@@ -253,6 +253,80 @@ export const bulkScheduleSessions = async (req, res, next) => {
 };
 
 /**
+ * PATCH /api/sessions/bulk
+ *
+ * Retime (or cancel) a whole recurring series in one call. Putting a class on
+ * the wrong hour and repeating it for a semester used to mean opening every
+ * single session on the calendar and fixing it by hand — this is the way out.
+ *
+ * The series is identified the same way a human reads it off the roster: a
+ * class, a weekday, and the time it currently starts at. Anything omitted just
+ * widens the match, so `{ classId, startTime }` retimes every future session of
+ * that class regardless of weekday.
+ *
+ * `from` defaults to today: history is a record of what happened, and moving a
+ * class that already met would quietly rewrite it. Pass an explicit `from` to
+ * include past dates when that's genuinely what's wanted.
+ */
+export const bulkUpdateSessions = async (req, res, next) => {
+  try {
+    const { classId, weekday, matchStartTime, from, to, startTime, endTime, status } = req.body;
+
+    if (!classId) {
+      return res.status(400).json({ error: 'Validation Error', message: 'classId is required.' });
+    }
+    if (!startTime && !endTime && !status) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Nothing to change — pass startTime, endTime, or status.' });
+    }
+    if ((startTime && !endTime) || (endTime && !startTime)) {
+      return res.status(400).json({ error: 'Validation Error', message: 'startTime and endTime must be changed together.' });
+    }
+    if (startTime && endTime && endTime <= startTime) {
+      return res.status(400).json({ error: 'Validation Error', message: 'endTime must be after startTime.' });
+    }
+
+    // Dates are stored at UTC midnight and times on a 1970-01-01 placeholder, so
+    // both sides of every comparison here are built the same way.
+    const fromDate = new Date(`${from || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+    const where = { classId, date: { gte: fromDate } };
+    if (to) where.date.lte = new Date(`${to}T00:00:00Z`);
+    if (matchStartTime) where.startTime = new Date(`1970-01-01T${matchStartTime}:00Z`);
+    // A cancelled session stays cancelled — sweeping it back onto the timetable
+    // by retiming the series would un-cancel it in the families' calendars.
+    if (!status) where.status = { not: 'CANCELLED' };
+
+    const candidates = await prisma.session.findMany({ where, select: { id: true, date: true } });
+
+    // Prisma has no weekday operator, so the day-of-week narrowing happens here.
+    const wantedDay = weekday === undefined || weekday === null || weekday === '' ? null : Number(weekday);
+    const targets = wantedDay === null
+      ? candidates
+      : candidates.filter((s) => s.date.getUTCDay() === wantedDay);
+
+    if (targets.length === 0) {
+      return res.json({ message: 'No sessions matched — nothing was changed.', updated: 0 });
+    }
+
+    const data = {};
+    if (startTime) data.startTime = new Date(`1970-01-01T${startTime}:00Z`);
+    if (endTime) data.endTime = new Date(`1970-01-01T${endTime}:00Z`);
+    if (status) data.status = status.toUpperCase();
+
+    await prisma.session.updateMany({
+      where: { id: { in: targets.map((s) => s.id) } },
+      data,
+    });
+
+    res.json({
+      message: `${targets.length} session${targets.length === 1 ? '' : 's'} updated.`,
+      updated: targets.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * PUT /api/sessions/:id
  * Update session status (e.g. mark as COMPLETED) or time
  */

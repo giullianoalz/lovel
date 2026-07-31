@@ -7,6 +7,7 @@ import {
   updateUser,
   updateUserStatus,
   inviteUser,
+  setTeachingRole,
   getTeacherPayroll,
 } from '../controllers/users.controller.js';
 
@@ -26,6 +27,10 @@ router.put('/:id/status', authenticate, requireRole('ADMIN'), updateUserStatus);
 
 // POST /api/users/:id/invite — Email a set-your-password link (Admin only)
 router.post('/:id/invite', authenticate, requireRole('ADMIN'), inviteUser);
+
+// POST|DELETE /api/users/:id/teaching-role — Let an account be assigned to classes (Admin only)
+router.post('/:id/teaching-role', authenticate, requireRole('ADMIN'), setTeachingRole);
+router.delete('/:id/teaching-role', authenticate, requireRole('ADMIN'), setTeachingRole);
 
 // GET /api/users/:id/payroll — Get teacher payroll summary (Admin or self)
 router.get('/:id/payroll', authenticate, requireSelfOrRole('ADMIN'), getTeacherPayroll);

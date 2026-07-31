@@ -248,6 +248,67 @@ export const inviteUser = async (req, res, next) => {
 };
 
 /**
+ * POST /api/users/:id/teaching-role
+ * DELETE /api/users/:id/teaching-role
+ *
+ * Grants (or withdraws) the TEACHER hat as a secondary role. This exists because
+ * a class can only be assigned to someone who holds TEACHER (see
+ * validateClassInput), so an admin who runs a COVE herself was unassignable —
+ * she simply never appeared in any teacher picker. Admin-only, and the usual
+ * path is an admin adding herself.
+ *
+ * Withdrawing is blocked while the person still teaches something: dropping the
+ * role would leave classes pointing at an account that no longer qualifies.
+ */
+export const setTeachingRole = async (req, res, next) => {
+  try {
+    const adding = req.method === 'POST';
+
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: req.params.id },
+      select: { id: true, fullName: true, role: true, secondaryRoles: true },
+    });
+
+    if (user.role === 'TEACHER') {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'This account is already a teacher account — its primary role can only be changed by an admin.',
+      });
+    }
+
+    const held = new Set(user.secondaryRoles || []);
+
+    if (adding) {
+      held.add('TEACHER');
+    } else {
+      const taught = await prisma.class.count({ where: { teacherId: user.id } });
+      if (taught > 0) {
+        return res.status(409).json({
+          error: 'Still Teaching',
+          message: `${user.fullName} is still assigned to ${taught} class${taught === 1 ? '' : 'es'}. Reassign them first.`,
+        });
+      }
+      held.delete('TEACHER');
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { secondaryRoles: [...held] },
+      select: { id: true, fullName: true, email: true, role: true, secondaryRoles: true, status: true },
+    });
+
+    res.json({
+      message: adding
+        ? `${updated.fullName} can now be assigned to classes.`
+        : `${updated.fullName} is no longer listed as a teacher.`,
+      user: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * GET /api/users/:id/payroll
  * Calculate payroll for a teacher: monthly salary + per-session tutoring earnings
  */

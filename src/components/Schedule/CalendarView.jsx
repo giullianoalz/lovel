@@ -4,6 +4,7 @@ import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
+import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
 import './CalendarView.css';
 
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -35,6 +36,18 @@ const timeRangeToStartEnd = (rangeStr) => {
   const [startStr, endStr] = rangeStr.split(' - ');
   return { startTime: to24h(startStr), endTime: to24h(endStr) };
 };
+
+const hhmmToMins = (hhmm) => {
+  const [h, m] = (hhmm || '0:0').split(':').map(Number);
+  return h * 60 + m;
+};
+
+// "2026-08-19" → "Wednesday". Parsed as UTC to match how session dates are
+// stored, so the weekday never slips a day in a timezone behind UTC.
+const weekdayNameOf = (isoDate) =>
+  ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][
+    new Date(`${isoDate}T00:00:00Z`).getUTCDay()
+  ];
 
 const addMinutesToTime = (hhmm, minutes) => {
   const [h, m] = hhmm.split(':').map(Number);
@@ -159,6 +172,64 @@ const MultiDatePicker = ({ selectedDates, onChange }) => {
   );
 };
 
+// Jump straight to a week or a day instead of walking there with the arrows.
+// Highlights whatever the current view covers — the whole week in Week view, the
+// single day in Day view — so it's obvious what clicking a date will land on.
+const JumpToDatePicker = ({ currentDate, view, onPick, onClose }) => {
+  const [month, setMonth] = useState(new Date(currentDate.getFullYear(), currentDate.getMonth(), 1));
+
+  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1).getDay();
+
+  const rangeStart = view === 'week'
+    ? new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate() - currentDate.getDay())
+    : new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+  const rangeEnd = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate() + (view === 'week' ? 6 : 0));
+
+  return (
+    <div className="cal-jump-popover">
+      <div className="cal-jump-head">
+        <button type="button" className="icon-btn" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Previous month">
+          <ChevronLeft size={16} />
+        </button>
+        <span>{month.toLocaleString('en-US', { month: 'long', year: 'numeric' })}</span>
+        <button type="button" className="icon-btn" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+
+      <div className="cal-jump-grid">
+        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
+          <div key={d} className="cal-jump-dayname">{d}</div>
+        ))}
+        {Array.from({ length: firstDay }).map((_, i) => <div key={`pad-${i}`} />)}
+        {Array.from({ length: daysInMonth }).map((_, i) => {
+          const day = i + 1;
+          const d = new Date(month.getFullYear(), month.getMonth(), day);
+          const inRange = toISODate(d) >= toISODate(rangeStart) && toISODate(d) <= toISODate(rangeEnd);
+          const isToday = toISODate(d) === toISODate(new Date());
+          return (
+            <button
+              key={day}
+              type="button"
+              className={`cal-jump-day ${inRange ? 'in-range' : ''} ${isToday ? 'is-today' : ''}`}
+              onClick={() => { onPick(d); onClose(); }}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="cal-jump-foot">
+        <button type="button" className="btn-text" onClick={() => { onPick(new Date()); onClose(); }}>
+          Today
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const CalendarView = () => {
   const { role, hasRole } = useAuth();
   const toast = useToast();
@@ -179,6 +250,16 @@ const CalendarView = () => {
   const [editEventForm, setEditEventForm] = useState({});
   const [rosterSearch, setRosterSearch] = useState('');
   const [appAlert, setAppAlert] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null });
+  // Jump-to-date popover on the header, so getting to a week doesn't mean
+  // clicking the arrow once per week from today.
+  const [isJumpOpen, setIsJumpOpen] = useState(false);
+  const jumpRef = useRef(null);
+  // Set when a session is dropped on a day that has no time axis (Week agenda,
+  // Month grid). Dropping there can only say *which day* — the dialog is where
+  // the time gets picked, which is also the only way to move a class to a
+  // different hour of the same day by dragging.
+  const [rescheduleDraft, setRescheduleDraft] = useState(null);
+  const [rescheduling, setRescheduling] = useState(false);
   
   // Only staff can edit/delete scheduled classes or manage the Zoom link —
   // parents/students only get to view the calendar.
@@ -526,6 +607,8 @@ const CalendarView = () => {
     loadStaffEvents(view, currentDate);
   }, [view, currentDate, role]);
 
+  const reloadTeachers = () => database.fetchTeachers().then(setTeachers);
+
   const reloadClasses = async () => {
     try {
       const res = await api.get('/classes?limit=200&includeRoster=true');
@@ -637,6 +720,24 @@ const CalendarView = () => {
       document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [isSearchOpen, isStudentDropdownOpen, isTutorDropdownOpen, isCategoryDropdownOpen, isAddEventDropdownOpen, isAttendeeDropdownOpen]);
+
+  // The jump-to-date popover lives outside the search wrapper, so it closes on
+  // its own click-away (and on Escape, like the rest of the overlays).
+  useEffect(() => {
+    if (!isJumpOpen) return;
+    const onDown = (e) => {
+      if (jumpRef.current && !jumpRef.current.contains(e.target)) setIsJumpOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setIsJumpOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isJumpOpen]);
 
   // Ensure inner dropdowns reset when the main search popover is closed
   useEffect(() => {
@@ -841,11 +942,20 @@ const CalendarView = () => {
   };
 
   const handleStartEditEvent = () => {
+    // Real date/time fields rather than one free-text "10:00 AM - 12:50 PM"
+    // string: the string had to be typed in exactly the shape the parser wanted,
+    // and it's the field people reach for when a class is on the wrong hour.
+    const { startTime, endTime } = timeRangeToStartEnd(selectedEvent.time);
     setEditEventForm({
       title: selectedEvent.title,
       subject: selectedEvent.subject,
       teacherId: selectedEvent.teacherId || '',
-      time: selectedEvent.time,
+      date: selectedEvent.dateStr,
+      startTime,
+      endTime,
+      origDate: selectedEvent.dateStr,
+      origStartTime: startTime,
+      applyToSeries: false,
       studentList: [...(selectedEvent.studentIds || [])],
     });
     setIsEditingEvent(true);
@@ -853,14 +963,33 @@ const CalendarView = () => {
   };
 
   const handleSaveEventEdit = async () => {
+    if (editEventForm.endTime <= editEventForm.startTime) {
+      toast.error('The end time has to be after the start time.');
+      return;
+    }
     try {
       await api.put(`/classes/${selectedEvent.classId}`, {
         name: editEventForm.title,
         subject: editEventForm.subject,
         teacherId: editEventForm.teacherId || undefined,
       });
-      const { startTime, endTime } = timeRangeToStartEnd(editEventForm.time);
-      await api.put(`/sessions/${selectedEvent.id}`, { startTime, endTime });
+      const { date, startTime, endTime } = editEventForm;
+      await api.put(`/sessions/${selectedEvent.id}`, { date, startTime, endTime });
+
+      // Same time, every following week: the fix for a whole semester booked an
+      // hour off, without opening each session in turn.
+      if (editEventForm.applyToSeries) {
+        const weekday = new Date(`${editEventForm.origDate}T00:00:00Z`).getUTCDay();
+        const res = await api.patch('/sessions/bulk', {
+          classId: selectedEvent.classId,
+          weekday,
+          matchStartTime: editEventForm.origStartTime,
+          from: editEventForm.origDate,
+          startTime,
+          endTime,
+        });
+        toast.success(res.data.message);
+      }
 
       const newTeacher = teachers.find(t => t.id === editEventForm.teacherId);
       const updated = {
@@ -869,7 +998,8 @@ const CalendarView = () => {
         subject: editEventForm.subject,
         teacher: newTeacher ? newTeacher.name : selectedEvent.teacher,
         teacherId: editEventForm.teacherId,
-        time: editEventForm.time,
+        dateStr: date,
+        time: `${formatTimeStr(hhmmToMins(startTime))} - ${formatTimeStr(hhmmToMins(endTime))}`,
         studentList: editEventForm.studentList.map(s => s.name),
         studentIds: editEventForm.studentList,
         students: editEventForm.studentList.length,
@@ -1080,6 +1210,12 @@ const CalendarView = () => {
 
   // Dropping a session onto a different day/time updates its real date and/or
   // time via PUT /sessions/:id — targetDate is an actual Date, not a mock offset.
+  //
+  // The Week agenda and the Month grid have no time axis: where you let go says
+  // nothing about the hour, so dropping there opens the reschedule dialog with
+  // the target day filled in rather than silently keeping the old time. That's
+  // also what makes dragging a class onto *the same day* meaningful — it's the
+  // way to move it to a different hour without a time grid to aim at.
   const handleDropOnWeekDay = async (e, targetDate) => {
     e.preventDefault();
     const eventId = e.dataTransfer.getData('eventId');
@@ -1089,14 +1225,16 @@ const CalendarView = () => {
     const eventItem = events.find(ev => ev.id.toString() === eventId);
     if (!eventItem) return;
 
-    const payload = { date: toISODate(targetDate) };
     const container = e.currentTarget.querySelector('.timeline-container') || e.currentTarget;
-    if (container && container.classList.contains('timeline-container')) {
-      const containerRect = container.getBoundingClientRect();
-      const dropY = e.clientY - containerRect.top;
-      const newTimeRange = calculateNewTimeRange(eventItem.time, dropY, offsetY);
-      Object.assign(payload, timeRangeToStartEnd(newTimeRange));
+    if (!container || !container.classList.contains('timeline-container')) {
+      openRescheduleDialog(eventItem, targetDate);
+      return;
     }
+
+    const containerRect = container.getBoundingClientRect();
+    const dropY = e.clientY - containerRect.top;
+    const newTimeRange = calculateNewTimeRange(eventItem.time, dropY, offsetY);
+    const payload = { date: toISODate(targetDate), ...timeRangeToStartEnd(newTimeRange) };
 
     try {
       await api.put(`/sessions/${eventItem.id}`, payload);
@@ -1104,6 +1242,64 @@ const CalendarView = () => {
     } catch (error) {
       toast.error(error.response?.data?.message || 'Could not reschedule this session.');
     }
+  };
+
+  // Prefills the dialog from the session being moved. `origDate`/`origStartTime`
+  // are kept because they're what identifies the rest of the series server-side
+  // when the admin chooses to retime every following week too.
+  const openRescheduleDialog = (eventItem, targetDate) => {
+    const { startTime, endTime } = timeRangeToStartEnd(eventItem.time);
+    setRescheduleDraft({
+      eventId: eventItem.id,
+      classId: eventItem.classId,
+      title: eventItem.title,
+      origDate: eventItem.dateStr,
+      origStartTime: startTime,
+      date: toISODate(targetDate || new Date(`${eventItem.dateStr}T00:00:00`)),
+      startTime,
+      endTime,
+      applyToSeries: false,
+    });
+  };
+
+  // Saves the dialog. The single session always moves; ticking "every following
+  // week" additionally retimes the rest of the series through PATCH
+  // /sessions/bulk, which is the whole point — a class repeated for a semester
+  // at the wrong hour shouldn't need fixing one week at a time.
+  const handleConfirmReschedule = async () => {
+    if (!rescheduleDraft) return;
+    const draft = rescheduleDraft;
+    if (draft.endTime <= draft.startTime) {
+      toast.error('The end time has to be after the start time.');
+      return;
+    }
+    setRescheduling(true);
+    try {
+      await api.put(`/sessions/${draft.eventId}`, {
+        date: draft.date,
+        startTime: draft.startTime,
+        endTime: draft.endTime,
+      });
+
+      if (draft.applyToSeries) {
+        const weekday = new Date(`${draft.origDate}T00:00:00Z`).getUTCDay();
+        const res = await api.patch('/sessions/bulk', {
+          classId: draft.classId,
+          weekday,
+          matchStartTime: draft.origStartTime,
+          from: draft.origDate,
+          startTime: draft.startTime,
+          endTime: draft.endTime,
+        });
+        toast.success(res.data.message);
+      }
+
+      setRescheduleDraft(null);
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not reschedule this session.');
+    }
+    setRescheduling(false);
   };
 
   // Dropping onto a different teacher's column reassigns the whole class to
@@ -1280,7 +1476,28 @@ const CalendarView = () => {
             <button onClick={goToPrevPeriod} aria-label="Previous"><ChevronLeft size={20} /></button>
             <button onClick={goToNextPeriod} aria-label="Next"><ChevronRight size={20} /></button>
           </div>
-          <h1>{headerLabel}</h1>
+          <div className="cal-jump-wrapper" ref={jumpRef}>
+            <h1>{headerLabel}</h1>
+            <button
+              type="button"
+              className="cal-jump-btn"
+              onClick={() => setIsJumpOpen(o => !o)}
+              aria-expanded={isJumpOpen}
+              aria-label="Jump to a date"
+              title="Jump to a date"
+            >
+              <CalendarIcon size={16} />
+              <span style={{ fontSize: 10 }}>▼</span>
+            </button>
+            {isJumpOpen && (
+              <JumpToDatePicker
+                currentDate={currentDate}
+                view={view}
+                onPick={setCurrentDate}
+                onClose={() => setIsJumpOpen(false)}
+              />
+            )}
+          </div>
           {sessionsLoading && <span className="app-inline-loader" style={{ fontSize: 12, marginLeft: 8 }}><span className="app-spinner-sm" style={{ width: 13, height: 13 }} />Loading…</span>}
         </div>
 
@@ -2015,7 +2232,7 @@ const CalendarView = () => {
               <div className="session-meta-grid">
                 {isEditingEvent ? (
                   <>
-                    <div className="meta-item">
+                    <div className="meta-item" style={{ flexWrap: 'wrap' }}>
                       <User size={16} />
                       <select
                         className="form-control"
@@ -2026,18 +2243,51 @@ const CalendarView = () => {
                         <option value="">Unassigned</option>
                         {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
-                    </div>
-                    <div className="meta-item">
-                      <Clock size={16} />
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={editEventForm.time}
-                        onChange={e => setEditEventForm(prev => ({ ...prev, time: e.target.value }))}
-                        style={{ flex: 1, height: '34px', fontSize: '13px' }}
-                        placeholder="e.g. 10:00 AM - 12:50 PM"
+                      <AddSelfAsTeacher
+                        teacherIds={teachers.map(t => t.id)}
+                        onAdded={async (userId) => {
+                          await reloadTeachers();
+                          setEditEventForm(prev => ({ ...prev, teacherId: userId }));
+                        }}
+                        onError={toast.error}
                       />
                     </div>
+                    <div className="meta-item cal-edit-when">
+                      <Clock size={16} />
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={editEventForm.date}
+                        onChange={e => setEditEventForm(prev => ({ ...prev, date: e.target.value }))}
+                        title="Date"
+                      />
+                      <input
+                        type="time"
+                        className="form-control"
+                        value={editEventForm.startTime}
+                        onChange={e => setEditEventForm(prev => ({ ...prev, startTime: e.target.value }))}
+                        title="Start time"
+                      />
+                      <span className="text-muted">to</span>
+                      <input
+                        type="time"
+                        className="form-control"
+                        value={editEventForm.endTime}
+                        onChange={e => setEditEventForm(prev => ({ ...prev, endTime: e.target.value }))}
+                        title="End time"
+                      />
+                    </div>
+                    <label className="cal-series-toggle">
+                      <input
+                        type="checkbox"
+                        checked={editEventForm.applyToSeries}
+                        onChange={e => setEditEventForm(prev => ({ ...prev, applyToSeries: e.target.checked }))}
+                      />
+                      <span>
+                        Apply this time to every later {weekdayNameOf(editEventForm.origDate)} session of this class
+                        {editEventForm.date !== editEventForm.origDate && ' (the date change stays on this one session)'}
+                      </span>
+                    </label>
                     <div className="meta-item">
                       <Settings size={16} />
                       <select
@@ -2506,6 +2756,14 @@ const CalendarView = () => {
                     <option value="">Select tutor...</option>
                     {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
+                  <AddSelfAsTeacher
+                    teacherIds={teachers.map(t => t.id)}
+                    onAdded={async (userId) => {
+                      await reloadTeachers();
+                      setNewEventForm(prev => ({ ...prev, tutor: userId }));
+                    }}
+                    onError={toast.error}
+                  />
                 </div>
 
                 <div className="form-group mt-8" ref={attendeeSectionRef} style={{ position: 'relative' }}>
@@ -2617,6 +2875,71 @@ const CalendarView = () => {
           </div>
         </div>
       )}
+      {/* Reschedule dialog — opened by dropping a session on a day in Week/Month */}
+      {rescheduleDraft && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => !rescheduling && setRescheduleDraft(null)}>
+          <div className="modal-content glass-card cal-reschedule" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title-area">
+                <h2>Reschedule {rescheduleDraft.title}</h2>
+              </div>
+              <button className="close-modal" onClick={() => setRescheduleDraft(null)}><X size={20} /></button>
+            </div>
+
+            <div className="modal-body">
+              <div className="cal-edit-when">
+                <CalendarIcon size={16} />
+                <input
+                  type="date"
+                  className="form-control"
+                  value={rescheduleDraft.date}
+                  onChange={e => setRescheduleDraft(p => ({ ...p, date: e.target.value }))}
+                  title="Date"
+                />
+              </div>
+              <div className="cal-edit-when" style={{ marginTop: 12 }}>
+                <Clock size={16} />
+                <input
+                  type="time"
+                  className="form-control"
+                  value={rescheduleDraft.startTime}
+                  onChange={e => setRescheduleDraft(p => ({ ...p, startTime: e.target.value }))}
+                  title="Start time"
+                  autoFocus
+                />
+                <span className="text-muted">to</span>
+                <input
+                  type="time"
+                  className="form-control"
+                  value={rescheduleDraft.endTime}
+                  onChange={e => setRescheduleDraft(p => ({ ...p, endTime: e.target.value }))}
+                  title="End time"
+                />
+              </div>
+
+              <label className="cal-series-toggle">
+                <input
+                  type="checkbox"
+                  checked={rescheduleDraft.applyToSeries}
+                  onChange={e => setRescheduleDraft(p => ({ ...p, applyToSeries: e.target.checked }))}
+                />
+                <span>
+                  Apply this time to every later {weekdayNameOf(rescheduleDraft.origDate)} session of this class
+                  {rescheduleDraft.date !== rescheduleDraft.origDate && ' (the date change stays on this one session)'}
+                </span>
+              </label>
+            </div>
+
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, padding: '0 24px 20px' }}>
+              <button className="cancel-btn" onClick={() => setRescheduleDraft(null)} disabled={rescheduling}>Cancel</button>
+              <button className="save-btn" onClick={handleConfirmReschedule} disabled={rescheduling}>
+                <Save size={14} /> {rescheduling ? 'Saving…' : 'Reschedule'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Custom Alert Modal */}
       {appAlert.isOpen && (
         <div className="modal-overlay" style={{ zIndex: 1100 }}>

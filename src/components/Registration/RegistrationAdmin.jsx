@@ -1,8 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone, Pencil } from 'lucide-react';
 import api from '../../lib/api';
 import { interestLabel } from '../../lib/enrollmentInterests';
+import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
 import './RegistrationAdmin.css';
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Session date/time columns are UTC-pinned wall clock (a bare TIME on a
+// 1970-01-01 placeholder for the time, UTC midnight for the date), so both are
+// read back with the UTC getters — local ones slide a class an hour or a day.
+const sessionHHMM = (value) => {
+  const d = new Date(value);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+};
+
+const prettyTime = (hhmm) => {
+  let [h, m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2, '0')} ${period}`;
+};
+
+const sessionISODate = (value) => new Date(value).toISOString().slice(0, 10);
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 const RegistrationAdmin = () => {
   const [activeTab, setActiveTab] = useState('terms');
@@ -58,6 +80,15 @@ const RegistrationAdmin = () => {
   const [creditDeposit, setCreditDeposit] = useState(false);
   const [quarterPreview, setQuarterPreview] = useState(null);
   const [quarterLoading, setQuarterLoading] = useState(false);
+
+  /* What's actually on the timetable for the class being looked at, grouped
+     into the recurring series it was created as. Without this the only view of
+     a repeating class was the calendar, one week at a time. */
+  const [classSessions, setClassSessions] = useState([]);
+  const [classSessionsLoading, setClassSessionsLoading] = useState(false);
+  const [expandedSeries, setExpandedSeries] = useState(null);
+  const [seriesEdit, setSeriesEdit] = useState(null);
+  const [seriesSaving, setSeriesSaving] = useState(false);
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleMode, setScheduleMode] = useState('recurring'); // 'recurring' | 'single'
@@ -455,7 +486,12 @@ const RegistrationAdmin = () => {
   useEffect(() => {
     if (selectedCove) {
       loadRoster(selectedCove);
+      loadClassSessions(selectedCove);
+    } else {
+      setClassSessions([]);
     }
+    setSeriesEdit(null);
+    setExpandedSeries(null);
   }, [selectedCove]);
 
   const formatDateForInput = (isoString) => {
@@ -658,6 +694,128 @@ const RegistrationAdmin = () => {
     }
   };
 
+  const loadClassSessions = async (coveId) => {
+    if (!coveId) return setClassSessions([]);
+    setClassSessionsLoading(true);
+    try {
+      const res = await api.get(`/sessions?classId=${coveId}`);
+      setClassSessions(res.data.sessions || []);
+    } catch (error) {
+      console.error(error);
+      setClassSessions([]);
+    }
+    setClassSessionsLoading(false);
+  };
+
+  /**
+   * The sessions of this class, folded back into the series they were created
+   * as: same weekday, same start, same end. That grouping is what makes "the
+   * Wednesday 3pm slot should have been 4pm" a single edit instead of one per
+   * week — the recurrence itself isn't stored, only the sessions it produced.
+   */
+  const sessionSeries = useMemo(() => {
+    const groups = new Map();
+    classSessions.forEach(s => {
+      const date = sessionISODate(s.date);
+      const startTime = sessionHHMM(s.startTime);
+      const endTime = sessionHHMM(s.endTime);
+      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+      const key = `${weekday}|${startTime}|${endTime}`;
+      if (!groups.has(key)) {
+        groups.set(key, { key, weekday, startTime, endTime, sessions: [] });
+      }
+      groups.get(key).sessions.push({ ...s, date, startTime, endTime });
+    });
+
+    const today = todayISO();
+    return Array.from(groups.values())
+      .map(g => {
+        const sessions = g.sessions.sort((a, b) => a.date.localeCompare(b.date));
+        const live = sessions.filter(s => s.status !== 'CANCELLED');
+        return {
+          ...g,
+          sessions,
+          first: sessions[0]?.date,
+          last: sessions[sessions.length - 1]?.date,
+          upcoming: live.filter(s => s.date >= today).length,
+          cancelled: sessions.length - live.length,
+        };
+      })
+      .sort((a, b) => (a.weekday - b.weekday) || a.startTime.localeCompare(b.startTime));
+  }, [classSessions]);
+
+  const startSeriesEdit = (series) => {
+    setSeriesEdit({
+      key: series.key,
+      weekday: series.weekday,
+      matchStartTime: series.startTime,
+      startTime: series.startTime,
+      endTime: series.endTime,
+      // Upcoming only by default: sessions that already happened are a record of
+      // what happened, and retiming them rewrites attendance history.
+      scope: 'upcoming',
+    });
+  };
+
+  const handleSaveSeriesTime = async (series) => {
+    if (!seriesEdit) return;
+    if (seriesEdit.endTime <= seriesEdit.startTime) {
+      showAlert('The end time has to be after the start time.', 'Check the times', 'warning');
+      return;
+    }
+    setSeriesSaving(true);
+    try {
+      const res = await api.patch('/sessions/bulk', {
+        classId: selectedCove,
+        weekday: series.weekday,
+        matchStartTime: seriesEdit.matchStartTime,
+        from: seriesEdit.scope === 'all' ? series.first : todayISO(),
+        startTime: seriesEdit.startTime,
+        endTime: seriesEdit.endTime,
+      });
+      setSeriesEdit(null);
+      await loadClassSessions(selectedCove);
+      showAlert(res.data.message, 'Series Updated', 'info');
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Error updating these sessions', 'Error', 'warning');
+    }
+    setSeriesSaving(false);
+  };
+
+  // Cancels rather than deletes, like the calendar does: a cancelled session
+  // still has to exist for attendance and payroll history to make sense.
+  const handleCancelSeries = (series) => {
+    showAlert(
+      `Cancel the ${series.upcoming} upcoming ${WEEKDAY_NAMES[series.weekday]} session${series.upcoming === 1 ? '' : 's'} at ${prettyTime(series.startTime)}? Past sessions stay as they are.`,
+      'Cancel these sessions',
+      'confirm',
+      async () => {
+        try {
+          const res = await api.patch('/sessions/bulk', {
+            classId: selectedCove,
+            weekday: series.weekday,
+            matchStartTime: series.startTime,
+            from: todayISO(),
+            status: 'CANCELLED',
+          });
+          await loadClassSessions(selectedCove);
+          showAlert(res.data.message, 'Sessions Cancelled', 'info');
+        } catch (error) {
+          showAlert(error.response?.data?.message || 'Error cancelling these sessions', 'Error', 'warning');
+        }
+      }
+    );
+  };
+
+  const handleCancelOneSession = async (session) => {
+    try {
+      await api.put(`/sessions/${session.id}`, { status: 'CANCELLED' });
+      loadClassSessions(selectedCove);
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Error cancelling this session', 'Error', 'warning');
+    }
+  };
+
   const toggleScheduleWeekday = (value) => {
     setScheduleForm(p => ({
       ...p,
@@ -683,6 +841,7 @@ const RegistrationAdmin = () => {
       }
       setShowScheduleModal(false);
       setScheduleForm({ startDate: '', endDate: '', weekdays: [], startTime: '10:00', endTime: '11:00' });
+      loadClassSessions(selectedCove);
     } catch (error) {
       showAlert(error.response?.data?.message || 'Error scheduling sessions', 'Error', 'warning');
     } finally {
@@ -1463,6 +1622,132 @@ const RegistrationAdmin = () => {
               </div>
             </div>
 
+            {/* What's on the timetable for this class, folded into its repeating
+                series — so a class booked at the wrong hour for a whole
+                semester is one edit, not one per week on the calendar. */}
+            <div className="roster-card glass-card reg-series-card">
+              <div className="reg-roster-card-head">
+                <h3>Scheduled Sessions ({classSessions.filter(s => s.status !== 'CANCELLED').length})</h3>
+                <button className="btn-outline reg-btn-sm" onClick={() => loadClassSessions(selectedCove)} disabled={classSessionsLoading}>
+                  <RefreshCw size={13} /> Refresh
+                </button>
+              </div>
+
+              {classSessionsLoading ? (
+                <p className="text-muted" style={{ fontSize: 13 }}>Loading sessions…</p>
+              ) : sessionSeries.length === 0 ? (
+                <p className="text-muted" style={{ fontSize: 13 }}>
+                  Nothing scheduled yet. Use <strong>Schedule Sessions</strong> above to put this class on the calendar.
+                </p>
+              ) : (
+                <ul className="reg-series-list">
+                  {sessionSeries.map(series => {
+                    const editing = seriesEdit?.key === series.key;
+                    const expanded = expandedSeries === series.key;
+                    return (
+                      <li key={series.key} className="reg-series-item">
+                        <div className="reg-series-row">
+                          <div className="reg-series-when">
+                            <Clock size={15} className="text-muted" />
+                            <div>
+                              <strong>{WEEKDAY_NAMES[series.weekday]}s · {prettyTime(series.startTime)} – {prettyTime(series.endTime)}</strong>
+                              <p className="text-xs text-muted" style={{ margin: 0 }}>
+                                {series.sessions.length} date{series.sessions.length === 1 ? '' : 's'} ({formatDateOnlyForDisplay(series.first)} – {formatDateOnlyForDisplay(series.last)})
+                                {' · '}{series.upcoming} upcoming
+                                {series.cancelled > 0 && ` · ${series.cancelled} cancelled`}
+                              </p>
+                            </div>
+                          </div>
+
+                          {!editing && (
+                            <div className="reg-row-actions">
+                              <button className="btn-text reg-btn-sm" onClick={() => startSeriesEdit(series)}>
+                                <Pencil size={13} /> Change time
+                              </button>
+                              <button className="btn-text reg-btn-sm" onClick={() => setExpandedSeries(expanded ? null : series.key)}>
+                                <Calendar size={13} /> {expanded ? 'Hide dates' : 'View dates'}
+                              </button>
+                              {series.upcoming > 0 && (
+                                <button className="btn-text reg-btn-sm reg-btn-danger" onClick={() => handleCancelSeries(series)}>
+                                  <Ban size={13} /> Cancel series
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {editing && (
+                          <div className="reg-series-edit">
+                            <div className="reg-series-times">
+                              <input
+                                type="time"
+                                className="form-control"
+                                value={seriesEdit.startTime}
+                                onChange={(e) => setSeriesEdit({ ...seriesEdit, startTime: e.target.value })}
+                                title="New start time"
+                              />
+                              <span className="text-muted">to</span>
+                              <input
+                                type="time"
+                                className="form-control"
+                                value={seriesEdit.endTime}
+                                onChange={(e) => setSeriesEdit({ ...seriesEdit, endTime: e.target.value })}
+                                title="New end time"
+                              />
+                            </div>
+                            <div className="reg-series-scope">
+                              <label>
+                                <input
+                                  type="radio"
+                                  name="series-scope"
+                                  checked={seriesEdit.scope === 'upcoming'}
+                                  onChange={() => setSeriesEdit({ ...seriesEdit, scope: 'upcoming' })}
+                                />
+                                Upcoming dates only
+                              </label>
+                              <label>
+                                <input
+                                  type="radio"
+                                  name="series-scope"
+                                  checked={seriesEdit.scope === 'all'}
+                                  onChange={() => setSeriesEdit({ ...seriesEdit, scope: 'all' })}
+                                />
+                                Every date in the series, past ones included
+                              </label>
+                            </div>
+                            <div className="reg-series-edit-actions">
+                              <button className="btn-text" onClick={() => setSeriesEdit(null)} disabled={seriesSaving}>Cancel</button>
+                              <button className="btn-primary reg-btn-sm" onClick={() => handleSaveSeriesTime(series)} disabled={seriesSaving}>
+                                {seriesSaving ? 'Saving…' : 'Apply new time'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {expanded && (
+                          <ul className="reg-series-dates">
+                            {series.sessions.map(s => (
+                              <li key={s.id} className={s.status === 'CANCELLED' ? 'is-cancelled' : ''}>
+                                <span>{formatDateOnlyForDisplay(s.date)}</span>
+                                <span className="text-muted">{prettyTime(s.startTime)} – {prettyTime(s.endTime)}</span>
+                                {s.status === 'CANCELLED' ? (
+                                  <span className="badge">Cancelled</span>
+                                ) : (
+                                  <button className="btn-text reg-btn-sm reg-btn-danger" onClick={() => handleCancelOneSession(s)}>
+                                    <Ban size={12} /> Cancel
+                                  </button>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
             <div className="roster-sections-grid">
               <div className="roster-card glass-card">
                 <div className="reg-roster-card-head">
@@ -2095,6 +2380,14 @@ const RegistrationAdmin = () => {
                     <option key={t.id} value={t.id}>{t.fullName}</option>
                   ))}
                 </select>
+                <AddSelfAsTeacher
+                  teacherIds={teachers.map(t => t.id)}
+                  onAdded={async (userId) => {
+                    await loadTeachers();
+                    setCoveForm(prev => ({ ...prev, teacherId: userId }));
+                  }}
+                  onError={(message) => showAlert(message, 'Error', 'warning')}
+                />
                 <p className="reg-form-hint">
                   The class only appears on this teacher&apos;s portal and calendar. Left
                   unassigned, it shows on nobody&apos;s.

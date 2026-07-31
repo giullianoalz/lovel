@@ -13,6 +13,7 @@ import {
   getSession,
   createSession,
   bulkScheduleSessions,
+  bulkUpdateSessions,
   updateSession,
   updateAttendance,
   addSessionNote,
@@ -44,6 +45,9 @@ router.post('/', authenticate, requireRole('ADMIN', 'TEACHER'), validate(createS
 
 // POST /api/sessions/bulk — Generate recurring sessions for a class (Admin/Teacher)
 router.post('/bulk', authenticate, requireRole('ADMIN', 'TEACHER'), bulkScheduleSessions);
+
+// PATCH /api/sessions/bulk — Retime or cancel a whole recurring series (Admin only)
+router.patch('/bulk', authenticate, requireRole('ADMIN'), bulkUpdateSessions);
 
 // PUT /api/sessions/:id — Update session status/time (Admin/Teacher)
 router.put('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), updateSession);

@@ -1922,3 +1922,154 @@ select.form-control {
   border-radius: 16px;
   overflow: hidden;
 }
+
+/* ── Jump-to-date ──────────────────────────────────────────────────────────
+   The header label doubles as the trigger: clicking the month/day you're
+   looking at is the obvious way to ask for a different one, instead of
+   walking there a week at a time with the arrows. */
+.cal-jump-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cal-jump-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: white;
+  border: 1px solid var(--border-light);
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-main);
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+.cal-jump-btn:hover {
+  background: var(--bg-sidebar);
+}
+
+.cal-jump-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 60;
+  width: 268px;
+  padding: 12px;
+  background: white;
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  box-shadow: 0 12px 28px -8px rgba(15, 23, 42, 0.22);
+  animation: calJumpIn 0.16s ease-out;
+}
+
+@keyframes calJumpIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.cal-jump-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.cal-jump-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.cal-jump-dayname {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding-bottom: 4px;
+}
+
+.cal-jump-day {
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cal-jump-day:hover {
+  background: #f1f5f9;
+}
+
+.cal-jump-day.is-today {
+  font-weight: 700;
+  color: var(--primary);
+}
+
+/* Whatever the current view covers — the whole week in Week view, one day in
+   Day view — so it reads as "you are here". */
+.cal-jump-day.in-range {
+  background: var(--primary);
+  color: white;
+  font-weight: 600;
+}
+
+.cal-jump-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+}
+
+/* ── Date/time editing ───────────────────────────────────────────────────── */
+.cal-edit-when {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cal-edit-when .form-control {
+  height: 34px;
+  font-size: 13px;
+  width: auto;
+  flex: 0 1 auto;
+}
+
+.cal-series-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.cal-series-toggle input {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.cal-reschedule {
+  max-width: 460px;
+}
+
+/* The when-row and the series toggle carry three controls and a sentence, so
+   they take the full width of the meta grid rather than one 140px cell. */
+.session-meta-grid .cal-edit-when,
+.session-meta-grid .cal-series-toggle {
+  grid-column: 1 / -1;
+}
