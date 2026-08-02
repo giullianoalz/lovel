@@ -72,9 +72,14 @@ const buildInviteLink = async (email) => {
  * Never throws for expected problems — returns { ok: false, message } so the
  * caller can turn it into a 4xx the admin can act on.
  *
+ * `deliver: false` prepares the invite without emailing it and always returns
+ * the link, for callers that deliver it themselves — the Google Form intake
+ * sends its own welcome message from the school's Gmail account and puts the
+ * link inside it, so a second email from us would be noise.
+ *
  * @returns {Promise<{ok: boolean, message?: string, emailed?: boolean, link?: string, user?: object}>}
  */
-export const sendAccountInvite = async (userId) => {
+export const sendAccountInvite = async (userId, { deliver = true } = {}) => {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return { ok: false, message: 'User not found.' };
 
@@ -119,12 +124,9 @@ export const sendAccountInvite = async (userId) => {
   }
 
   const isReminder = Boolean(user.invitedAt);
-  const delivery = await sendInviteEmail({
-    to: user.email,
-    fullName: user.fullName,
-    link,
-    isReminder,
-  });
+  const delivery = deliver
+    ? await sendInviteEmail({ to: user.email, fullName: user.fullName, link, isReminder })
+    : { ok: false, skipped: true };
 
   const updated = await prisma.user.update({
     where: { id: user.id },
@@ -134,10 +136,10 @@ export const sendAccountInvite = async (userId) => {
   return {
     ok: true,
     emailed: delivery.ok,
-    // Only surfaced when email delivery failed, so an admin can still pass the
-    // link on by hand instead of being stuck. It sets a password — treat it
-    // like one.
-    ...(delivery.ok ? {} : { link, deliveryError: delivery.error }),
+    // Surfaced when we didn't deliver it ourselves — either delivery failed and
+    // an admin passes it on by hand, or the caller asked to deliver it. It sets
+    // a password — treat it like one.
+    ...(delivery.ok ? {} : { link, ...(delivery.skipped ? {} : { deliveryError: delivery.error }) }),
     user: updated,
   };
 };

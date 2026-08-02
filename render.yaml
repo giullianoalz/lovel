@@ -41,6 +41,11 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      # Shared secret for the Google Form Apps Script trigger. Must match the
+      # FORM_INTAKE_SECRET script property on the Apps Script side; without it
+      # /api/intake refuses every request.
+      - key: FORM_INTAKE_SECRET
+        sync: false
       - key: DRIVE_CLIENT_EMAIL
         sync: false
       - key: DRIVE_PRIVATE_KEY
