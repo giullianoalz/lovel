@@ -1,6 +1,7 @@
 import prisma from '../config/database.js';
-import { isOnly } from '../utils/roles.js';
+import { isOnly, hasRole } from '../utils/roles.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
+import { computeTeacherPayroll, PAY_CATEGORIES } from '../services/payroll.service.js';
 
 /**
  * What one staff member may learn about another.
@@ -8,7 +9,7 @@ import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../serv
  * These two endpoints used to return the whole Prisma row. Two kinds of column
  * rode along that shouldn't have:
  *
- *  - `baseSalary` / `perSessionRate` — every colleague's pay. Not theoretical:
+ *  - `baseSalary` / `hourlyRate` — every colleague's pay. Not theoretical:
  *    the Teachers tab of /students renders both, and that screen is open to
  *    TEACHER as well as ADMIN, so each teacher could read the whole payroll.
  *  - `firebaseUid` / `fcmToken` — handles that identify the account and its
@@ -309,109 +310,141 @@ export const setTeachingRole = async (req, res, next) => {
 };
 
 /**
- * GET /api/users/:id/payroll
- * Calculate payroll for a teacher: monthly salary + per-session tutoring earnings
+ * PUT /api/users/:id/payroll
+ * Set a teacher's pay rates (Admin only).
+ *
+ * Deliberately NOT part of `updateUser`. That route is `requireSelfOrRole`, so
+ * anyone may edit their own profile — folding pay into it would let a teacher
+ * give themselves a raise. Pay is the one thing on a User row that its owner
+ * must not be able to change, so it gets its own admin-only endpoint.
+ *
+ * Body: {
+ *   baseSalary?:   number|null,   // fixed monthly amount, for salaried staff
+ *   hourlyRate?:   number|null,   // fallback rate per hour taught
+ *   categoryRates?: { ONLINE?: number|null, IN_PERSON?: number|null }
+ * }
+ * Any part may be sent alone; null or '' clears that rate. Clearing a category
+ * override removes the row, so the teacher falls back to their base rate.
  */
-export const getTeacherPayroll = async (req, res, next) => {
+export const updateTeacherPayroll = async (req, res, next) => {
   try {
-    const { month, year } = req.query;
-    
-    // Default to current month
-    const targetYear = parseInt(year) || new Date().getFullYear();
-    const targetMonth = parseInt(month) || (new Date().getMonth() + 1); // 1-indexed
-    
-    const startDate = new Date(targetYear, targetMonth - 1, 1);
-    const endDate = new Date(targetYear, targetMonth, 0); // Last day of month
+    const { baseSalary, hourlyRate, categoryRates } = req.body;
 
-    const teacher = await prisma.user.findUniqueOrThrow({
+    if (baseSalary === undefined && hourlyRate === undefined && categoryRates === undefined) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Send baseSalary, hourlyRate, or categoryRates.',
+      });
+    }
+
+    // Money, so parse strictly: a stray character silently becoming NaN and
+    // then null would quietly wipe someone's salary.
+    const parseRate = (value, label) => {
+      if (value === null || value === '') return { value: null };
+      const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,\s]/g, ''));
+      if (!Number.isFinite(n)) return { error: `${label} must be a number.` };
+      if (n < 0) return { error: `${label} cannot be negative.` };
+      if (n > 99999999.99) return { error: `${label} is implausibly large.` };
+      return { value: Math.round(n * 100) / 100 };
+    };
+
+    const data = {};
+    for (const [key, raw, label] of [
+      ['baseSalary', baseSalary, 'Base salary'],
+      ['hourlyRate', hourlyRate, 'Hourly rate'],
+    ]) {
+      if (raw === undefined) continue;
+      const parsed = parseRate(raw, label);
+      if (parsed.error) return res.status(400).json({ error: 'Validation Error', message: parsed.error });
+      data[key] = parsed.value;
+    }
+
+    // Validate every category override before touching the database, so a typo
+    // in the second one can't leave the first already saved.
+    const validKeys = PAY_CATEGORIES.map((c) => c.key);
+    const overrideOps = [];
+    for (const [category, raw] of Object.entries(categoryRates || {})) {
+      if (!validKeys.includes(category)) {
+        return res.status(400).json({
+          error: 'Validation Error',
+          message: `Unknown pay category "${category}". Known categories: ${validKeys.join(', ')}.`,
+        });
+      }
+      if (raw === undefined) continue;
+      const parsed = parseRate(raw, `Rate for ${category}`);
+      if (parsed.error) return res.status(400).json({ error: 'Validation Error', message: parsed.error });
+      overrideOps.push({ category, rate: parsed.value });
+    }
+
+    const target = await prisma.user.findUnique({
       where: { id: req.params.id },
       select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phone: true,
-        avatarUrl: true,
-        baseSalary: true,
-        perSessionRate: true,
-        status: true,
-        taughtClasses: {
-          select: {
-            id: true,
-            name: true,
-            subject: true,
-            type: true,
-            sessions: {
-              where: {
-                date: { gte: startDate, lte: endDate },
-                status: 'COMPLETED',
-                // Only pay for sessions where a student actually showed up —
-                // scheduling a class must not generate earnings on its own.
-                attendance: { some: { status: 'PRESENT' } },
-              },
-              select: {
-                id: true,
-                date: true,
-                startTime: true,
-                endTime: true,
-                status: true,
-              },
-              orderBy: { date: 'desc' },
-            },
-          },
-        },
-        timeOffRequests: {
-          where: {
-            status: 'APPROVED',
-            date: { gte: new Date(targetYear, 0, 1), lte: new Date(targetYear, 11, 31) },
-          }
-        }
+        id: true, fullName: true, role: true, secondaryRoles: true,
+        baseSalary: true, hourlyRate: true,
+        payRates: { select: { category: true, hourlyRate: true } },
+      },
+    });
+    if (!target) {
+      return res.status(404).json({ error: 'Not Found', message: 'That user does not exist.' });
+    }
+    if (!hasRole(target, 'TEACHER', 'ADMIN')) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: `${target.fullName} is not a teacher, so there is no payroll to set.`,
+      });
+    }
+
+    // One transaction: a half-applied pay change is a wrong paycheque.
+    await prisma.$transaction([
+      ...(Object.keys(data).length
+        ? [prisma.user.update({ where: { id: req.params.id }, data })]
+        : []),
+      ...overrideOps.map(({ category, rate }) =>
+        // Clearing an override deletes the row rather than storing 0 — the
+        // teacher should fall back to their base rate, not be paid nothing.
+        rate === null
+          ? prisma.teacherPayRate.deleteMany({ where: { teacherId: req.params.id, category } })
+          : prisma.teacherPayRate.upsert({
+              where: { teacherId_category: { teacherId: req.params.id, category } },
+              update: { hourlyRate: rate },
+              create: { teacherId: req.params.id, category, hourlyRate: rate },
+            })
+      ),
+    ]);
+
+    const updated = await prisma.user.findUniqueOrThrow({
+      where: { id: req.params.id },
+      select: {
+        id: true, fullName: true, baseSalary: true, hourlyRate: true,
+        payRates: { select: { category: true, hourlyRate: true } },
       },
     });
 
-    const allSessions = teacher.taughtClasses.flatMap(c => c.sessions);
+    // No audit table exists yet, so the server log is the only trace of who
+    // changed whose pay. Worth a real record if this ever gets contested.
+    const describe = (u) =>
+      `base ${u.baseSalary ?? '—'}, hourly ${u.hourlyRate ?? '—'}` +
+      (u.payRates.length ? `, ${u.payRates.map((r) => `${r.category}=${r.hourlyRate}`).join(' ')}` : '');
+    console.log(`[Payroll] ${req.user.email} set ${target.fullName}: ${describe(target)} -> ${describe(updated)}`);
 
-    const baseSalary = parseFloat(teacher.baseSalary || 0);
-    const perSessionRate = parseFloat(teacher.perSessionRate || 0);
-    const sessionEarnings = allSessions.length * perSessionRate;
-    const totalEarnings = baseSalary + sessionEarnings;
-
-    // Calculate time off
-    const usedSickDays = teacher.timeOffRequests ? teacher.timeOffRequests.filter(r => r.type === 'SICK').length : 0;
-    const usedPTODays = teacher.timeOffRequests ? teacher.timeOffRequests.filter(r => r.type === 'PTO').length : 0;
-
-    res.json({
-      teacher: {
-        id: teacher.id,
-        fullName: teacher.fullName,
-        email: teacher.email,
-        phone: teacher.phone,
-        avatarUrl: teacher.avatarUrl,
-        status: teacher.status,
-      },
-      payroll: {
-        month: targetMonth,
-        year: targetYear,
-        baseSalary,
-        perSessionRate,
-        totalSessionCount: allSessions.length,
-        sessionEarnings,
-        totalEarnings,
-        usedSickDays,
-        totalSickDays: 8,
-        usedPTODays,
-        totalPTODays: 12,
-      },
-      classes: teacher.taughtClasses.map(c => ({
-        id: c.id,
-        name: c.name,
-        subject: c.subject,
-        type: c.type,
-        completedSessions: c.sessions.length,
-        sessions: c.sessions,
-      })),
-    });
+    res.json({ message: `Pay rates updated for ${updated.fullName}.`, user: updated });
   } catch (error) {
     next(error);
   }
 };
 
+/**
+ * GET /api/users/:id/payroll
+ * A teacher's earnings for one month, broken down by the kind of work.
+ */
+export const getTeacherPayroll = async (req, res, next) => {
+  try {
+    const { month, year } = req.query;
+    const targetYear = parseInt(year) || new Date().getFullYear();
+    const targetMonth = parseInt(month) || (new Date().getMonth() + 1);
+
+    res.json(await computeTeacherPayroll(req.params.id, targetMonth, targetYear));
+  } catch (error) {
+    next(error);
+  }
+};

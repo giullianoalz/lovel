@@ -1,17 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { X, DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, MapPin, Video } from 'lucide-react';
+import { X, DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, MapPin, Video, Pencil, Save } from 'lucide-react';
 import { database } from '../../lib/database';
+import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './TeacherProfileModal.css';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const TeacherProfileModal = ({ teacher, onClose }) => {
+  const { hasRole } = useAuth();
+  const toast = useToast();
   const [payrollData, setPayrollData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+
+  // Reading your own pay is fine; setting it is not — the server enforces the
+  // same rule, this only keeps the controls out of a teacher's way.
+  const canEditPay = hasRole('ADMIN');
+  const [isEditingRates, setIsEditingRates] = useState(false);
+  const [rateForm, setRateForm] = useState({ baseSalary: '', hourlyRate: '', categoryRates: {} });
+  const [savingRates, setSavingRates] = useState(false);
 
   const loadPayroll = async () => {
     setLoading(true);
@@ -30,6 +41,45 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
   useEffect(() => {
     loadPayroll();
   }, [teacher.id, currentMonth, currentYear]);
+
+  const handleStartEditRates = () => {
+    // Only the override itself goes into the form, never the effective rate:
+    // prefilling an inherited $20 would turn "falls back to base" into a
+    // hard-coded override the moment anyone pressed Save.
+    const categoryRates = {};
+    (payroll?.categoryRates || []).forEach(c => {
+      categoryRates[c.category] = c.rate != null ? String(c.rate) : '';
+    });
+    setRateForm({
+      baseSalary: payroll?.baseSalary ? String(payroll.baseSalary) : '',
+      hourlyRate: payroll?.hourlyRate != null ? String(payroll.hourlyRate) : '',
+      categoryRates,
+    });
+    setIsEditingRates(true);
+  };
+
+  const handleSaveRates = async () => {
+    setSavingRates(true);
+    try {
+      const categoryRates = {};
+      Object.entries(rateForm.categoryRates).forEach(([k, v]) => { categoryRates[k] = v.trim(); });
+      await database.updateTeacherPayroll(teacher.id, {
+        // '' clears the rate server-side rather than sending NaN.
+        baseSalary: rateForm.baseSalary.trim(),
+        hourlyRate: rateForm.hourlyRate.trim(),
+        categoryRates,
+      });
+      setIsEditingRates(false);
+      // Reload rather than patch locally: the month's total is derived from
+      // these rates, so the whole breakdown above is now stale.
+      await loadPayroll();
+      toast.success(`Pay rates updated for ${teacher.name}.`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not save the pay rates.');
+    } finally {
+      setSavingRates(false);
+    }
+  };
 
   const handlePrevMonth = () => {
     if (currentMonth === 1) {
@@ -101,7 +151,7 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                     ${payroll.totalEarnings.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </div>
                   <div className="payroll-total-sessions">
-                    <Calendar size={14} /> {payroll.totalSessionCount} sessions completed
+                    <Calendar size={14} /> {payroll.totalHours} h across {payroll.totalSessionCount} session{payroll.totalSessionCount === 1 ? '' : 's'}
                   </div>
                 </div>
 
@@ -121,15 +171,28 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                     </div>
                   )}
 
-                  {payroll.perSessionRate > 0 && (
-                    <div className="breakdown-item">
+                  {/* One line per kind of work, so the hours behind the total
+                      are readable without opening the rate settings. */}
+                  {(payroll.breakdown || []).map(b => (
+                    <div className="breakdown-item" key={b.category}>
                       <div className="breakdown-label">
-                        <Calendar size={14} />
-                        <span>Sessions ({payroll.totalSessionCount} × ${payroll.perSessionRate})</span>
+                        {b.category === 'ONLINE' ? <Video size={14} /> : <MapPin size={14} />}
+                        <span>
+                          {b.category === 'ONLINE' ? 'Online' : 'In-person'} ({b.hours} h × ${b.rate.toFixed(2)})
+                        </span>
                       </div>
                       <div className="breakdown-value accent">
-                        ${(payroll.sessionEarnings || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        ${b.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </div>
+                    </div>
+                  ))}
+
+                  {/* A month with real teaching and a $0 total is nearly always
+                      a missing rate, not a teacher who did nothing. Say so. */}
+                  {payroll.unratedHours > 0 && (
+                    <div className="breakdown-warning">
+                      {payroll.unratedHours} h taught with no rate set — those hours are
+                      counted as $0. Set an hourly rate below.
                     </div>
                   )}
 
@@ -148,15 +211,108 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
 
                 {/* Rate Info */}
                 <div className="rate-info-card">
-                  <h4>Rate Configuration</h4>
-                  <div className="rate-row">
-                    <span>Monthly Base Salary</span>
-                    <strong>${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                  <div className="rate-card-header">
+                    <h4>Rate Configuration</h4>
+                    {canEditPay && !isEditingRates && (
+                      <button className="rate-edit-btn" onClick={handleStartEditRates} title="Edit pay rates">
+                        <Pencil size={14} /> Edit
+                      </button>
+                    )}
                   </div>
-                  <div className="rate-row">
-                    <span>Per Tutoring Session</span>
-                    <strong>${payroll.perSessionRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
-                  </div>
+
+                  {isEditingRates ? (
+                    <>
+                      <label className="rate-edit-row">
+                        <span>Monthly Base Salary</span>
+                        <div className="rate-input-wrap">
+                          <span className="rate-currency">$</span>
+                          <input
+                            type="number" min="0" step="0.01" inputMode="decimal"
+                            className="form-control"
+                            value={rateForm.baseSalary}
+                            onChange={e => setRateForm(f => ({ ...f, baseSalary: e.target.value }))}
+                            placeholder="0.00"
+                            autoFocus
+                          />
+                        </div>
+                      </label>
+                      <label className="rate-edit-row">
+                        <span>Hourly Rate</span>
+                        <div className="rate-input-wrap">
+                          <span className="rate-currency">$</span>
+                          <input
+                            type="number" min="0" step="0.01" inputMode="decimal"
+                            className="form-control"
+                            value={rateForm.hourlyRate}
+                            onChange={e => setRateForm(f => ({ ...f, hourlyRate: e.target.value }))}
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </label>
+
+                      <h5 className="rate-subhead">Rate by type of session</h5>
+                      {(payroll.categoryRates || []).map(c => (
+                        <label className="rate-edit-row" key={c.category}>
+                          <span>{c.label}</span>
+                          <div className="rate-input-wrap">
+                            <span className="rate-currency">$</span>
+                            <input
+                              type="number" min="0" step="0.01" inputMode="decimal"
+                              className="form-control"
+                              value={rateForm.categoryRates[c.category] ?? ''}
+                              onChange={e => setRateForm(f => ({
+                                ...f,
+                                categoryRates: { ...f.categoryRates, [c.category]: e.target.value },
+                              }))}
+                              placeholder={rateForm.hourlyRate ? `${rateForm.hourlyRate} (base)` : '0.00'}
+                            />
+                          </div>
+                        </label>
+                      ))}
+
+                      <p className="rate-hint">
+                        Paid per hour actually taught. A type left empty falls back to the hourly
+                        rate above; set one to pay a different amount for that kind of session.
+                        Whether a session counts as online is decided per meeting, so a class that
+                        meets in person on Monday and over Zoom on Tuesday pays each at its own rate.
+                      </p>
+                      <div className="rate-edit-actions">
+                        <button className="cancel-btn" onClick={() => setIsEditingRates(false)} disabled={savingRates}>
+                          Cancel
+                        </button>
+                        <button className="save-btn" onClick={handleSaveRates} disabled={savingRates}>
+                          <Save size={14} /> {savingRates ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rate-row">
+                        <span>Monthly Base Salary</span>
+                        <strong>${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                      </div>
+                      <div className="rate-row">
+                        <span>Hourly Rate</span>
+                        <strong>
+                          {payroll.hourlyRate != null
+                            ? `$${payroll.hourlyRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}/hr`
+                            : <span className="rate-unset">not set</span>}
+                        </strong>
+                      </div>
+                      {(payroll.categoryRates || []).map(c => (
+                        <div className="rate-row rate-row-sub" key={c.category}>
+                          <span>{c.label}</span>
+                          <strong>
+                            {c.rate != null
+                              ? `$${c.rate.toLocaleString('en-US', { minimumFractionDigits: 2 })}/hr`
+                              : <span className="rate-inherited">
+                                  {c.source === 'base' ? `$${c.effectiveRate.toFixed(2)}/hr (base)` : 'not set'}
+                                </span>}
+                          </strong>
+                        </div>
+                      ))}
+                    </>
+                  )}
                 </div>
 
                 {/* Leave Balances */}

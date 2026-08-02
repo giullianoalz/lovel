@@ -45,7 +45,10 @@ model User {
   createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   baseSalary             Decimal?                  @map("base_salary") @db.Decimal(10, 2)
-  perSessionRate         Decimal?                  @map("per_session_rate") @db.Decimal(10, 2)
+  // Paid per hour taught, not per session: a 50-minute and a 3-hour class are
+  // not the same work, and a flat per-session rate paid them the same. This is
+  // the fallback rate — a category override in TeacherPayRate wins over it.
+  hourlyRate             Decimal?                  @map("hourly_rate") @db.Decimal(10, 2)
   accommodationNotes     String?                   @map("accommodation_notes")
   medicalNotes           String?                   @map("medical_notes")
   authoredAnnouncements  Announcement[]
@@ -86,6 +89,7 @@ model User {
   lessonPlans            LessonPlan[]              @relation("TeacherLessonPlans")
   supplyItems            SupplyItem[]
   timeOffRequests        TimeOffRequest[]
+  payRates               TeacherPayRate[]
   spaceReservations      SpaceReservation[]
   tempPickupAuths        TempPickupAuth[]
   assignments            Assignment[]              @relation("TeacherAssignments")
@@ -235,6 +239,31 @@ model SessionCancellation {
   @@unique([sessionId, studentId])
   @@index([status])
   @@map("session_cancellations")
+}
+
+// One teacher's hourly rate for one kind of work.
+//
+// A teacher who teaches both in the building and over Zoom is often paid
+// differently for each, so a single rate on the User row can't express it. The
+// category is decided PER SESSION, not per class: since a class can meet in
+// person on Monday and online on Tuesday (see Session.meetingUrl), reading the
+// category off the Class would pay the wrong rate for half the week.
+//
+// Category keys are free-form strings rather than an enum so a new kind of work
+// doesn't need a migration; the ones the payroll engine currently produces are
+// in PAY_CATEGORIES (payroll.service.js).
+model TeacherPayRate {
+  id         String   @id @default(uuid()) @db.Uuid
+  teacherId  String   @map("teacher_id") @db.Uuid
+  category   String   @db.VarChar(40)
+  hourlyRate Decimal  @map("hourly_rate") @db.Decimal(10, 2)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  teacher    User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, category])
+  @@index([teacherId])
+  @@map("teacher_pay_rates")
 }
 
 model Attendance {

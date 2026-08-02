@@ -41,7 +41,9 @@ const MyPayroll = () => {
 
   const payroll = payrollData?.payroll;
   const classes = payrollData?.classes || [];
-  const isHourly = payroll?.perSessionRate > 0;
+  // Someone with hours priced above zero is paid for their teaching; someone
+  // with only a fixed salary sees a salary screen instead of an empty breakdown.
+  const isHourly = (payroll?.breakdown || []).length > 0 || payroll?.hourlyRate > 0;
 
   return (
     <div className="my-payroll">
@@ -76,7 +78,7 @@ const MyPayroll = () => {
               </div>
               <div className="payroll-sessions-count">
                 {isHourly
-                  ? <><Calendar size={14} /> {payroll.totalSessionCount} sessions completed</>
+                  ? <><Calendar size={14} /> {payroll.totalHours} h across {payroll.totalSessionCount} session{payroll.totalSessionCount === 1 ? '' : 's'}</>
                   : <><MapPin size={14} /> Fixed monthly salary</>}
               </div>
             </div>
@@ -84,10 +86,15 @@ const MyPayroll = () => {
             {isHourly ? (
               <div className="payroll-card">
                 <h4><Briefcase size={16} /> Earnings Breakdown</h4>
-                <div className="breakdown-row">
-                  <span><Calendar size={14} /> {payroll.totalSessionCount} sessions × ${payroll.perSessionRate}/session</span>
-                  <strong>${(payroll.sessionEarnings || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
-                </div>
+                {(payroll.breakdown || []).map(b => (
+                  <div className="breakdown-row" key={b.category}>
+                    <span>
+                      <Calendar size={14} /> {b.category === 'ONLINE' ? 'Online' : 'In-person'}
+                      {' '}({b.hours} h × ${b.rate.toFixed(2)}/hr)
+                    </span>
+                    <strong>${b.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                  </div>
+                ))}
                 {payroll.baseSalary > 0 && (
                   <div className="breakdown-row">
                     <span><MapPin size={14} /> Base Salary</span>
@@ -99,7 +106,14 @@ const MyPayroll = () => {
                   <span><TrendingUp size={14} /> Grand Total</span>
                   <strong>${payroll.totalEarnings.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
                 </div>
-                <p className="text-muted" style={{fontSize: 11, marginTop: 8}}>Charges are generated automatically when a session is scheduled.</p>
+                {payroll.unratedHours > 0 && (
+                  <p className="text-muted" style={{fontSize: 11, marginTop: 8}}>
+                    {payroll.unratedHours} h have no rate set yet — ask the office.
+                  </p>
+                )}
+                <p className="text-muted" style={{fontSize: 11, marginTop: 8}}>
+                  Only sessions marked complete with a student present are paid.
+                </p>
               </div>
             ) : (
               <div className="payroll-card">

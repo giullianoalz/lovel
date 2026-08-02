@@ -1,4 +1,5 @@
 import api from './api';
+import { resolveMeetingUrl } from './meetingLink';
 
 /**
  * Database Service Layer
@@ -215,57 +216,45 @@ export const database = {
         phone: t.phone || 'N/A',
         status: t.status.charAt(0).toUpperCase() + t.status.slice(1).toLowerCase(),
         baseSalary: parseFloat(t.baseSalary || 0),
-        perSessionRate: parseFloat(t.perSessionRate || 0),
+        // Null means "no rate set", which the card shows as "—". Coercing it to
+        // 0 would render a confident "$0.00/hr" for someone simply not
+        // configured yet — the two need to look different on a payroll screen.
+        hourlyRate: t.hourlyRate == null ? null : parseFloat(t.hourlyRate),
         classCount: t.familyMembers?.length || 0, // placeholder
       }));
       if (teachers.length > 0) return teachers;
       // Fallback mock
       return [
-        { id: 'teacher_1', name: 'Prof. David Brown', email: 'david@academy.com', phone: '(555) 111-2222', status: 'Active', baseSalary: 2000, perSessionRate: 35, classCount: 3 },
-        { id: 'teacher_2', name: 'Prof. Sarah Jenkins', email: 'sarah@academy.com', phone: '(555) 333-4444', status: 'Active', baseSalary: 2200, perSessionRate: 40, classCount: 2 },
-        { id: 'teacher_3', name: 'Prof. Michael Torres', email: 'michael@academy.com', phone: '(555) 555-6666', status: 'Active', baseSalary: 1800, perSessionRate: 30, classCount: 4 },
+        { id: 'teacher_1', name: 'Prof. David Brown', email: 'david@academy.com', phone: '(555) 111-2222', status: 'Active', baseSalary: 2000, hourlyRate: 35, classCount: 3 },
+        { id: 'teacher_2', name: 'Prof. Sarah Jenkins', email: 'sarah@academy.com', phone: '(555) 333-4444', status: 'Active', baseSalary: 2200, hourlyRate: 40, classCount: 2 },
+        { id: 'teacher_3', name: 'Prof. Michael Torres', email: 'michael@academy.com', phone: '(555) 555-6666', status: 'Active', baseSalary: 1800, hourlyRate: 30, classCount: 4 },
       ];
     } catch (error) {
       console.error("Error fetching teachers:", error);
       return [
-        { id: 'teacher_1', name: 'Prof. David Brown', email: 'david@academy.com', phone: '(555) 111-2222', status: 'Active', baseSalary: 2000, perSessionRate: 35, classCount: 3 },
-        { id: 'teacher_2', name: 'Prof. Sarah Jenkins', email: 'sarah@academy.com', phone: '(555) 333-4444', status: 'Active', baseSalary: 2200, perSessionRate: 40, classCount: 2 },
-        { id: 'teacher_3', name: 'Prof. Michael Torres', email: 'michael@academy.com', phone: '(555) 555-6666', status: 'Active', baseSalary: 1800, perSessionRate: 30, classCount: 4 },
+        { id: 'teacher_1', name: 'Prof. David Brown', email: 'david@academy.com', phone: '(555) 111-2222', status: 'Active', baseSalary: 2000, hourlyRate: 35, classCount: 3 },
+        { id: 'teacher_2', name: 'Prof. Sarah Jenkins', email: 'sarah@academy.com', phone: '(555) 333-4444', status: 'Active', baseSalary: 2200, hourlyRate: 40, classCount: 2 },
+        { id: 'teacher_3', name: 'Prof. Michael Torres', email: 'michael@academy.com', phone: '(555) 555-6666', status: 'Active', baseSalary: 1800, hourlyRate: 30, classCount: 4 },
       ];
     }
   },
 
+  // Deliberately lets the error through instead of falling back to sample
+  // figures. This feeds the screen where an admin reads and edits real pay —
+  // plausible-looking invented numbers there are worse than no numbers, because
+  // they can be saved. The caller shows an ErrorBanner with a retry.
   fetchTeacherPayroll: async (teacherId, month, year) => {
-    try {
-      const params = [];
-      if (month) params.push(`month=${month}`);
-      if (year) params.push(`year=${year}`);
-      const qs = params.length > 0 ? `?${params.join('&')}` : '';
-      const response = await api.get(`/users/${teacherId}/payroll${qs}`);
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching teacher payroll:", error);
-      // Fallback mock payroll
-      const now = new Date();
-      return {
-        teacher: { id: teacherId, fullName: 'Teacher', email: '', phone: '' },
-        payroll: {
-          month: month || (now.getMonth() + 1),
-          year: year || now.getFullYear(),
-          baseSalary: 2000,
-          perSessionRate: 35,
-          inPersonSessionCount: 12,
-          onlineSessionCount: 8,
-          totalSessionCount: 20,
-          tutoringEarnings: 280,
-          totalEarnings: 2280,
-        },
-        classes: [
-          { id: 'c1', name: 'Math Foundations', subject: 'math', type: 'IN_PERSON', completedSessions: 8, sessions: [] },
-          { id: 'c2', name: 'Online Algebra', subject: 'math', type: 'VIRTUAL', completedSessions: 5, sessions: [] },
-        ],
-      };
-    }
+    const params = [];
+    if (month) params.push(`month=${month}`);
+    if (year) params.push(`year=${year}`);
+    const qs = params.length > 0 ? `?${params.join('&')}` : '';
+    const response = await api.get(`/users/${teacherId}/payroll${qs}`);
+    return response.data;
+  },
+
+  updateTeacherPayroll: async (teacherId, { baseSalary, hourlyRate, categoryRates }) => {
+    const response = await api.put(`/users/${teacherId}/payroll`, { baseSalary, hourlyRate, categoryRates });
+    return response.data.user;
   },
 
   updateStudentHealth: async (studentId, updates) => {
@@ -609,7 +598,7 @@ export const database = {
           time: new Date(s.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' - ' + new Date(s.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
           studentsCount: 0, // Should come from enrollments ideally
           status: s.status === 'COMPLETED' ? 'completed' : 'pending',
-          link: s.class?.meetingUrl || '#'
+          link: resolveMeetingUrl(s) || '#'
         }));
       }
       return null;

@@ -379,9 +379,9 @@ const StudentsList = () => {
                       </span>
                     </div>
                     <div className="detail-item">
-                      <span className="detail-label">Per Session:</span>
+                      <span className="detail-label">Hourly:</span>
                       <span style={{ fontSize: '13px', fontWeight: 600, color: '#0369a1' }}>
-                        ${teacher.perSessionRate?.toFixed(2) || '0.00'}
+                        {teacher.hourlyRate != null ? `$${Number(teacher.hourlyRate).toFixed(2)}/hr` : '—'}
                       </span>
                     </div>
                   </>

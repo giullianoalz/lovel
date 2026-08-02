@@ -9,6 +9,7 @@ import {
   inviteUser,
   setTeachingRole,
   getTeacherPayroll,
+  updateTeacherPayroll,
 } from '../controllers/users.controller.js';
 
 const router = Router();
@@ -34,5 +35,10 @@ router.delete('/:id/teaching-role', authenticate, requireRole('ADMIN'), setTeach
 
 // GET /api/users/:id/payroll — Get teacher payroll summary (Admin or self)
 router.get('/:id/payroll', authenticate, requireSelfOrRole('ADMIN'), getTeacherPayroll);
+
+// PUT /api/users/:id/payroll — Set a teacher's pay rates (Admin ONLY).
+// Not requireSelfOrRole, unlike the GET above and unlike PUT /:id: reading your
+// own pay is fine, setting it is not.
+router.put('/:id/payroll', authenticate, requireRole('ADMIN'), updateTeacherPayroll);
 
 export default router;
