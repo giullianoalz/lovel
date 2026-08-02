@@ -2063,6 +2063,29 @@ select.form-control {
   flex-shrink: 0;
 }
 
+/* Zoom link editor: the URL row plus the "every Tuesday" toggle under it. */
+.cal-link-editor {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.cal-link-editor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.cal-link-editor-row .form-control {
+  flex: 1;
+  min-width: 0;
+}
+
+.cal-link-editor .cal-series-toggle {
+  margin-top: 8px;
+}
+
 .cal-reschedule {
   max-width: 460px;
 }
@@ -2070,6 +2093,7 @@ select.form-control {
 /* The when-row and the series toggle carry three controls and a sentence, so
    they take the full width of the meta grid rather than one 140px cell. */
 .session-meta-grid .cal-edit-when,
+.session-meta-grid .cal-link-cell,
 .session-meta-grid .cal-series-toggle {
   grid-column: 1 / -1;
 }

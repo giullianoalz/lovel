@@ -270,13 +270,13 @@ export const bulkScheduleSessions = async (req, res, next) => {
  */
 export const bulkUpdateSessions = async (req, res, next) => {
   try {
-    const { classId, weekday, matchStartTime, from, to, startTime, endTime, status } = req.body;
+    const { classId, weekday, matchStartTime, from, to, startTime, endTime, status, meetingUrl } = req.body;
 
     if (!classId) {
       return res.status(400).json({ error: 'Validation Error', message: 'classId is required.' });
     }
-    if (!startTime && !endTime && !status) {
-      return res.status(400).json({ error: 'Validation Error', message: 'Nothing to change — pass startTime, endTime, or status.' });
+    if (!startTime && !endTime && !status && meetingUrl === undefined) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Nothing to change — pass startTime, endTime, status, or meetingUrl.' });
     }
     if ((startTime && !endTime) || (endTime && !startTime)) {
       return res.status(400).json({ error: 'Validation Error', message: 'startTime and endTime must be changed together.' });
@@ -311,6 +311,9 @@ export const bulkUpdateSessions = async (req, res, next) => {
     if (startTime) data.startTime = new Date(`1970-01-01T${startTime}:00Z`);
     if (endTime) data.endTime = new Date(`1970-01-01T${endTime}:00Z`);
     if (status) data.status = status.toUpperCase();
+    // Same link on every Tuesday of the term, and only on Tuesdays — the whole
+    // point of the per-session field is that the other weekdays stay untouched.
+    if (meetingUrl !== undefined) data.meetingUrl = meetingUrl?.trim() || null;
 
     await prisma.session.updateMany({
       where: { id: { in: targets.map((s) => s.id) } },
@@ -328,17 +331,20 @@ export const bulkUpdateSessions = async (req, res, next) => {
 
 /**
  * PUT /api/sessions/:id
- * Update session status (e.g. mark as COMPLETED) or time
+ * Update session status (e.g. mark as COMPLETED), time, or this meeting's link
  */
 export const updateSession = async (req, res, next) => {
   try {
-    const { status, date, startTime, endTime } = req.body;
+    const { status, date, startTime, endTime, meetingUrl } = req.body;
     const updateData = {};
 
     if (status) updateData.status = status.toUpperCase();
     if (date) updateData.date = new Date(date);
     if (startTime) updateData.startTime = new Date(`1970-01-01T${startTime}:00Z`);
     if (endTime) updateData.endTime = new Date(`1970-01-01T${endTime}:00Z`);
+    // An empty string clears the link — that's how the modal says "this meeting
+    // is in person after all", and it has to reach the column as NULL.
+    if (meetingUrl !== undefined) updateData.meetingUrl = meetingUrl?.trim() || null;
 
     const session = await prisma.session.update({
       where: { id: req.params.id },

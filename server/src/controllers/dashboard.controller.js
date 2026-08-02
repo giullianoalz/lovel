@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { resolveMeetingUrl } from '../utils/meetingLink.js';
 
 /**
  * GET /api/dashboard
@@ -56,8 +57,10 @@ export const getDashboard = async (req, res, next) => {
         teacher: s.class?.teacher?.fullName || 'TBD',
         time: timeLabel,
         status: 'upcoming',
-        type: s.class?.type === 'VIRTUAL' ? 'Virtual' : 'In-person',
-        meetingUrl: s.class?.meetingUrl || null,
+        // Per-meeting, not per-class: a hybrid class only shows "Virtual" (and a
+        // link) on the days it actually meets online.
+        type: resolveMeetingUrl(s) ? 'Virtual' : 'In-person',
+        meetingUrl: resolveMeetingUrl(s),
       };
     });
 

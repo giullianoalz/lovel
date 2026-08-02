@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2 } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
+import { resolveMeetingUrl } from '../../lib/meetingLink';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
 import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
@@ -246,6 +247,7 @@ const CalendarView = () => {
   const [saving, setSaving] = useState(false);
   const [isEditingLink, setIsEditingLink] = useState(false);
   const [editLink, setEditLink] = useState('');
+  const [linkAppliesToSeries, setLinkAppliesToSeries] = useState(false);
   const [isEditingEvent, setIsEditingEvent] = useState(false);
   const [editEventForm, setEditEventForm] = useState({});
   const [rosterSearch, setRosterSearch] = useState('');
@@ -264,6 +266,9 @@ const CalendarView = () => {
   // Only staff can edit/delete scheduled classes or manage the Zoom link —
   // parents/students only get to view the calendar.
   const isAdmin = hasRole('ADMIN', 'TEACHER');
+  // Editing a whole series at once (PATCH /sessions/bulk) is admin-only on the
+  // server, so a teacher is never offered the checkbox that would 403.
+  const canEditSeries = hasRole('ADMIN');
 
   // Advanced Search States
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -630,6 +635,13 @@ const CalendarView = () => {
       .map(s => {
         const classInfo = classesById[s.classId] || {};
         const teacherName = classInfo.teacher?.fullName;
+        // The link belongs to this meeting, not to the class: a hybrid class
+        // reads as Virtual only on the days that carry one.
+        const cls = {
+          type: s.class?.type || classInfo.type,
+          meetingUrl: s.class?.meetingUrl ?? classInfo.meetingUrl,
+        };
+        const meetingUrl = resolveMeetingUrl(s, cls) || '';
         return {
           id: s.id,
           classId: s.classId,
@@ -637,7 +649,8 @@ const CalendarView = () => {
           subject: subjectClass(s.class?.subject || classInfo.subject),
           time: `${formatTimeOfDay(s.startTime)} - ${formatTimeOfDay(s.endTime)}`,
           dateStr: new Date(s.date).toISOString().split('T')[0],
-          type: (s.class?.type || classInfo.type) === 'VIRTUAL' ? 'Virtual' : 'In-Person',
+          type: cls.type === 'VIRTUAL' || s.meetingUrl ? 'Virtual' : 'In-Person',
+          classType: cls.type || 'IN_PERSON',
           teacher: teacherName || 'Unassigned',
           teacherId: classInfo.teacherId || classInfo.teacher?.id || null,
           students: classInfo._count?.enrollments ?? 0,
@@ -648,7 +661,10 @@ const CalendarView = () => {
           rosterNames: (classInfo.enrollments || []).map(en => (en.student?.fullName || '').toLowerCase()),
           notes: s.notes?.[0]?.notes || '',
           materials: (s.materials || []).map(m => ({ name: m.name, url: m.fileUrl })),
-          meetingUrl: s.class?.meetingUrl || classInfo.meetingUrl || '',
+          meetingUrl,
+          // Only ever a default to prefill when someone marks *this* meeting
+          // virtual — never shown as this session's link.
+          classMeetingUrl: cls.meetingUrl || '',
           status: s.status,
         };
       });
@@ -916,6 +932,7 @@ const CalendarView = () => {
     setEditNotes(event.notes || '');
     setIsEditing(false);
     setIsEditingEvent(false);
+    setIsEditingLink(false);
     setRosterSearch('');
 
     // The tile only carries lightweight info — fetch the class roster and the
@@ -934,7 +951,9 @@ const CalendarView = () => {
         studentIds,
         notes: sess.notes?.[0]?.notes || '',
         materials: (sess.materials || []).map(m => ({ name: m.name, url: m.fileUrl })),
-        meetingUrl: cls.meetingUrl || prev.meetingUrl,
+        meetingUrl: resolveMeetingUrl(sess, cls) || '',
+        classMeetingUrl: cls.meetingUrl || '',
+        classType: cls.type || prev.classType,
       } : prev);
     } catch (error) {
       console.error('Error loading session detail:', error);
@@ -1071,18 +1090,74 @@ const CalendarView = () => {
       setIsEditingLink(false);
       return;
     }
-    setEditLink(selectedEvent.meetingUrl || '');
+    // Nothing on this meeting yet: offer the class's link as a starting point
+    // rather than making someone dig the same URL out again. It's only a
+    // suggestion in the box — it isn't live until it's saved onto the session.
+    setEditLink(selectedEvent.meetingUrl || selectedEvent.classMeetingUrl || '');
+    setLinkAppliesToSeries(false);
     setIsEditingLink(true);
   };
 
+  // Optimistic local update after saving a link on the open session. Clearing it
+  // doesn't necessarily make the meeting in-person: a fully VIRTUAL class still
+  // falls back to its class-level link.
+  const applyLinkToEvent = (event, url) => {
+    if (!event) return event;
+    const effective = resolveMeetingUrl(
+      { meetingUrl: url },
+      { type: event.classType, meetingUrl: event.classMeetingUrl }
+    ) || '';
+    return { ...event, meetingUrl: effective, type: effective ? 'Virtual' : 'In-Person' };
+  };
+
+  // The link is saved onto the session, never onto the class: Algebra 1 meets in
+  // person on Monday and Wednesday, so a class-wide link would put a "Join Zoom"
+  // button on days when the room is expecting the student in person. The series
+  // option repeats it across one weekday only — every later Tuesday, say — which
+  // is how a recurring virtual day gets set up without touching the other days.
   const handleSaveLink = async () => {
     if (!selectedEvent) return;
+    const url = editLink.trim();
     try {
-      await api.put(`/classes/${selectedEvent.classId}`, { meetingUrl: editLink });
-      setSelectedEvent(prev => ({ ...prev, meetingUrl: editLink }));
-      reloadClasses();
+      await api.put(`/sessions/${selectedEvent.id}`, { meetingUrl: url });
+
+      if (linkAppliesToSeries) {
+        const weekday = new Date(`${selectedEvent.dateStr}T00:00:00Z`).getUTCDay();
+        const res = await api.patch('/sessions/bulk', {
+          classId: selectedEvent.classId,
+          weekday,
+          from: selectedEvent.dateStr,
+          meetingUrl: url,
+        });
+        toast.success(res.data.message);
+      }
+
+      setSelectedEvent(prev => applyLinkToEvent(prev, url));
+      loadSessions(view, currentDate);
     } catch (error) {
       toast.error(error.response?.data?.message || 'Could not save the meeting link.');
+    }
+    setIsEditingLink(false);
+  };
+
+  const handleRemoveLink = async () => {
+    setEditLink('');
+    if (!selectedEvent) return;
+    try {
+      await api.put(`/sessions/${selectedEvent.id}`, { meetingUrl: '' });
+      if (linkAppliesToSeries) {
+        const weekday = new Date(`${selectedEvent.dateStr}T00:00:00Z`).getUTCDay();
+        await api.patch('/sessions/bulk', {
+          classId: selectedEvent.classId,
+          weekday,
+          from: selectedEvent.dateStr,
+          meetingUrl: '',
+        });
+      }
+      setSelectedEvent(prev => applyLinkToEvent(prev, ''));
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Could not remove the meeting link.');
     }
     setIsEditingLink(false);
   };
@@ -2206,7 +2281,7 @@ const CalendarView = () => {
                     <button 
                       className={`icon-btn-text ${selectedEvent.meetingUrl || isEditingLink ? 'active' : ''}`} 
                       onClick={handleToggleZoom}
-                      title={selectedEvent.meetingUrl ? "Edit Zoom Link" : "Add Zoom Link"}
+                      title={selectedEvent.meetingUrl ? "Edit this meeting's Zoom link" : "Add a Zoom link to this meeting"}
                       style={{ color: selectedEvent.meetingUrl || isEditingLink ? 'var(--primary)' : '#64748b' }}
                     >
                       <Video size={18} />
@@ -2313,34 +2388,53 @@ const CalendarView = () => {
                       <Clock size={16} />
                       <span>{selectedEvent.time}</span>
                     </div>
-                    <div className="meta-item" style={{ flexWrap: 'wrap', gap: '8px' }}>
+                    <div className={`meta-item${isEditingLink ? ' cal-link-cell' : ''}`} style={{ flexWrap: 'wrap', gap: '8px' }}>
                       {isEditingLink ? (
-                        <div style={{ display: 'flex', gap: '8px', width: '100%', alignItems: 'center' }}>
-                          <Video size={16} />
-                          <input 
-                            type="text" 
-                            className="form-control" 
-                            style={{ height: '32px', fontSize: '13px' }} 
-                            value={editLink} 
-                            onChange={e => setEditLink(e.target.value)} 
-                            placeholder="Paste Zoom Link here..."
-                            autoFocus
-                          />
-                          <button className="save-btn" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={handleSaveLink}>Save</button>
-                          <button className="cancel-btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => setIsEditingLink(false)}>Cancel</button>
+                        <div className="cal-link-editor">
+                          <div className="cal-link-editor-row">
+                            <Video size={16} />
+                            <input
+                              type="text"
+                              className="form-control"
+                              style={{ height: '32px', fontSize: '13px' }}
+                              value={editLink}
+                              onChange={e => setEditLink(e.target.value)}
+                              placeholder="Paste Zoom Link here..."
+                              autoFocus
+                            />
+                            <button className="save-btn" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={handleSaveLink}>Save</button>
+                            {selectedEvent.meetingUrl && (
+                              <button className="cancel-btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={handleRemoveLink}>Remove</button>
+                            )}
+                            <button className="cancel-btn" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => setIsEditingLink(false)}>Cancel</button>
+                          </div>
+                          {canEditSeries && (
+                            <label className="cal-series-toggle">
+                              <input
+                                type="checkbox"
+                                checked={linkAppliesToSeries}
+                                onChange={e => setLinkAppliesToSeries(e.target.checked)}
+                              />
+                              <span>
+                                Apply this link to every later {weekdayNameOf(selectedEvent.dateStr)} session of this class
+                                — the other weekdays stay in person
+                              </span>
+                            </label>
+                          )}
                         </div>
                       ) : (
                         <>
-                          {selectedEvent.type === 'Virtual' || selectedEvent.meetingUrl ? (
+                          {selectedEvent.meetingUrl ? (
                             <>
                               <Video size={16} />
-                              {selectedEvent.meetingUrl ? (
-                                <a href={selectedEvent.meetingUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontWeight: '600', textDecoration: 'underline' }}>
-                                  Join Zoom Session
-                                </a>
-                              ) : (
-                                <span>Virtual Session (No Link)</span>
-                              )}
+                              <a href={selectedEvent.meetingUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', fontWeight: '600', textDecoration: 'underline' }}>
+                                Join Zoom Session
+                              </a>
+                            </>
+                          ) : selectedEvent.classType === 'VIRTUAL' ? (
+                            <>
+                              <Video size={16} />
+                              <span>Virtual Session (No Link)</span>
                             </>
                           ) : (
                             <>

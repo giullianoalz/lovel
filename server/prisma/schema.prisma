@@ -188,6 +188,12 @@ model Session {
   startTime       DateTime              @map("start_time") @db.Time(6)
   endTime         DateTime              @map("end_time") @db.Time(6)
   status          SessionStatus         @default(SCHEDULED)
+  // A link on THIS meeting only. Algebra 1 meets in person Mon/Wed and online
+  // on Tuesday: hanging the Zoom link off the Class would advertise it on all
+  // three and families would show up online on the wrong day. Set here, the
+  // link exists on the Tuesday session and nowhere else. Left null the meeting
+  // is in person, unless the whole Class is VIRTUAL — see resolveMeetingUrl().
+  meetingUrl      String?               @map("meeting_url")
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
   behaviorLogs    BehaviorLog[]
