@@ -252,8 +252,19 @@ export const database = {
     return response.data;
   },
 
-  updateTeacherPayroll: async (teacherId, { baseSalary, hourlyRate, categoryRates }) => {
-    const response = await api.put(`/users/${teacherId}/payroll`, { baseSalary, hourlyRate, categoryRates });
+  // Same rule as fetchTeacherPayroll: no mock fallback. This is the number an
+  // admin signs payroll off against.
+  fetchPayrollSummary: async (month, year) => {
+    const params = [];
+    if (month) params.push(`month=${month}`);
+    if (year) params.push(`year=${year}`);
+    const qs = params.length > 0 ? `?${params.join('&')}` : '';
+    const response = await api.get(`/users/payroll/summary${qs}`);
+    return response.data;
+  },
+
+  updateTeacherPayroll: async (teacherId, { baseSalary, salaryPeriod, hourlyRate, categoryRates }) => {
+    const response = await api.put(`/users/${teacherId}/payroll`, { baseSalary, salaryPeriod, hourlyRate, categoryRates });
     return response.data.user;
   },
 

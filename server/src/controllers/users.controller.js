@@ -1,7 +1,7 @@
 import prisma from '../config/database.js';
 import { isOnly, hasRole } from '../utils/roles.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
-import { computeTeacherPayroll, PAY_CATEGORIES } from '../services/payroll.service.js';
+import { computeTeacherPayroll, computePayrollSummary, PAY_CATEGORIES } from '../services/payroll.service.js';
 
 /**
  * What one staff member may learn about another.
@@ -35,7 +35,11 @@ const presentUser = (user, viewer) => {
     emailUsable: !isPlaceholderEmail(user.email),
   };
 
-  if (viewer.role === 'ADMIN') {
+  // hasRole, not `viewer.role ===`: administration is a permission, and an
+  // account whose primary hat is TEACHER but that also holds ADMIN runs the
+  // office. Reading it strictly hid every colleague's pay from them, so the
+  // Teachers tab showed blanks for someone who is allowed to set those rates.
+  if (hasRole(viewer, 'ADMIN')) {
     // eslint-disable-next-line no-unused-vars
     const { firebaseUid, fcmToken, ...rest } = user;
     return { ...rest, ...base };
@@ -249,6 +253,70 @@ export const inviteUser = async (req, res, next) => {
 };
 
 /**
+ * POST /api/users/invite-bulk
+ * Invites several people in one go (Admin only).
+ *
+ * Nobody in the academy has ever been invited — 71 of 81 accounts cannot sign
+ * in — and doing that one profile at a time is why. This exists so the backlog
+ * can be cleared in one pass.
+ *
+ * Deliberately transport-agnostic. `sendAccountInvite` creates the Firebase
+ * account and the set-password link whether or not the email goes out, and
+ * every link comes back in the response. So this is useful today, with email
+ * delivery still unconfigured: the admin gets 28 working links to hand out by
+ * whatever means they like, and the same call starts emailing the moment a
+ * verified sender exists. No part of unblocking sign-in waits on Resend.
+ *
+ * Body: { userIds: string[] }  — explicit ids only. No "invite everyone who
+ * matches a filter": mailing real families is not something to trigger by
+ * accident, so the caller has to name each person.
+ */
+export const inviteUsersBulk = async (req, res, next) => {
+  try {
+    const { userIds } = req.body;
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({ error: 'Validation Error', message: 'userIds must be a non-empty array.' });
+    }
+    if (userIds.length > 100) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Invite at most 100 people at a time.' });
+    }
+
+    // Sequential, not Promise.all: each invite hits Firebase and the mail
+    // provider, and firing 28 at once is how you trip a rate limit and end up
+    // not knowing which half went out.
+    const results = [];
+    for (const id of userIds) {
+      try {
+        const r = await sendAccountInvite(id);
+        results.push(
+          r.ok
+            ? { id, ok: true, emailed: Boolean(r.emailed), email: r.user.email, fullName: r.user.fullName, link: r.link || null }
+            : { id, ok: false, message: r.message }
+        );
+      } catch (error) {
+        // One bad row must not abandon the other 27.
+        results.push({ id, ok: false, message: error.message });
+      }
+    }
+
+    const sent = results.filter((r) => r.ok && r.emailed).length;
+    const prepared = results.filter((r) => r.ok && !r.emailed).length;
+    const failed = results.filter((r) => !r.ok).length;
+
+    console.log(`[Invite] ${req.user.email} invited ${userIds.length}: ${sent} emailed, ${prepared} link-only, ${failed} failed`);
+
+    res.json({
+      message: `${sent} emailed, ${prepared} ready to share by hand, ${failed} failed.`,
+      summary: { total: userIds.length, sent, prepared, failed },
+      results,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/users/:id/teaching-role
  * DELETE /api/users/:id/teaching-role
  *
@@ -319,7 +387,8 @@ export const setTeachingRole = async (req, res, next) => {
  * must not be able to change, so it gets its own admin-only endpoint.
  *
  * Body: {
- *   baseSalary?:   number|null,   // fixed monthly amount, for salaried staff
+ *   baseSalary?:   number|null,   // fixed amount, for salaried staff
+ *   salaryPeriod?: 'MONTHLY'|'ANNUAL',  // how to read baseSalary
  *   hourlyRate?:   number|null,   // fallback rate per hour taught
  *   categoryRates?: { ONLINE?: number|null, IN_PERSON?: number|null }
  * }
@@ -328,12 +397,23 @@ export const setTeachingRole = async (req, res, next) => {
  */
 export const updateTeacherPayroll = async (req, res, next) => {
   try {
-    const { baseSalary, hourlyRate, categoryRates } = req.body;
+    const { baseSalary, salaryPeriod, hourlyRate, categoryRates } = req.body;
 
-    if (baseSalary === undefined && hourlyRate === undefined && categoryRates === undefined) {
+    if (
+      baseSalary === undefined && salaryPeriod === undefined &&
+      hourlyRate === undefined && categoryRates === undefined
+    ) {
       return res.status(400).json({
         error: 'Validation Error',
-        message: 'Send baseSalary, hourlyRate, or categoryRates.',
+        message: 'Send baseSalary, salaryPeriod, hourlyRate, or categoryRates.',
+      });
+    }
+
+    const SALARY_PERIODS = ['MONTHLY', 'ANNUAL'];
+    if (salaryPeriod !== undefined && !SALARY_PERIODS.includes(salaryPeriod)) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: `salaryPeriod must be one of: ${SALARY_PERIODS.join(', ')}.`,
       });
     }
 
@@ -358,6 +438,7 @@ export const updateTeacherPayroll = async (req, res, next) => {
       if (parsed.error) return res.status(400).json({ error: 'Validation Error', message: parsed.error });
       data[key] = parsed.value;
     }
+    if (salaryPeriod !== undefined) data.salaryPeriod = salaryPeriod;
 
     // Validate every category override before touching the database, so a typo
     // in the second one can't leave the first already saved.
@@ -380,7 +461,7 @@ export const updateTeacherPayroll = async (req, res, next) => {
       where: { id: req.params.id },
       select: {
         id: true, fullName: true, role: true, secondaryRoles: true,
-        baseSalary: true, hourlyRate: true,
+        baseSalary: true, salaryPeriod: true, hourlyRate: true,
         payRates: { select: { category: true, hourlyRate: true } },
       },
     });
@@ -415,7 +496,7 @@ export const updateTeacherPayroll = async (req, res, next) => {
     const updated = await prisma.user.findUniqueOrThrow({
       where: { id: req.params.id },
       select: {
-        id: true, fullName: true, baseSalary: true, hourlyRate: true,
+        id: true, fullName: true, baseSalary: true, salaryPeriod: true, hourlyRate: true,
         payRates: { select: { category: true, hourlyRate: true } },
       },
     });
@@ -423,11 +504,34 @@ export const updateTeacherPayroll = async (req, res, next) => {
     // No audit table exists yet, so the server log is the only trace of who
     // changed whose pay. Worth a real record if this ever gets contested.
     const describe = (u) =>
-      `base ${u.baseSalary ?? '—'}, hourly ${u.hourlyRate ?? '—'}` +
+      `base ${u.baseSalary ?? '—'}/${u.salaryPeriod === 'ANNUAL' ? 'yr' : 'mo'}, hourly ${u.hourlyRate ?? '—'}` +
       (u.payRates.length ? `, ${u.payRates.map((r) => `${r.category}=${r.hourlyRate}`).join(' ')}` : '');
     console.log(`[Payroll] ${req.user.email} set ${target.fullName}: ${describe(target)} -> ${describe(updated)}`);
 
     res.json({ message: `Pay rates updated for ${updated.fullName}.`, user: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/users/payroll/summary
+ * Every teacher's earnings for one month, plus the academy's total (Admin only).
+ *
+ * Admin-only with no self case, unlike GET /:id/payroll: a teacher may read her
+ * own pay, but this screen is the whole roster's pay side by side.
+ */
+export const getPayrollSummary = async (req, res, next) => {
+  try {
+    const { month, year } = req.query;
+    const targetYear = parseInt(year) || new Date().getFullYear();
+    const targetMonth = parseInt(month) || (new Date().getMonth() + 1);
+
+    if (targetMonth < 1 || targetMonth > 12) {
+      return res.status(400).json({ error: 'Validation Error', message: 'month must be 1-12.' });
+    }
+
+    res.json(await computePayrollSummary(targetMonth, targetYear));
   } catch (error) {
     next(error);
   }

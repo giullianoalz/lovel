@@ -1,0 +1,117 @@
+.payroll-overview {
+  max-width: 1180px; margin: 0 auto; padding: 24px 20px 60px;
+  animation: poFadeIn 0.4s ease-out;
+}
+
+@keyframes poFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.payroll-overview-header {
+  display: flex; align-items: flex-start; gap: 14px;
+  color: var(--primary, #166534); margin-bottom: 24px;
+}
+.payroll-overview-header h1 { margin: 0; font-size: 26px; color: var(--text-main, #1e293b); }
+.payroll-overview-header p { margin: 4px 0 0; font-size: 14px; color: var(--text-muted, #64748b); }
+
+/* Summary tiles */
+.po-stat-row {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 18px;
+}
+.po-stat {
+  background: rgba(255,255,255,0.8); backdrop-filter: blur(12px);
+  border: 1px solid rgba(0,0,0,0.06); border-radius: 16px; padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 4px;
+  animation: poFadeIn 0.35s ease-out;
+}
+.po-stat-primary {
+  background: linear-gradient(135deg, #166534, #15803d); color: #fff; border-color: transparent;
+}
+.po-stat-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--text-muted, #64748b);
+}
+.po-stat-primary .po-stat-label { color: rgba(255,255,255,0.85); }
+.po-stat-value { font-size: 30px; font-weight: 700; line-height: 1.1; }
+.po-stat-sub { font-size: 12px; color: var(--text-muted, #94a3b8); }
+.po-stat-primary .po-stat-sub { color: rgba(255,255,255,0.8); }
+
+.po-warning {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.5;
+  margin-bottom: 18px;
+  animation: poFadeIn 0.35s ease-out;
+}
+.po-warning svg { flex-shrink: 0; margin-top: 1px; }
+
+/* Roster table */
+.po-table-wrap {
+  background: rgba(255,255,255,0.8); backdrop-filter: blur(12px);
+  border: 1px solid rgba(0,0,0,0.06); border-radius: 16px;
+  overflow-x: auto; animation: poFadeIn 0.35s ease-out;
+}
+.po-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 860px; }
+.po-table th {
+  text-align: left; padding: 12px 14px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted, #64748b);
+  border-bottom: 1px solid #e2e8f0; white-space: nowrap;
+}
+.po-table th.num, .po-table td.num { text-align: right; }
+.po-table th.num { justify-content: flex-end; }
+.po-table th svg { vertical-align: -2px; margin-right: 4px; }
+.po-table td {
+  padding: 12px 14px; border-bottom: 1px solid #f1f5f9; color: var(--text-main, #1e293b);
+  white-space: nowrap;
+}
+.po-table tbody tr { transition: background 0.15s ease; }
+.po-table tbody tr:hover { background: rgba(22, 101, 52, 0.04); }
+.po-row-flagged { background: rgba(251, 191, 36, 0.06); }
+
+.po-teacher { display: flex; align-items: center; gap: 10px; }
+.po-avatar {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: #dcfce7; color: #166534; font-weight: 700; font-size: 13px;
+}
+.po-name { display: block; font-weight: 600; }
+.po-status-tag {
+  display: inline-block; margin-top: 2px; font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: 6px; background: #f1f5f9; color: #64748b;
+}
+.po-flag {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; margin-left: 4px;
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px;
+  background: #fef3c7; color: #92400e;
+}
+.po-unset { color: var(--text-muted, #94a3b8); font-weight: 400; }
+.po-sub { display: block; font-size: 11px; color: var(--text-muted, #94a3b8); }
+.po-earned { font-weight: 700; color: #166534; }
+
+.po-edit-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: 1px solid #e2e8f0; border-radius: 8px;
+  padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--text-main, #1e293b); transition: all 0.15s ease;
+}
+.po-edit-btn:hover { border-color: var(--primary, #166534); color: var(--primary, #166534); transform: translateY(-1px); }
+
+.po-table tfoot td {
+  border-top: 2px solid #e2e8f0; border-bottom: none;
+  font-weight: 700; background: rgba(241, 245, 249, 0.6);
+}
+
+.po-empty, .po-footnote {
+  color: var(--text-muted, #64748b); font-size: 12px;
+}
+.po-empty { text-align: center; padding: 40px 20px; font-size: 14px; }
+.po-footnote { margin-top: 12px; }
+
+.payroll-overview-state { text-align: center; padding: 60px 20px; }
+
+@media (max-width: 900px) {
+  .po-stat-row { grid-template-columns: 1fr; }
+}

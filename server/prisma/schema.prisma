@@ -45,6 +45,12 @@ model User {
   createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   baseSalary             Decimal?                  @map("base_salary") @db.Decimal(10, 2)
+  // Whether `baseSalary` is the yearly figure or the monthly one. Salaried
+  // staff are hired on an annual number ($63,000/yr), and that is the number
+  // everyone says out loud — storing a divided-down $5,250 would mean nobody
+  // could find their own salary on the screen. Payroll runs monthly, so it
+  // divides at read time instead.
+  salaryPeriod           SalaryPeriod              @default(MONTHLY) @map("salary_period")
   // Paid per hour taught, not per session: a 50-minute and a 3-hour class are
   // not the same work, and a flat per-session rate paid them the same. This is
   // the fallback rate — a category override in TeacherPayRate wins over it.
@@ -903,6 +909,16 @@ enum UserRole {
   PARENT  @map("parent")
 
   @@map("user_role")
+}
+
+// How to read a salaried person's `baseSalary`. Only two exist because those
+// are the two ways the academy actually hires: an annual figure for salaried
+// staff, a monthly one for a fixed stipend.
+enum SalaryPeriod {
+  MONTHLY @map("monthly")
+  ANNUAL  @map("annual")
+
+  @@map("salary_period")
 }
 
 enum UserStatus {

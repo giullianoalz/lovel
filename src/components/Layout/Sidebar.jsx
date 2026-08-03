@@ -259,6 +259,10 @@ const Sidebar = () => {
                     <CreditCard size={20} />
                     <span>Billing</span>
                   </NavLink>
+                  <NavLink to="/payroll" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+                    <Wallet size={20} />
+                    <span>Payroll</span>
+                  </NavLink>
                   <NavLink to="/registration" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                     <ClipboardList size={20} />
                     <span>Registration & Terms</span>

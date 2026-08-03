@@ -7,8 +7,10 @@ import {
   updateUser,
   updateUserStatus,
   inviteUser,
+  inviteUsersBulk,
   setTeachingRole,
   getTeacherPayroll,
+  getPayrollSummary,
   updateTeacherPayroll,
 } from '../controllers/users.controller.js';
 
@@ -16,6 +18,10 @@ const router = Router();
 
 // GET /api/users — List all users (Admin/Teacher)
 router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listUsers);
+
+// GET /api/users/payroll/summary — The whole roster's pay for one month (Admin only).
+// Declared before /:id so "payroll" is never read as a user id.
+router.get('/payroll/summary', authenticate, requireRole('ADMIN'), getPayrollSummary);
 
 // GET /api/users/:id — Get a user by ID (Admin/Teacher or self)
 router.get('/:id', authenticate, requireSelfOrRole('ADMIN', 'TEACHER'), getUser);
@@ -25,6 +31,10 @@ router.put('/:id', authenticate, requireSelfOrRole('ADMIN'), updateUser);
 
 // PUT /api/users/:id/status — Change user status (Admin only)
 router.put('/:id/status', authenticate, requireRole('ADMIN'), updateUserStatus);
+
+// POST /api/users/invite-bulk — Invite several people at once (Admin only).
+// Declared before /:id/invite so "invite-bulk" is never read as an :id.
+router.post('/invite-bulk', authenticate, requireRole('ADMIN'), inviteUsersBulk);
 
 // POST /api/users/:id/invite — Email a set-your-password link (Admin only)
 router.post('/:id/invite', authenticate, requireRole('ADMIN'), inviteUser);

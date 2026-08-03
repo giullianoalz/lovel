@@ -21,7 +21,7 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
   // same rule, this only keeps the controls out of a teacher's way.
   const canEditPay = hasRole('ADMIN');
   const [isEditingRates, setIsEditingRates] = useState(false);
-  const [rateForm, setRateForm] = useState({ baseSalary: '', hourlyRate: '', categoryRates: {} });
+  const [rateForm, setRateForm] = useState({ baseSalary: '', salaryPeriod: 'MONTHLY', hourlyRate: '', categoryRates: {} });
   const [savingRates, setSavingRates] = useState(false);
 
   const loadPayroll = async () => {
@@ -51,7 +51,11 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
       categoryRates[c.category] = c.rate != null ? String(c.rate) : '';
     });
     setRateForm({
-      baseSalary: payroll?.baseSalary ? String(payroll.baseSalary) : '',
+      // The agreed figure, not the month's share: someone hired at $63,000 a
+      // year must see 63,000 here, or saving would file a twelfth of their
+      // salary as the new yearly one.
+      baseSalary: payroll?.salaryAmount ? String(payroll.salaryAmount) : '',
+      salaryPeriod: payroll?.salaryPeriod || 'MONTHLY',
       hourlyRate: payroll?.hourlyRate != null ? String(payroll.hourlyRate) : '',
       categoryRates,
     });
@@ -66,6 +70,7 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
       await database.updateTeacherPayroll(teacher.id, {
         // '' clears the rate server-side rather than sending NaN.
         baseSalary: rateForm.baseSalary.trim(),
+        salaryPeriod: rateForm.salaryPeriod,
         hourlyRate: rateForm.hourlyRate.trim(),
         categoryRates,
       });
@@ -223,8 +228,8 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                   {isEditingRates ? (
                     <>
                       <label className="rate-edit-row">
-                        <span>Monthly Base Salary</span>
-                        <div className="rate-input-wrap">
+                        <span>Base Salary</span>
+                        <div className="rate-input-wrap rate-input-wrap-split">
                           <span className="rate-currency">$</span>
                           <input
                             type="number" min="0" step="0.01" inputMode="decimal"
@@ -234,8 +239,26 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                             placeholder="0.00"
                             autoFocus
                           />
+                          {/* Enter the figure the person was hired on. Payroll
+                              runs monthly and divides a yearly salary by 12 —
+                              typing the yearly number into a monthly field is
+                              how $63,000 a year became $63,000 a month. */}
+                          <select
+                            className="form-control rate-period-select"
+                            value={rateForm.salaryPeriod}
+                            onChange={e => setRateForm(f => ({ ...f, salaryPeriod: e.target.value }))}
+                            aria-label="Salary period"
+                          >
+                            <option value="MONTHLY">per month</option>
+                            <option value="ANNUAL">per year</option>
+                          </select>
                         </div>
                       </label>
+                      {rateForm.salaryPeriod === 'ANNUAL' && parseFloat(rateForm.baseSalary) > 0 && (
+                        <p className="rate-hint rate-hint-tight">
+                          Paid as ${(parseFloat(rateForm.baseSalary) / 12).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per month.
+                        </p>
+                      )}
                       <label className="rate-edit-row">
                         <span>Hourly Rate</span>
                         <div className="rate-input-wrap">
@@ -288,8 +311,17 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                   ) : (
                     <>
                       <div className="rate-row">
-                        <span>Monthly Base Salary</span>
-                        <strong>${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                        <span>Base Salary</span>
+                        <strong>
+                          {payroll.salaryPeriod === 'ANNUAL'
+                            ? <>
+                                ${payroll.salaryAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}/yr
+                                {' '}<span className="rate-inherited">
+                                  (${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}/mo)
+                                </span>
+                              </>
+                            : <>${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}/mo</>}
+                        </strong>
                       </div>
                       <div className="rate-row">
                         <span>Hourly Rate</span>

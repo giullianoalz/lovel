@@ -24,6 +24,7 @@ const FrontDeskAlerts = lazy(() => import('./components/Alerts/FrontDeskAlerts')
 const MarketingHub = lazy(() => import('./components/Marketing/MarketingHub'))
 const TeacherPortal = lazy(() => import('./components/Portal/TeacherPortal'))
 const MyPayroll = lazy(() => import('./components/Payroll/MyPayroll'))
+const PayrollOverview = lazy(() => import('./components/Payroll/PayrollOverview'))
 const MedicalIncidents = lazy(() => import('./components/Medical/MedicalIncidents'))
 const LessonPlanReview = lazy(() => import('./components/LessonPlans/LessonPlanReview'))
 const AcademyFeed = lazy(() => import('./components/Feed/AcademyFeed'))
@@ -193,6 +194,14 @@ function App() {
                         element={
                           <ProtectedRoute allowedRoles={['ADMIN']}>
                             <SupervisionPanel />
+                          </ProtectedRoute>
+                        }
+                      />
+                      <Route
+                        path="/payroll"
+                        element={
+                          <ProtectedRoute allowedRoles={['ADMIN']}>
+                            <PayrollOverview />
                           </ProtectedRoute>
                         }
                       />

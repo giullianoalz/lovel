@@ -353,6 +353,28 @@
   text-align: right;
 }
 
+/* The salary row carries an amount and its period side by side, so it needs
+   more room than the single-number rate rows. */
+.rate-input-wrap-split {
+  width: 226px;
+  display: flex;
+  gap: 6px;
+}
+.rate-input-wrap-split .form-control:first-child { flex: 1; min-width: 0; }
+/* Selector, not `.rate-period-select` alone: `.rate-input-wrap .form-control`
+   sets width:100% and outranks a single class, so the period dropdown was
+   stretching to the full row and pushing itself out of the modal. */
+.rate-input-wrap .rate-period-select {
+  width: 96px;
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 6px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.rate-hint-tight { margin-top: 6px; }
+
 .rate-hint {
   margin: 10px 0 0 0;
   font-size: 12px;
