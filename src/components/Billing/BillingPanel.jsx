@@ -38,7 +38,10 @@ const BillingPanel = () => {
   const [isReconcileOpen, setIsReconcileOpen] = useState(false);
   const [reconcile, setReconcile] = useState({ step: 1, text: '', lines: [], report: null });
   const [isParsingPreview, setIsParsingPreview] = useState(false);
-  const [newTxForm, setNewTxForm] = useState({ type: 'Payment', amount: '', date: new Date().toISOString().split('T')[0], description: '', studentId: '', paymentMethod: '', invoiceId: '' });
+  const [newTxForm, setNewTxForm] = useState({ type: 'Payment', amount: '', date: new Date().toISOString().split('T')[0], description: '', studentId: '', paymentMethod: '', invoiceId: '', repeatMonthly: false, repeatUntil: '' });
+  // The family's standing arrangements. Kept apart from `transactions` because
+  // they are instructions, not money — nothing here is on anyone's balance.
+  const [recurringCharges, setRecurringCharges] = useState([]);
   const [refundModal, setRefundModal] = useState(null); // { invoice, payment, amount, reason }
 
   const loadBilling = async () => {
@@ -46,12 +49,16 @@ const BillingPanel = () => {
     setError(null);
     try {
       // Independent fetches — run them in parallel instead of one at a time.
-      const [fams, studs, txs, invs] = await Promise.all([
+      const [fams, studs, txs, invs, recurring] = await Promise.all([
         database.fetchFamilies(),
         database.fetchStudents(),
         database.fetchAllTransactions(),
         database.fetchAllInvoices(),
+        // Every family's arrangements in one call, filtered client-side per
+        // family — the list is small and this keeps switching families instant.
+        database.fetchRecurringCharges(null, { includeInactive: true }),
       ]);
+      setRecurringCharges(recurring);
       setFamilies(fams);
       setStudents(studs);
       setTransactions(txs);
@@ -78,6 +85,34 @@ const BillingPanel = () => {
     }, 0);
   };
 
+  // Only money the academy asks for can stand every month. A payment or a
+  // refund is a thing that happened once; repeating it would invent history.
+  const isRepeatable = newTxForm.type === 'Charge';
+
+  const familyRecurring = selectedFamily
+    ? recurringCharges.filter(r => r.familyId === selectedFamily.id)
+    : [];
+
+  const handleToggleRecurring = async (charge) => {
+    try {
+      const updated = await database.updateRecurringCharge(charge.id, { active: !charge.active });
+      setRecurringCharges(prev => prev.map(r => (r.id === charge.id ? updated : r)));
+      toast.success(updated.active ? 'Recurring charge resumed.' : 'Recurring charge paused — it will not be raised again.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not update the recurring charge.');
+    }
+  };
+
+  const handleDeleteRecurring = async (charge) => {
+    try {
+      const res = await database.deleteRecurringCharge(charge.id);
+      setRecurringCharges(prev => prev.filter(r => r.id !== charge.id));
+      toast.success(res.message || 'Recurring charge removed.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not remove the recurring charge.');
+    }
+  };
+
   const handleAddTransaction = async () => {
     if (!newTxForm.amount || isNaN(newTxForm.amount)) return;
     setLoading(true);
@@ -99,6 +134,24 @@ const BillingPanel = () => {
       if (newTx.type.toLowerCase() === 'charge') {
         const newInv = await database.generateInvoice(selectedFamily.id, [newTx.id]);
         toast.success(`Charge added. Invoice ${newInv.id} generated and sent to parent automatically.`);
+      }
+
+      // 3. If it repeats, record the arrangement for the months after this one.
+      //    Today's charge was already raised above, so the schedule starts next
+      //    month — starting it today would bill the family twice for August.
+      if (isRepeatable && newTxForm.repeatMonthly) {
+        const first = new Date(`${newTxForm.date}T00:00:00Z`);
+        const nextMonth = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1));
+        await database.addRecurringCharge({
+          familyId: selectedFamily.id,
+          studentId: newTxForm.studentId || null,
+          amount: parseFloat(newTxForm.amount),
+          description: newTxForm.description || `Monthly ${newTxForm.type}`,
+          dayOfMonth: first.getUTCDate(),
+          startDate: nextMonth.toISOString().slice(0, 10),
+          endDate: newTxForm.repeatUntil || null,
+        });
+        toast.success(`It will repeat every month on day ${first.getUTCDate()}.`);
       }
 
       setIsAddTxModalOpen(false);
@@ -758,6 +811,37 @@ const BillingPanel = () => {
                 </button>
               </div>
 
+              {/* Standing arrangements. Above the ledger on purpose: this is
+                  what the family will owe next month, and it explains charges
+                  that appear on their own. */}
+              {familyRecurring.length > 0 && (
+                <div className="recurring-section">
+                  <h4><History size={15} /> Repeats every month</h4>
+                  {familyRecurring.map(r => (
+                    <div key={r.id} className={`recurring-row ${r.active ? '' : 'paused'}`}>
+                      <div className="recurring-main">
+                        <strong>{r.description}</strong>
+                        <span className="recurring-meta">
+                          ${r.amount.toFixed(2)} · day {r.dayOfMonth} of the month
+                          {r.studentName && <> · {r.studentName}</>}
+                          {r.endDate && <> · until {formatDateUS(r.endDate)}</>}
+                          {r.chargesRaised > 0 && <> · {r.chargesRaised} charged so far</>}
+                        </span>
+                      </div>
+                      {!r.active && <span className="recurring-paused-tag">Paused</span>}
+                      <div className="recurring-actions">
+                        <button className="recurring-btn" onClick={() => handleToggleRecurring(r)}>
+                          {r.active ? 'Pause' : 'Resume'}
+                        </button>
+                        <button className="recurring-btn danger" onClick={() => handleDeleteRecurring(r)}>
+                          Stop
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <table className="ledger-table">
                 <thead>
                   <tr>
@@ -902,6 +986,44 @@ const BillingPanel = () => {
                 <label>Description</label>
                 <input type="text" className="form-control" placeholder="e.g. EMA Check #1234" value={newTxForm.description} onChange={e => setNewTxForm({...newTxForm, description: e.target.value})} />
               </div>
+
+              {isRepeatable && (
+                <div className="repeat-box">
+                  <label className="repeat-toggle">
+                    <input
+                      type="checkbox"
+                      checked={newTxForm.repeatMonthly}
+                      onChange={e => setNewTxForm({ ...newTxForm, repeatMonthly: e.target.checked })}
+                    />
+                    <span><History size={14} /> Repeat this charge every month</span>
+                  </label>
+
+                  {newTxForm.repeatMonthly && (
+                    <div className="repeat-detail">
+                      <p className="repeat-hint">
+                        Charged on day {new Date(`${newTxForm.date}T00:00:00Z`).getUTCDate()} of every month,
+                        starting next month. A month that is too short is charged on its last day.
+                      </p>
+                      <div className="form-group">
+                        <label>Until (optional)</label>
+                        <input
+                          type="date"
+                          className="form-control"
+                          value={newTxForm.repeatUntil}
+                          min={newTxForm.date}
+                          onChange={e => setNewTxForm({ ...newTxForm, repeatUntil: e.target.value })}
+                        />
+                      </div>
+                      <p className="repeat-hint">
+                        {/* Said plainly because the manual charge above behaves the
+                            opposite way, and the difference is money leaving. */}
+                        Leave empty to run until you stop it. Repeats land on the family's
+                        account as unbilled charges — they are never invoiced automatically.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {newTxForm.type === 'Payment' && (
                 <>

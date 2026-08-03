@@ -906,3 +906,115 @@ select.form-control {
     top: auto;
   }
 }
+
+/* ── Standing monthly charges ──────────────────────────────
+   Instructions, not money: styled apart from the ledger so nobody reads a
+   scheduled repeat as something the family already owes. */
+.recurring-section {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+
+.recurring-section h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #64748b);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.recurring-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid #f1f5f9;
+  transition: opacity 0.2s ease;
+}
+.recurring-row:first-of-type { border-top: none; }
+.recurring-row.paused { opacity: 0.6; }
+
+.recurring-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.recurring-main strong { font-size: 14px; color: var(--text-main, #1e293b); }
+.recurring-meta { font-size: 12px; color: var(--text-muted, #64748b); }
+
+.recurring-paused-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.recurring-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.recurring-btn {
+  background: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-main, #1e293b);
+  transition: all 0.15s ease;
+}
+.recurring-btn:hover { border-color: var(--primary, #166534); color: var(--primary, #166534); transform: translateY(-1px); }
+.recurring-btn.danger:hover { border-color: #dc2626; color: #dc2626; }
+
+/* The repeat block inside the Add Transaction modal */
+.repeat-box {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.repeat-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main, #1e293b);
+}
+.repeat-toggle span { display: flex; align-items: center; gap: 7px; }
+.repeat-toggle input { width: 16px; height: 16px; cursor: pointer; }
+
+.repeat-detail { margin-top: 12px; animation: repeatReveal 0.25s ease-out; }
+@keyframes repeatReveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.repeat-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted, #64748b);
+}
+.repeat-detail .form-group:last-of-type { margin-bottom: 10px; }
+
+/* On a phone the description and the two buttons fight over ~255px and the
+   text collapses to a 4-line column. Stack them instead: the arrangement
+   reads on one line and the controls sit under it. */
+@media (max-width: 640px) {
+  .recurring-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .recurring-main { flex: 1 1 100%; }
+  .recurring-actions { flex: 1 1 auto; margin-top: 8px; }
+  .recurring-btn { flex: 1; text-align: center; }
+  .recurring-paused-tag { margin-top: 8px; }
+}

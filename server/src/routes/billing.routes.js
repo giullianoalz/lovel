@@ -11,6 +11,14 @@ import {
   reconcileEmaRemittance,
   refundPayment,
 } from '../controllers/billing.controller.js';
+import {
+  listRecurringCharges,
+  createRecurringCharge,
+  updateRecurringCharge,
+  deleteRecurringCharge,
+  previewDueCharges,
+  runRecurringChargesNow,
+} from '../controllers/recurringCharges.controller.js';
 
 const router = Router();
 
@@ -19,6 +27,15 @@ router.get('/transactions', authenticate, requireRole('ADMIN'), listTransactions
 
 // POST /api/billing/transactions — Create a transaction (Admin)
 router.post('/transactions', authenticate, requireRole('ADMIN'), validate(createTransactionSchema), createTransaction);
+
+// Standing monthly charges (Admin). "due" and "run" are declared before "/:id"
+// so neither word is ever read as an id.
+router.get('/recurring/due', authenticate, requireRole('ADMIN'), previewDueCharges);
+router.post('/recurring/run', authenticate, requireRole('ADMIN'), runRecurringChargesNow);
+router.get('/recurring', authenticate, requireRole('ADMIN'), listRecurringCharges);
+router.post('/recurring', authenticate, requireRole('ADMIN'), createRecurringCharge);
+router.patch('/recurring/:id', authenticate, requireRole('ADMIN'), updateRecurringCharge);
+router.delete('/recurring/:id', authenticate, requireRole('ADMIN'), deleteRecurringCharge);
 
 // GET /api/billing/invoices — List invoices (Admin)
 router.get('/invoices', authenticate, requireRole('ADMIN'), listInvoices);

@@ -104,6 +104,8 @@ model User {
   cancellationsReported  SessionCancellation[]     @relation("CancelledByStaff")
   cancellationsResolved  SessionCancellation[]     @relation("ResolvedByStaff")
   snackReloadsAsStudent  SnackReloadRequest[]      @relation("SnackReloadStudent")
+  recurringCharges       RecurringCharge[]         @relation("RecurringChargeStudent")
+  recurringChargesCreated RecurringCharge[]        @relation("RecurringChargeCreatedBy")
   snackReloadsDecided    SnackReloadRequest[]      @relation("SnackReloadDecidedBy")
   snackReloadsFulfilled  SnackReloadRequest[]      @relation("SnackReloadFulfilledBy")
   applicationsAsStudent  EnrollmentApplication[]   @relation("StudentApplications")
@@ -128,8 +130,56 @@ model Family {
   transactions Transaction[]
   snackReloads SnackReloadRequest[]
   applications EnrollmentApplication[]
+  recurringCharges RecurringCharge[]
 
   @@map("families")
+}
+
+/**
+ * A charge that comes back every month on its own — an IXL membership, a snack
+ * card the family tops up, anything billed on a standing arrangement.
+ *
+ * This is the *instruction*, not the money. Each month a job turns it into one
+ * ordinary Transaction, which is what the family's balance and invoices are
+ * built from. Keeping the two apart is what lets an admin pause or re-price
+ * the arrangement without rewriting history: last month's charge stays exactly
+ * as it was billed.
+ *
+ * Deliberately monthly-only. Every standing charge the academy actually has is
+ * monthly, and a general recurrence engine (weekly, "every 3rd Tuesday") is a
+ * lot of machinery — plus a lot of ways to be wrong about money — for a case
+ * nobody has yet.
+ */
+model RecurringCharge {
+  id          String    @id @default(uuid()) @db.Uuid
+  familyId    String    @map("family_id") @db.Uuid
+  // Optional: a charge can belong to one child (IXL for the older sibling) or
+  // to the household (a snack card the family shares).
+  studentId   String?   @map("student_id") @db.Uuid
+  amount      Decimal   @db.Decimal(10, 2)
+  description String
+  // 1–31. A month that is too short bills on its last day rather than skipping:
+  // "the 31st" on a family's arrangement means end of month, not "not February".
+  dayOfMonth  Int       @map("day_of_month")
+  startDate   DateTime  @map("start_date") @db.Date
+  // Null runs until somebody stops it. An arrangement that ends at a known date
+  // (a term) sets this so nobody has to remember to switch it off.
+  endDate     DateTime? @map("end_date") @db.Date
+  // Paused rather than deleted: the history stays attached and it can be
+  // resumed without retyping the arrangement.
+  active      Boolean   @default(true)
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  family      Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  student     User?         @relation("RecurringChargeStudent", fields: [studentId], references: [id], onDelete: SetNull)
+  createdBy   User?         @relation("RecurringChargeCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+
+  @@index([familyId])
+  @@index([active])
+  @@map("recurring_charges")
 }
 
 model FamilyMember {
@@ -406,6 +456,13 @@ model Transaction {
   // Postgres treats NULLs as distinct, so every other transaction is untouched.
   termId      String?         @map("term_id") @db.Uuid
   quarter     Int?
+  // Set only on charges raised by a standing monthly arrangement. `periodKey`
+  // is the month it covers ("2026-08"); together with the unique index below
+  // it is what makes the nightly run safe to repeat or catch up after downtime
+  // — a second attempt for the same month is refused by the database instead
+  // of charging the family twice. Same trick as termId/quarter above.
+  recurringChargeId String?   @map("recurring_charge_id") @db.Uuid
+  periodKey         String?   @map("period_key") @db.VarChar(7)
   invoiceId   String?         @map("invoice_id") @db.Uuid
   paymentId   String?         @map("payment_id") @db.Uuid
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -413,8 +470,10 @@ model Transaction {
   invoice     Invoice?        @relation(fields: [invoiceId], references: [id])
   payment     Payment?        @relation(fields: [paymentId], references: [id])
   student     User?           @relation(fields: [studentId], references: [id])
+  recurringCharge RecurringCharge? @relation(fields: [recurringChargeId], references: [id], onDelete: SetNull)
 
   @@unique([studentId, termId, quarter])
+  @@unique([recurringChargeId, periodKey])
   @@index([familyId])
   @@index([date])
   @@map("transactions")

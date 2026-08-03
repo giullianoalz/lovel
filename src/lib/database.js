@@ -338,6 +338,33 @@ export const database = {
     return response.data.transaction;
   },
 
+  // --- Standing monthly charges ---
+  // The arrangement, not the money: creating one bills nobody today. The
+  // nightly job raises one transaction per month from it.
+  fetchRecurringCharges: async (familyId, { includeInactive = false } = {}) => {
+    const params = new URLSearchParams();
+    if (familyId) params.set('familyId', familyId);
+    if (includeInactive) params.set('includeInactive', 'true');
+    const qs = params.toString() ? `?${params}` : '';
+    const response = await api.get(`/billing/recurring${qs}`);
+    return response.data.recurringCharges;
+  },
+
+  addRecurringCharge: async (payload) => {
+    const response = await api.post('/billing/recurring', payload);
+    return response.data.recurringCharge;
+  },
+
+  updateRecurringCharge: async (id, updates) => {
+    const response = await api.patch(`/billing/recurring/${id}`, updates);
+    return response.data.recurringCharge;
+  },
+
+  deleteRecurringCharge: async (id) => {
+    const response = await api.delete(`/billing/recurring/${id}`);
+    return response.data;
+  },
+
   generateInvoice: async (familyId, transactionIds) => {
     const response = await api.post('/billing/invoices', { familyId, transactionIds });
     return response.data.invoice;

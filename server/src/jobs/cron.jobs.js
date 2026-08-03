@@ -1,7 +1,8 @@
 import cron from 'node-cron';
 import prisma from '../config/database.js';
-import { sendNotification } from './notification.helper.js';
+import { sendNotification, notifyAdmins } from './notification.helper.js';
 import { previousOccurrence } from './cronSchedule.js';
+import { runRecurringCharges } from '../services/recurringCharges.service.js';
 import {
   getEventConfig,
   getAdminUserIds,
@@ -307,6 +308,36 @@ const sendClassStartingSoonReminders = async () => {
 };
 
 // ─────────────────────────────────────────────────────────────
+// JOB 5 — Standing Monthly Charges
+// Every day at 6:00 AM: raise the charges whose day of the month has come.
+//
+// Daily rather than monthly on purpose. Arrangements are billed on different
+// days (the 1st, the 15th), and a single monthly slot would either bill them
+// all on the same day or need one job per day. This asks the same question
+// every morning — "who is due and not yet charged this month?" — which is also
+// what makes it safe to miss a day: the charge is raised on the next run.
+// ─────────────────────────────────────────────────────────────
+const raiseRecurringCharges = async () => {
+  console.log('[CRON] Raising standing monthly charges…');
+  const result = await runRecurringCharges();
+
+  if (result.createdCount > 0) {
+    console.log(`[CRON] ${result.periodKey}: raised ${result.createdCount} charge(s), ${result.skippedCount} already done`);
+  }
+  // A failure here is money that did not get billed, so it is worth waking
+  // somebody rather than sitting in a log nobody reads.
+  if (result.failed.length > 0) {
+    console.error('[CRON] Recurring charges failed:', result.failed);
+    await notifyAdmins({
+      type: 'BILLING_ALERT',
+      title: 'Some monthly charges could not be raised',
+      message: `${result.failed.length} standing charge(s) failed for ${result.periodKey}. They will be retried tomorrow, but the families are not billed yet.`,
+      dedupKey: `recurring-charges-failed-${result.periodKey}`,
+    });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
 // JOB TABLE
 // `name` is the CronJobRun key — renaming one resets its history, which only
 // costs a single skipped catch-up, but keep them stable anyway.
@@ -331,6 +362,11 @@ const JOBS = [
     name: 'class-reminders',
     schedule: '*/5 * * * *', // every 5 minutes
     handler: sendClassStartingSoonReminders,
+  },
+  {
+    name: 'recurring-charges',
+    schedule: '0 6 * * *', // every day at 6:00 AM
+    handler: raiseRecurringCharges,
   },
 ];
 
