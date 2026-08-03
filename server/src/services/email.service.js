@@ -53,13 +53,14 @@ export const sendRegistrationBillingEmail = async ({ to, studentName, className,
       attachments.push({ path: term.calendarAssetUrl, filename: 'Academic-Calendar-2026.pdf' });
     }
 
-    await resend.emails.send({
+    const { error } = await resend.emails.send({
       from: process.env.EMAIL_FROM || 'noreply@lovelearning.app',
       to,
       subject: `Registration & Billing Confirmation — ${term.name}`,
       html: buildBillingEmailHtml({ studentName, className, electiveNames, request, term }),
       attachments,
     });
+    if (error) return { ok: false, error: error.message };
 
     return { ok: true };
   } catch (error) {
@@ -113,7 +114,7 @@ export const sendInviteEmail = async ({ to, fullName, link, isReminder = false }
   if (!to) return { ok: false, error: 'No recipient email' };
 
   try {
-    await resend.emails.send({
+    const { error } = await resend.emails.send({
       from: process.env.EMAIL_FROM || 'noreply@lovelearning.app',
       to,
       subject: isReminder
@@ -121,6 +122,7 @@ export const sendInviteEmail = async ({ to, fullName, link, isReminder = false }
         : 'Welcome to Love Learning Explorers — set your password',
       html: buildInviteEmailHtml({ fullName, link, isReminder }),
     });
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };
@@ -140,12 +142,13 @@ export const sendNotificationEmail = async ({ to, title, message, actionUrl = nu
   if (!to) return { ok: false, error: 'No recipient email' };
 
   try {
-    await resend.emails.send({
+    const { error } = await resend.emails.send({
       from: process.env.EMAIL_FROM || 'noreply@lovelearning.app',
       to,
       subject: title,
       html: buildNotificationEmailHtml({ title, message, actionUrl }),
     });
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };

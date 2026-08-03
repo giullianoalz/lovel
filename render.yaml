@@ -41,6 +41,12 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      # The From address for every outgoing email. Must be on a domain verified
+      # in Resend — Resend refuses anything else, and with no domain verified it
+      # only ever delivers to the account owner's own address. Undeclared, the
+      # code falls back to noreply@lovelearning.app, a domain nobody owns.
+      - key: EMAIL_FROM
+        sync: false
       # Shared secret for the Google Form Apps Script trigger. Must match the
       # FORM_INTAKE_SECRET script property on the Apps Script side; without it
       # /api/intake refuses every request.
