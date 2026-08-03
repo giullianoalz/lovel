@@ -120,7 +120,12 @@ const RegistrationAdmin = () => {
   const [manualForm, setManualForm] = useState({
     termId: '',
     studentId: '',
-    firstChoiceClassId: '',
+    // Every class this student is being placed into — a family can ask for a
+    // homeschool cove AND a group class AND 1-on-1 in the same application, and
+    // this is where all of it gets assigned at once. `secondChoiceClassId` only
+    // means something when exactly one class is picked: a backup to try if
+    // that single class is full.
+    classIds: [],
     secondChoiceClassId: '',
     electiveIds: [],
     ixlPlan: 'NONE',
@@ -147,23 +152,25 @@ const RegistrationAdmin = () => {
   // Mirrors registrationPricing.service.js so the admin sees the exact totals
   // before submitting — no extra round-trip needed.
   const recalcManualPreview = (form, classes, electives) => {
-    const cls = classes.find(c => c.id === form.firstChoiceClassId);
+    const selectedClasses = classes.filter(c => form.classIds.includes(c.id));
     const term = terms.find(t => t.id === form.termId);
-    if (!cls || !term) { setManualPreview(null); return; }
+    if (selectedClasses.length === 0 || !term) { setManualPreview(null); return; }
 
     const IXL_PRICES = { NONE: 0, CORE: 5, CORE_SPANISH: 10 };
     // A class may carry its own price, which wins over the term's two rates.
     // Same null-vs-0 rule as the server: 0 is a free class, null defers.
-    const termRate = cls.groupType === 'ANCHORED' ? Number(term.anchoredRate || 0) : Number(term.regularRate || 0);
-    const baseRate = cls.priceOverride === null || cls.priceOverride === undefined
-      ? termRate
-      : Number(cls.priceOverride);
+    // Summed across every selected class — three seats cost three seats, not one.
+    const classRate = (cls) => {
+      const termRate = cls.groupType === 'ANCHORED' ? Number(term.anchoredRate || 0) : Number(term.regularRate || 0);
+      return cls.priceOverride === null || cls.priceOverride === undefined ? termRate : Number(cls.priceOverride);
+    };
+    const baseRate = selectedClasses.reduce((s, cls) => s + classRate(cls), 0);
     const selectedElectives = electives.filter(e => form.electiveIds.includes(e.id));
     const electivesTotal = selectedElectives.reduce((s, e) => s + Number(e.price || 130), 0);
     const ixlTotal = IXL_PRICES[form.ixlPlan] ?? 0;
     const totalQuarterly = baseRate + electivesTotal + ixlTotal;
     const depositAmount = Math.round(totalQuarterly * 0.15 * 100) / 100;
-    setManualPreview({ baseRate, electivesTotal, ixlTotal, totalQuarterly, depositAmount });
+    setManualPreview({ baseRate, electivesTotal, ixlTotal, totalQuarterly, depositAmount, perClass: selectedClasses.map(cls => ({ id: cls.id, name: cls.name, rate: classRate(cls) })) });
   };
 
   const updateManualForm = (patch) => {
@@ -184,9 +191,27 @@ const RegistrationAdmin = () => {
     setManualApplication(null);
   };
 
+  // Adds or removes one class from the placement. Picking a second class drops
+  // any second-choice backup — that concept only applies when exactly one
+  // class was deliberately chosen, not when several were.
+  //
+  // Derives from `prev` rather than the rendered `manualForm`: two toggles
+  // landing in the same batch would otherwise both read the same stale list
+  // and the first one's change would be silently lost.
+  const handleManualClassToggle = (classId) => {
+    setManualForm(prev => {
+      const classIds = prev.classIds.includes(classId)
+        ? prev.classIds.filter(id => id !== classId)
+        : [...prev.classIds, classId];
+      const next = { ...prev, classIds, secondChoiceClassId: classIds.length === 1 ? prev.secondChoiceClassId : '' };
+      recalcManualPreview(next, manualTermClasses, manualTermElectives);
+      return next;
+    });
+  };
+
   // When term changes, load its classes and electives
   const handleManualTermChange = async (termId) => {
-    updateManualForm({ termId, firstChoiceClassId: '', secondChoiceClassId: '', electiveIds: [] });
+    updateManualForm({ termId, classIds: [], secondChoiceClassId: '', electiveIds: [] });
     setManualPreview(null);
     if (!termId) { setManualTermClasses([]); setManualTermElectives([]); return; }
     try {
@@ -211,13 +236,13 @@ const RegistrationAdmin = () => {
 
   const handleManualSubmit = async (e) => {
     e.preventDefault();
-    if (!manualForm.termId || !manualForm.studentId || !manualForm.firstChoiceClassId) return;
+    if (!manualForm.termId || !manualForm.studentId || manualForm.classIds.length === 0) return;
     setManualSubmitting(true);
     try {
       const res = await api.post('/registration/admin-register', manualForm);
       setManualResult({ ...res.data, applicationApproved: Boolean(manualForm.applicationId) });
       // Reset form
-      setManualForm({ termId: '', studentId: '', firstChoiceClassId: '', secondChoiceClassId: '', electiveIds: [], ixlPlan: 'NONE', skipEmail: false, applicationId: null });
+      setManualForm({ termId: '', studentId: '', classIds: [], secondChoiceClassId: '', electiveIds: [], ixlPlan: 'NONE', skipEmail: false, applicationId: null });
       setManualPreview(null);
       setManualStudentSearch('');
       setManualStudentName('');
@@ -267,7 +292,7 @@ const RegistrationAdmin = () => {
     setManualForm({
       termId: '',
       studentId: application.student.id,
-      firstChoiceClassId: '',
+      classIds: [],
       secondChoiceClassId: '',
       electiveIds: [],
       ixlPlan: application.ixlPlan || 'NONE',
@@ -370,6 +395,9 @@ const RegistrationAdmin = () => {
     }
   };
 
+  // Deliberately unfiltered: the manual-registration search must still find
+  // self-signup children, who sit at INACTIVE until placing them activates
+  // them. The roster picker narrows to ACTIVE at render instead.
   const loadAllStudents = async () => {
     try {
       const res = await api.get('/students');
@@ -1287,37 +1315,46 @@ const RegistrationAdmin = () => {
                     </select>
                   </div>
 
-                  {/* FIRST CHOICE CLASS */}
+                  {/* CLASSES — every class this student is being placed into. A
+                      family asking for a homeschool cove AND a group class AND
+                      1-on-1 tutoring gets all three assigned here in one pass,
+                      each priced and enrolled-or-waitlisted on its own. */}
                   {manualForm.termId && (
                     <div className="manual-reg-section">
-                      <label className="reg-form-label">3. First Choice Class</label>
-                      <select
-                        className="form-control reg-input-full"
-                        value={manualForm.firstChoiceClassId}
-                        onChange={e => updateManualForm({ firstChoiceClassId: e.target.value, secondChoiceClassId: '' })}
-                        required
-                      >
-                        <option value="">— Select a class —</option>
-                        {manualTermClasses.map(c => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} ({c.enrolled}/{c.capacity} enrolled{c.enrolled >= c.capacity ? ' · FULL' : ''})
-                          </option>
-                        ))}
-                      </select>
-                      {manualForm.firstChoiceClassId && (() => {
-                        const cls = manualTermClasses.find(c => c.id === manualForm.firstChoiceClassId);
-                        const isFull = cls && cls.enrolled >= cls.capacity;
-                        return isFull ? (
-                          <p className="manual-reg-warn">⚠️ This class is full. The student will be added to the waitlist.</p>
-                        ) : null;
-                      })()}
+                      <label className="reg-form-label">3. Classes <span className="text-muted">(select every class to assign)</span></label>
+                      <div className="manual-reg-electives">
+                        {manualTermClasses.map(c => {
+                          const isFull = c.enrolled >= c.capacity;
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              className={`badge manual-reg-elective-btn ${manualForm.classIds.includes(c.id) ? 'active' : ''}`}
+                              onClick={() => handleManualClassToggle(c.id)}
+                            >
+                              {c.name} ({c.enrolled}/{c.capacity}{isFull ? ' · FULL' : ''})
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {manualForm.classIds.some(id => {
+                        const cls = manualTermClasses.find(c => c.id === id);
+                        return cls && cls.enrolled >= cls.capacity;
+                      }) && (
+                        <p className="manual-reg-warn">
+                          ⚠️ {manualForm.classIds.length === 1 ? 'This class is' : 'One or more of these classes are'} full.
+                          The student will be added to the waitlist for {manualForm.classIds.length === 1 ? 'it' : 'those'}.
+                        </p>
+                      )}
                     </div>
                   )}
 
-                  {/* SECOND CHOICE CLASS */}
-                  {manualForm.firstChoiceClassId && (
+                  {/* SECOND CHOICE CLASS — a backup only makes sense when
+                      exactly one class was chosen; enrolling in several
+                      classes at once has nothing to "fall back" to. */}
+                  {manualForm.classIds.length === 1 && (
                     <div className="manual-reg-section">
-                      <label className="reg-form-label">4. Second Choice Class <span className="text-muted">(optional — backup if first is full)</span></label>
+                      <label className="reg-form-label">4. Second Choice Class <span className="text-muted">(optional — backup if the class above is full)</span></label>
                       <select
                         className="form-control reg-input-full"
                         value={manualForm.secondChoiceClassId}
@@ -1325,7 +1362,7 @@ const RegistrationAdmin = () => {
                       >
                         <option value="">— None —</option>
                         {manualTermClasses
-                          .filter(c => c.id !== manualForm.firstChoiceClassId)
+                          .filter(c => c.id !== manualForm.classIds[0])
                           .map(c => (
                             <option key={c.id} value={c.id}>
                               {c.name} ({c.enrolled}/{c.capacity})
@@ -1388,7 +1425,7 @@ const RegistrationAdmin = () => {
                     <button
                       type="submit"
                       className="btn-primary"
-                      disabled={manualSubmitting || !manualForm.termId || !manualForm.studentId || !manualForm.firstChoiceClassId}
+                      disabled={manualSubmitting || !manualForm.termId || !manualForm.studentId || manualForm.classIds.length === 0}
                       style={{ width: '100%', justifyContent: 'center' }}
                     >
                       {manualSubmitting ? 'Processing...' : '✍️ Complete Manual Registration'}
@@ -1402,10 +1439,28 @@ const RegistrationAdmin = () => {
                 <h3 className="manual-reg-preview-title">Billing Preview</h3>
                 {manualPreview ? (
                   <div className="manual-reg-preview-content">
-                    <div className="manual-reg-preview-row">
-                      <span>Base Rate</span>
-                      <span>${manualPreview.baseRate.toFixed(2)}</span>
-                    </div>
+                    {/* Itemised when several classes are being assigned, so the
+                        admin can see the total is the sum of real seats rather
+                        than a number that appeared from nowhere. */}
+                    {manualPreview.perClass && manualPreview.perClass.length > 1 ? (
+                      <>
+                        {manualPreview.perClass.map(c => (
+                          <div className="manual-reg-preview-row" key={c.id}>
+                            <span>{c.name}</span>
+                            <span>${c.rate.toFixed(2)}</span>
+                          </div>
+                        ))}
+                        <div className="manual-reg-preview-row">
+                          <span><strong>Classes subtotal</strong></span>
+                          <span><strong>${manualPreview.baseRate.toFixed(2)}</strong></span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="manual-reg-preview-row">
+                        <span>Base Rate</span>
+                        <span>${manualPreview.baseRate.toFixed(2)}</span>
+                      </div>
+                    )}
                     <div className="manual-reg-preview-row">
                       <span>Electives</span>
                       <span>${manualPreview.electivesTotal.toFixed(2)}</span>
@@ -2474,6 +2529,7 @@ const RegistrationAdmin = () => {
 
               <div className="student-search-results reg-search-results">
                 {allStudents
+                  .filter(s => s.status === 'ACTIVE')
                   .filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase()))
                   .map(student => {
                     const checked = selectedStudentIds.includes(student.id);
@@ -2494,7 +2550,7 @@ const RegistrationAdmin = () => {
                     );
                   })
                 }
-                {allStudents.filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase())).length === 0 && (
+                {allStudents.filter(s => s.status === 'ACTIVE').filter(s => s.fullName.toLowerCase().includes(studentSearch.toLowerCase())).length === 0 && (
                   <p className="text-muted reg-search-empty">No students found matching "{studentSearch}"</p>
                 )}
               </div>

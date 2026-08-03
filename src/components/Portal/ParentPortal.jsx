@@ -98,6 +98,9 @@ const REQUEST_STATUS_META = {
   enrolled: { label: 'Enrolled', cls: 'ok', icon: <CheckCircle size={15} /> },
   waitlisted_first_enrolled_second: { label: 'Waitlisted (1st) · Enrolled in 2nd choice', cls: 'partial', icon: <Hourglass size={15} /> },
   waitlisted_both: { label: 'Waitlisted', cls: 'wait', icon: <Hourglass size={15} /> },
+  enrolled_all: { label: 'Enrolled in all requested classes', cls: 'ok', icon: <CheckCircle size={15} /> },
+  enrolled_partial: { label: 'Enrolled in some classes, waitlisted for others', cls: 'partial', icon: <Hourglass size={15} /> },
+  waitlisted_all: { label: 'Waitlisted for every requested class', cls: 'wait', icon: <Hourglass size={15} /> },
   pending: { label: 'Request in progress', cls: 'wait', icon: <Hourglass size={15} /> },
 };
 

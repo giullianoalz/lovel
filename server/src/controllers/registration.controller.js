@@ -1319,12 +1319,26 @@ export const resendBillingEmail = async (req, res, next) => {
  * gets approved. Placing the child *is* the approval — there is no separate
  * button — because that is the moment the child stops being a form submission
  * and starts appearing on rosters, invoices and payroll.
+ *
+ * `classIds` replaces the old single `firstChoiceClassId` — a family's
+ * application can ask for several modalities at once (a homeschool cove AND a
+ * group class AND 1-on-1 tutoring), and placing them used to mean running this
+ * endpoint could seat exactly one. Every class in the array is enrolled if it
+ * has room or waitlisted if it doesn't, and each is billed at its own rate —
+ * three classes cost three seats, not one. `firstChoiceClassId` is still
+ * accepted as a single-class shorthand so nothing else calling this breaks.
+ *
+ * `secondChoiceClassId` only means something when exactly one class is
+ * requested: a backup to try if that one class is full. Once more than one
+ * class is deliberately chosen there is nothing to "fall back" to — each is
+ * either enrolled or waitlisted on its own.
  */
 export const adminRegisterStudent = async (req, res, next) => {
   try {
     const {
       termId,
       studentId,
+      classIds: rawClassIds,
       firstChoiceClassId,
       secondChoiceClassId,
       electiveIds = [],
@@ -1333,8 +1347,12 @@ export const adminRegisterStudent = async (req, res, next) => {
       applicationId = null,
     } = req.body;
 
-    if (!termId || !studentId || !firstChoiceClassId) {
-      return res.status(400).json({ message: 'termId, studentId y firstChoiceClassId son requeridos.' });
+    const classIds = [...new Set(
+      (Array.isArray(rawClassIds) && rawClassIds.length ? rawClassIds : [firstChoiceClassId]).filter(Boolean)
+    )];
+
+    if (!termId || !studentId || classIds.length === 0) {
+      return res.status(400).json({ message: 'termId, studentId y al menos una clase son requeridos.' });
     }
 
     const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
@@ -1360,21 +1378,42 @@ export const adminRegisterStudent = async (req, res, next) => {
       }
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      // Lock both candidate classes before reading their capacity — see
-      // lockClassRows for why this is required to avoid overbooking.
-      await lockClassRows(tx, [firstChoiceClassId, secondChoiceClassId]);
+    // Only a single class can fall back to a second choice — see the doc
+    // comment above.
+    const usesSecondChoiceFallback = classIds.length === 1 && Boolean(secondChoiceClassId);
 
-      const firstClass = await tx.class.findUniqueOrThrow({
-        where: { id: firstChoiceClassId },
+    const result = await prisma.$transaction(async (tx) => {
+      // Lock every candidate class before reading capacity — see lockClassRows
+      // for why this is required to avoid overbooking.
+      await lockClassRows(tx, usesSecondChoiceFallback ? [...classIds, secondChoiceClassId] : classIds);
+
+      const classRows = await tx.class.findMany({
+        where: { id: { in: classIds } },
         include: { _count: { select: { enrollments: { where: { status: 'active' } } } } },
       });
+      if (classRows.length !== classIds.length) {
+        return { error: { status: 404, message: 'One of the selected classes no longer exists.' } };
+      }
+      // The admin's chosen order, not whatever order the DB returned rows in —
+      // it is what the "first" class means for the legacy fallback path below.
+      const classById = new Map(classRows.map((c) => [c.id, c]));
+      const orderedClasses = classIds.map((id) => classById.get(id));
+      const firstClass = orderedClasses[0];
 
       const electives = electiveIds.length
         ? await tx.elective.findMany({ where: { id: { in: electiveIds } } })
         : [];
 
-      const billing = calculateRegistrationBilling({ term, groupType: firstClass.groupType, priceOverride: firstClass.priceOverride, electives, ixlPlan });
+      // Each class prices itself off the term/groupType or its own override;
+      // summed, because a family enrolling in three classes owes three seats,
+      // not one. Electives and IXL are chosen once for the whole placement,
+      // not once per class, so they ride into the combined total via
+      // priceOverride rather than being recalculated for every class.
+      const classesBaseTotal = orderedClasses.reduce(
+        (sum, cls) => sum + calculateRegistrationBilling({ term, groupType: cls.groupType, priceOverride: cls.priceOverride }).baseRate,
+        0
+      );
+      const billing = calculateRegistrationBilling({ term, priceOverride: classesBaseTotal, electives, ixlPlan });
       const billingData = {
         ixlPlan,
         baseRate: billing.baseRate,
@@ -1407,13 +1446,13 @@ export const adminRegisterStudent = async (req, res, next) => {
         data: { status: 'ACTIVE' },
       });
 
-      const postCharge = async (className) => {
-        if (familyId && billing.totalQuarterly > 0) {
+      const postCharge = async (amount, className) => {
+        if (familyId && amount > 0) {
           await tx.transaction.create({
             data: {
               familyId,
               studentId,
-              amount: billing.totalQuarterly,
+              amount,
               type: 'CHARGE',
               description: `Admin Registration - ${term.name} - ${className}`
             }
@@ -1421,40 +1460,82 @@ export const adminRegisterStudent = async (req, res, next) => {
         }
       };
 
-      // Try first choice
-      if (firstClass._count.enrollments < firstClass.maxStudents) {
-        await tx.classEnrollment.create({ data: { classId: firstChoiceClassId, studentId, status: 'active' } });
+      if (!usesSecondChoiceFallback) {
+        // ── One or more deliberately-chosen classes — each stands on its own. ──
+        const outcomes = [];
+        for (const cls of orderedClasses) {
+          if (cls._count.enrollments < cls.maxStudents) {
+            await tx.classEnrollment.create({ data: { classId: cls.id, studentId, status: 'active' } });
+            outcomes.push({ class: cls, enrolled: true });
+          } else {
+            await tx.waitlistEntry.create({ data: { classId: cls.id, studentId, status: 'waiting' } });
+            outcomes.push({ class: cls, enrolled: false });
+          }
+        }
+
+        const enrolledCount = outcomes.filter((o) => o.enrolled).length;
+        const status = enrolledCount === 0
+          ? (outcomes.length === 1 ? 'waitlisted_both' : 'waitlisted_all')
+          : enrolledCount === outcomes.length
+            ? (outcomes.length === 1 ? 'enrolled_first' : 'enrolled_all')
+            : 'enrolled_partial';
+
         const request = await tx.registrationRequest.create({
-          data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'enrolled_first', ...billingData },
+          data: { termId, studentId, firstChoiceClassId: firstClass.id, secondChoiceClassId: null, status, ...billingData },
         });
-        await postCharge(firstClass.name);
+
+        // A charge per seat actually taken — a waitlisted class costs nothing
+        // until a seat opens. Electives/IXL are billed once, alongside the
+        // first seat that clears, so waitlisting everything charges nothing
+        // at all, matching how a single fully-waitlisted request already works.
+        let extrasCharged = false;
+        for (const o of outcomes) {
+          if (!o.enrolled) continue;
+          const classRate = calculateRegistrationBilling({ term, groupType: o.class.groupType, priceOverride: o.class.priceOverride }).baseRate;
+          const extras = extrasCharged ? 0 : billing.electivesTotal + billing.ixlTotal;
+          extrasCharged = true;
+          await postCharge(classRate + extras, o.class.name);
+        }
+
+        return { status, requestId: request.id, className: outcomes.map((o) => o.class.name).join(', '), electives };
+      }
+
+      // ── Legacy path: exactly one chosen class with an explicit backup ──
+      if (firstClass._count.enrollments < firstClass.maxStudents) {
+        await tx.classEnrollment.create({ data: { classId: firstClass.id, studentId, status: 'active' } });
+        const request = await tx.registrationRequest.create({
+          data: { termId, studentId, firstChoiceClassId: firstClass.id, secondChoiceClassId, status: 'enrolled_first', ...billingData },
+        });
+        await postCharge(billing.totalQuarterly, firstClass.name);
         return { status: 'enrolled_first', requestId: request.id, className: firstClass.name, electives };
       }
 
       // First choice full — add to waitlist
-      await tx.waitlistEntry.create({ data: { classId: firstChoiceClassId, studentId, status: 'waiting' } });
+      await tx.waitlistEntry.create({ data: { classId: firstClass.id, studentId, status: 'waiting' } });
 
-      if (secondChoiceClassId) {
-        const secondClass = await tx.class.findUniqueOrThrow({
-          where: { id: secondChoiceClassId },
-          include: { _count: { select: { enrollments: { where: { status: 'active' } } } } },
+      const secondClass = await tx.class.findUniqueOrThrow({
+        where: { id: secondChoiceClassId },
+        include: { _count: { select: { enrollments: { where: { status: 'active' } } } } },
+      });
+      if (secondClass._count.enrollments < secondClass.maxStudents) {
+        await tx.classEnrollment.create({ data: { classId: secondChoiceClassId, studentId, status: 'active' } });
+        const request = await tx.registrationRequest.create({
+          data: { termId, studentId, firstChoiceClassId: firstClass.id, secondChoiceClassId, status: 'waitlisted_first_enrolled_second', ...billingData },
         });
-        if (secondClass._count.enrollments < secondClass.maxStudents) {
-          await tx.classEnrollment.create({ data: { classId: secondChoiceClassId, studentId, status: 'active' } });
-          const request = await tx.registrationRequest.create({
-            data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_first_enrolled_second', ...billingData },
-          });
-          await postCharge(secondClass.name);
-          return { status: 'waitlisted_first_enrolled_second', requestId: request.id, className: secondClass.name, electives };
-        }
-        await tx.waitlistEntry.create({ data: { classId: secondChoiceClassId, studentId, status: 'waiting' } });
+        await postCharge(billing.totalQuarterly, secondClass.name);
+        return { status: 'waitlisted_first_enrolled_second', requestId: request.id, className: secondClass.name, electives };
       }
+      await tx.waitlistEntry.create({ data: { classId: secondChoiceClassId, studentId, status: 'waiting' } });
 
       const request = await tx.registrationRequest.create({
-        data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_both', ...billingData },
+        data: { termId, studentId, firstChoiceClassId: firstClass.id, secondChoiceClassId, status: 'waitlisted_both', ...billingData },
       });
       return { status: 'waitlisted_both', requestId: request.id, className: firstClass.name, electives };
     });
+
+    if (result.error) {
+      return res.status(result.error.status).json({ message: result.error.message });
+    }
 
     // The roster counts this UI shows are cached for a minute; a seat that just
     // filled must not keep reading as free to the admin who filled it.
