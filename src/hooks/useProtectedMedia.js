@@ -12,15 +12,17 @@ const cache = new Map();
  * or local disk) instead of served from a public /uploads path.
  */
 export function useProtectedMedia(apiPath) {
-  const [url, setUrl] = useState(() => cache.get(apiPath) || null);
-  const [error, setError] = useState(null);
+  // The fetch result carries the path it belongs to, so a component that swaps
+  // apiPath never shows the previous file while the new one loads. A cache hit
+  // is read here during render rather than pushed through state by an effect.
+  const [fetched, setFetched] = useState(null);
+  const forThisPath = fetched && fetched.path === apiPath ? fetched : null;
+
+  const url = (apiPath ? cache.get(apiPath) : null) || forThisPath?.url || null;
+  const error = forThisPath?.error || null;
 
   useEffect(() => {
-    if (!apiPath) return;
-    if (cache.has(apiPath)) {
-      setUrl(cache.get(apiPath));
-      return;
-    }
+    if (!apiPath || cache.has(apiPath)) return;
 
     let cancelled = false;
     api.get(apiPath, { responseType: 'blob' })
@@ -28,10 +30,10 @@ export function useProtectedMedia(apiPath) {
         if (cancelled) return;
         const objectUrl = URL.createObjectURL(res.data);
         cache.set(apiPath, objectUrl);
-        setUrl(objectUrl);
+        setFetched({ path: apiPath, url: objectUrl });
       })
       .catch((err) => {
-        if (!cancelled) setError(err);
+        if (!cancelled) setFetched({ path: apiPath, error: err });
       });
 
     return () => { cancelled = true; };

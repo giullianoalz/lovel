@@ -50,7 +50,9 @@ export const waveConnect = async (req, res, next) => {
 
 // GET /api/integrations/wave/callback — OAuth redirect target (no auth middleware;
 // trust is established by the signed state param, not a session cookie).
-export const waveCallback = async (req, res, next) => {
+// Takes no `next`: a failure here has to come back as a redirect the browser can
+// render, not as an error handed to the JSON error middleware.
+export const waveCallback = async (req, res) => {
   const back = (params) => res.redirect(`${frontendUrl()}/settings/integrations?${new URLSearchParams(params)}`);
   try {
     const { code, state, error } = req.query;
