@@ -21,9 +21,14 @@
  *  2. Open the form's response spreadsheet -> Extensions -> Apps Script.
  *  3. Paste this file in.
  *  4. Project Settings -> Script Properties, add:
- *         API_BASE_URL       https://academy-management-api.onrender.com
+ *         API_BASE_URL       <copy from the Render dashboard>
  *         FORM_INTAKE_SECRET <the same value set on Render>
  *         SEND_AS            lovelearningfl@gmail.com
+ *
+ *     API_BASE_URL is the service's own URL as shown at the top of its page in
+ *     the Render dashboard, with no trailing /api — the script appends that.
+ *     It is NOT derivable from the service name in render.yaml: the obvious
+ *     guess, academy-management-api.onrender.com, answers "Not Found".
  *  5. Run `testConnection` once. It verifies the URL and the secret, confirms
  *     the alias is really verified, and triggers Google's authorisation
  *     prompt. Accept it. Do not continue until it prints OK on all three.
