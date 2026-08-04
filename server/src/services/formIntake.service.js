@@ -14,8 +14,8 @@
  * child has a seat.
  */
 
-import crypto from 'crypto';
 import prisma from '../config/database.js';
+import { placeholderUid } from './invite.service.js';
 
 const clean = (v) => (v == null ? '' : String(v).trim());
 
@@ -64,7 +64,7 @@ export const parseBirthday = (v) => {
   return { date, warning: null };
 };
 
-const importUid = () => `form_${crypto.randomUUID()}`;
+const importUid = () => placeholderUid('form');
 const slug = (s) => clean(s).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '').slice(0, 40);
 
 /**

@@ -20,9 +20,26 @@ import { sendInviteEmail } from './email.service.js';
 // look like it worked and silently reach nobody.
 const PLACEHOLDER_EMAIL_DOMAINS = ['@import.local', '@selfreg.local'];
 
-// Placeholder uids from the same two sources: a row carrying one has no
-// Firebase account behind it, so its owner cannot sign in yet.
-const PLACEHOLDER_UID_PREFIXES = ['import_', 'selfreg_'];
+// Placeholder uids from the same sources: a row carrying one has no Firebase
+// account behind it, so its owner cannot sign in yet.
+//
+// Mint them through `placeholderUid` rather than by hand. The Google Form
+// intake minted its own `form_` uids without registering the prefix here, so
+// every family it created read as "can sign in" — the directory showed them a
+// green tick and the intake skipped their invite, leaving them with no way in.
+const PLACEHOLDER_UID_PREFIXES = ['import_', 'selfreg_', 'form_'];
+
+/**
+ * Builds a placeholder uid for `source` (e.g. 'form'), failing loudly if that
+ * source isn't recognised above — a new intake path finds out at its first
+ * write, not weeks later when nobody can log in.
+ */
+export const placeholderUid = (source) => {
+  if (!PLACEHOLDER_UID_PREFIXES.includes(`${source}_`)) {
+    throw new Error(`Unknown placeholder uid source "${source}" — add it to PLACEHOLDER_UID_PREFIXES.`);
+  }
+  return `${source}_${crypto.randomUUID()}`;
+};
 
 export const isPlaceholderEmail = (email) =>
   !email || PLACEHOLDER_EMAIL_DOMAINS.some((domain) => email.toLowerCase().endsWith(domain));

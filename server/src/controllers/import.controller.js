@@ -1,9 +1,9 @@
-import crypto from 'crypto';
 import prisma from '../config/database.js';
+import { placeholderUid } from '../services/invite.service.js';
 
 const slug = (s) => (s || '').toString().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '').slice(0, 40);
 const clean = (v) => (v == null ? '' : String(v).trim());
-const importUid = () => `import_${crypto.randomUUID()}`;
+const importUid = () => placeholderUid('import');
 
 const mapStatus = (s) => {
   const v = clean(s).toLowerCase();
