@@ -81,12 +81,30 @@
   position: fixed; inset: 0; background: rgba(0,0,0,0.4);
   display: flex; align-items: center; justify-content: center; z-index: 1000;
 }
+/* Capped and column-flexed so the list scrolls inside the modal instead of the
+   modal growing past the viewport. Without this, 20 results made it taller
+   than the screen and — being centre-aligned — pushed its own heading and
+   search box off the top edge, out of reach. */
 .teacher-picker-modal {
   background: white; border-radius: 16px; padding: 20px;
   width: 90%; max-width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  max-height: min(560px, 85vh);
 }
-.teacher-picker-modal h3 { margin: 0 0 14px; font-size: 16px; }
-.teacher-picker-list { display: flex; flex-direction: column; gap: 6px; }
+.teacher-picker-modal h3 { margin: 0 0 14px; font-size: 16px; flex-shrink: 0; }
+/* The search box must never scroll away: it is the only way to reach someone
+   past the first pageful of results. */
+.teacher-picker-modal .form-control { flex-shrink: 0; }
+.teacher-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+  margin: 0 -20px -20px;
+  padding: 0 20px 20px;
+}
 
 /* Defined here rather than reused from RegistrationAdmin.css: each panel is
    lazy-loaded per route, so landing on /chat directly never pulls that
