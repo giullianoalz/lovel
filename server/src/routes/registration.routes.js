@@ -21,6 +21,7 @@ import {
   remindHolds,
   getBillingSummary,
   resendBillingEmail,
+  cancelRegistrationRequest,
   previewQuarterCharges,
   generateQuarterCharges,
   adminRegisterStudent,
@@ -67,6 +68,11 @@ router.get('/billing-summary', authenticate, requireRole('ADMIN'), getBillingSum
 router.get('/quarter-charges', authenticate, requireRole('ADMIN'), previewQuarterCharges);
 router.post('/quarter-charges', authenticate, requireRole('ADMIN'), generateQuarterCharges);
 router.post('/requests/:id/resend-email', authenticate, requireRole('ADMIN'), resendBillingEmail);
+
+// DELETE /api/registration/requests/:id — Undo a registration entirely (Admin).
+// Frees the seat and removes the charge it raised, unless that charge is
+// already invoiced or paid — see the controller.
+router.delete('/requests/:id', authenticate, requireRole('ADMIN'), cancelRegistrationRequest);
 
 // Self-signup review queue. Deliberately uncached: a placement made from this
 // screen has to disappear from it on the next load, not a minute later.

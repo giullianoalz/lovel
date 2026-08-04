@@ -71,6 +71,32 @@
   transform: translateY(1px);
 }
 
+/* Destructive confirm — same shape as .btn-primary so the two read as a pair
+   in a modal's footer, in red because the action does not come back. */
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(220, 38, 38, 0.3);
+  background: linear-gradient(135deg, #b91c1c, #dc2626);
+}
+
+.btn-danger:active { transform: translateY(1px); }
+
 .btn-outline {
   display: inline-flex;
   align-items: center;
@@ -1380,3 +1406,26 @@
     grid-template-columns: 1fr auto;
   }
 }
+
+/* Billing tab — Resend and Cancel side by side on each registration row. */
+.billing-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.billing-cancel-btn { color: #dc2626; }
+.billing-cancel-btn:hover:not(:disabled) { background: #fef2f2; }
+.billing-cancel-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* What cancelling actually does, listed in the confirm modal. */
+.cancel-reg-effects {
+  margin: 0 0 24px;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.cancel-reg-effects li + li { margin-top: 4px; }

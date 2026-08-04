@@ -988,6 +988,94 @@ export const removeFromWaitlist = async (req, res, next) => {
 };
 
 /**
+ * DELETE /api/registration/requests/:id
+ * Undoes a registration outright (Admin only).
+ *
+ * Until now a completed registration was the one thing with no way back:
+ * applications can be declined and waitlist entries removed, but once someone
+ * reached `enrolled_first` the seat, the charge and the row were permanent. A
+ * test entry or a child registered into the wrong class had to be fixed in the
+ * database by hand.
+ *
+ * Reverses the whole thing in one transaction — the seat, the waitlist entries,
+ * the elective choices, the request itself, and the tuition charge it raised.
+ *
+ * The charge is only removed when nothing depends on it, by the same rule as
+ * DELETE /billing/transactions/:id: an invoiced or paid charge is money that
+ * has already been communicated or collected, and the correction for that is a
+ * credit or a refund, not deleting the record. That case is reported back
+ * rather than silently skipped, so the admin knows there is still money to
+ * settle.
+ */
+export const cancelRegistrationRequest = async (req, res, next) => {
+  try {
+    const request = await prisma.registrationRequest.findUnique({
+      where: { id: req.params.id },
+      include: {
+        student: { select: { id: true, fullName: true } },
+        firstChoice: { select: { id: true, name: true } },
+        secondChoice: { select: { id: true } },
+      },
+    });
+    if (!request) {
+      return res.status(404).json({ error: 'Not Found', message: 'That registration no longer exists.' });
+    }
+
+    // Only the charge this registration raised: matched on the Q1 marker it
+    // writes, so a recurring charge or a manually added fee for the same
+    // student is never swept up by cancelling a registration.
+    const charges = await prisma.transaction.findMany({
+      where: { studentId: request.studentId, termId: request.termId, quarter: 1, type: 'CHARGE' },
+      select: { id: true, amount: true, invoiceId: true, paymentId: true },
+    });
+    const removable = charges.filter((c) => !c.invoiceId && !c.paymentId);
+    const locked = charges.filter((c) => c.invoiceId || c.paymentId);
+
+    const classIds = [request.firstChoiceClassId, request.secondChoiceClassId].filter(Boolean);
+
+    await prisma.$transaction(async (tx) => {
+      // Seats first, so the class is free again even if a later step is what
+      // the admin ends up retrying.
+      await tx.classEnrollment.deleteMany({
+        where: { studentId: request.studentId, classId: { in: classIds } },
+      });
+      await tx.waitlistEntry.deleteMany({
+        where: { OR: [{ requestId: request.id }, { studentId: request.studentId, classId: { in: classIds } }] },
+      });
+      await tx.registrationElectiveChoice.deleteMany({ where: { requestId: request.id } });
+
+      if (removable.length) {
+        await tx.transaction.deleteMany({ where: { id: { in: removable.map((c) => c.id) } } });
+      }
+
+      await tx.registrationRequest.delete({ where: { id: request.id } });
+    });
+
+    invalidate('registration:classes:*');
+
+    // No audit table for registrations exists yet, so the server log is the
+    // only trace of who cancelled what.
+    console.log(`[Registration] ${req.user.email} cancelled ${request.student.fullName}'s registration for "${request.firstChoice.name}" (removed ${removable.length} charge(s), ${locked.length} left in place)`);
+
+    // Says what actually happened rather than what usually happens: claiming a
+    // charge was removed when the ledger had none is how an admin ends up
+    // hunting for money that was never there.
+    let message = 'Registration cancelled.';
+    if (locked.length) {
+      message += ` ${locked.length} charge(s) stayed on the ledger because they are already invoiced or paid — issue a credit or refund for those.`;
+    } else if (removable.length) {
+      message += ` Its ${removable.length === 1 ? 'charge was' : `${removable.length} charges were`} removed from the family's ledger.`;
+    } else {
+      message += ' There was no charge on the ledger to remove.';
+    }
+
+    res.json({ message, chargesRemoved: removable.length, chargesLeft: locked.length });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * GET /api/registration/quarter-charges?termId=&quarter=&creditDeposit=
  * What each enrolled student would be charged for this quarter. Read-only —
  * this is the sheet an admin checks before any money is committed.

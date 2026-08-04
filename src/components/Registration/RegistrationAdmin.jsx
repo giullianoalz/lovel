@@ -106,6 +106,10 @@ const RegistrationAdmin = () => {
   const [billingRequests, setBillingRequests] = useState([]);
   const [billingLoading, setBillingLoading] = useState(false);
   const [resendingId, setResendingId] = useState(null);
+  // The request awaiting confirmation, then the one being cancelled — cancelling
+  // frees a seat and deletes a charge, so it asks first.
+  const [cancelModal, setCancelModal] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
 
   // ── Applications state (self-signup review queue) ──────────────────────────
   const [applications, setApplications] = useState([]);
@@ -496,6 +500,27 @@ const RegistrationAdmin = () => {
       showAlert(error.response?.data?.message || 'Error resending the email', 'Error', 'warning');
     } finally {
       setResendingId(null);
+    }
+  };
+
+  // Confirmed through a modal rather than window.confirm: this frees a seat and
+  // deletes a charge, and the summary of what will happen is worth reading.
+  const handleCancelRegistration = async () => {
+    const request = cancelModal;
+    if (!request) return;
+    setCancelModal(null);
+    setCancellingId(request.id);
+    try {
+      const res = await api.delete(`/registration/requests/${request.id}`);
+      showAlert(res.data.message, 'Registration cancelled', 'info');
+      // Reload both: the roster below now has a free seat, and the request is
+      // gone from the list this ran from.
+      loadBillingSummary();
+      loadClasses();
+    } catch (error) {
+      showAlert(error.response?.data?.message || 'Could not cancel the registration.', 'Error', 'warning');
+    } finally {
+      setCancellingId(null);
     }
   };
 
@@ -2073,13 +2098,22 @@ const RegistrationAdmin = () => {
                         {r.emailStatus === 'PENDING' && <span className="badge pending"><Clock size={12} /> Pending</span>}
                       </td>
                       <td>
-                        <button
-                          className="btn-text"
-                          disabled={resendingId === r.id}
-                          onClick={() => handleResendEmail(r.id)}
-                        >
-                          <Mail size={14} /> {resendingId === r.id ? 'Sending...' : 'Resend'}
-                        </button>
+                        <div className="billing-row-actions">
+                          <button
+                            className="btn-text"
+                            disabled={resendingId === r.id}
+                            onClick={() => handleResendEmail(r.id)}
+                          >
+                            <Mail size={14} /> {resendingId === r.id ? 'Sending...' : 'Resend'}
+                          </button>
+                          <button
+                            className="btn-text billing-cancel-btn"
+                            disabled={cancellingId === r.id}
+                            onClick={() => setCancelModal(r)}
+                          >
+                            <Trash2 size={14} /> {cancellingId === r.id ? 'Cancelling…' : 'Cancel'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2254,6 +2288,42 @@ const RegistrationAdmin = () => {
                 <button type="submit" className="btn-primary">Create Term</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Registration Modal — spells out the side effects, because this
+          frees a seat someone may be waitlisted for and deletes real money off
+          the family's ledger. */}
+      {cancelModal && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-card reg-modal-md">
+            <div className="registration-modal-header">
+              <h2>Cancel this registration?</h2>
+              <button className="icon-btn" onClick={() => setCancelModal(null)} aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="modal-body reg-modal-body">
+              <p className="reg-modal-text">
+                <strong>{cancelModal.studentName}</strong> will be removed from{' '}
+                <strong>{cancelModal.className}</strong>, and this registration will be deleted.
+              </p>
+              <ul className="cancel-reg-effects">
+                <li>Their seat is freed for the next student on the waitlist.</li>
+                <li>
+                  The {`$${cancelModal.totalQuarterly.toFixed(2)}`} tuition charge is removed from the family's
+                  ledger — unless it has already been invoiced or paid, which is reported back instead.
+                </li>
+                <li>This cannot be undone. To re-enrol them you'd register them again.</li>
+              </ul>
+              <div className="reg-form-actions" style={{ marginTop: 0 }}>
+                <button type="button" className="btn-text" onClick={() => setCancelModal(null)}>Keep it</button>
+                <button type="button" className="btn-danger" onClick={handleCancelRegistration}>
+                  <Trash2 size={16} /> Cancel registration
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
