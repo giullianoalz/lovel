@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import prisma from '../config/database.js';
 import { hasRole } from '../utils/roles.js';
-import { generateAssistantReply } from '../services/ai.service.js';
+import { generateAssistantReply, isAssistantEnabled } from '../services/ai.service.js';
 import { findContactInfo } from '../utils/contentFilter.js';
 import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
 import { sendNotification } from '../jobs/notification.helper.js';
@@ -74,12 +74,51 @@ function isWithinQuietHours(start, end, now = new Date()) {
   return cur >= s || cur < e; // window wraps past midnight
 }
 
+const ASSISTANT_THREAD_NAME = 'Academy Assistant';
+const ASSISTANT_GREETING = 'Hello! I am your Academy Assistant. How can I help you today?';
+
+// Every user gets exactly one 1:1 thread with the AI assistant. It used to be
+// created only by the chat seed, so anyone who signed up afterwards (i.e. every
+// real parent, student and teacher) never had one. Created lazily the first
+// time they open the Chat Hub, and reused forever after.
+async function ensureAssistantThread(userId) {
+  const existing = await prisma.chatThread.findFirst({
+    where: { isBot: true, participants: { some: { userId } } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  if (existing) return existing.id;
+
+  const thread = await prisma.chatThread.create({
+    data: {
+      isBot: true,
+      name: ASSISTANT_THREAD_NAME,
+      participants: { create: [{ userId }] },
+      // senderId null is what marks a message as coming from the assistant.
+      messages: { create: [{ senderId: null, text: ASSISTANT_GREETING }] },
+    },
+    select: { id: true },
+  });
+  return thread.id;
+}
+
 // GET /api/chat
 export const getThreads = async (req, res, next) => {
   try {
     const userId = req.user.id;
 
     const { status = 'ACTIVE' } = req.query;
+
+    // Only for the default (ACTIVE) inbox. The lookup ignores status, so a
+    // thread the user has resolved stays resolved instead of coming back.
+    if (status.toUpperCase() === 'ACTIVE' && isAssistantEnabled()) {
+      try {
+        await ensureAssistantThread(userId);
+      } catch (err) {
+        // A missing assistant thread must never break the whole inbox.
+        console.error('Failed to ensure assistant thread:', err.message);
+      }
+    }
 
     // Find all threads the user is part of
     const participants = await prisma.chatParticipant.findMany({
@@ -266,6 +305,17 @@ export const createThread = async (req, res, next) => {
       if (!allowed) {
         return res.status(403).json({ error: 'You are not allowed to message this person.' });
       }
+    }
+
+    // The assistant thread is one-per-user: hand back the existing one (creating
+    // it if this is their first time) instead of stacking up duplicates.
+    if (isBot) {
+      const assistantThreadId = await ensureAssistantThread(userId);
+      const assistantThread = await prisma.chatThread.findUnique({
+        where: { id: assistantThreadId },
+        include: { participants: { include: { user: true } } },
+      });
+      return res.status(200).json({ thread: assistantThread });
     }
 
     // For direct 1:1 threads, reuse an existing thread between the same two users
