@@ -3,7 +3,12 @@ services:
     name: academy-management-api
     runtime: node
     rootDir: server
-    plan: free
+    # Not free: a free web service spins down after ~15 min idle, and the
+    # in-process node-cron jobs (server/src/jobs/cron.jobs.js) don't fire while
+    # it sleeps. runStartupCatchUp() rescues the daily ones on the next boot,
+    # but class-reminders runs every 5 minutes — a "class starting soon" alert
+    # replayed hours late is worse than useless.
+    plan: starter
     buildCommand: npm install
     startCommand: npm run start
     healthCheckPath: /api/health
