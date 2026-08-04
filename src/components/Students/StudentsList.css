@@ -473,3 +473,28 @@
     gap: 6px;
   }
 }
+
+/* Entry point to the bulk invite picker. Sits above the parent list because
+   the backlog it clears spans every role, not just the rows below it. */
+.bulk-invite-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  animation: fadeInUp 0.3s ease;
+}
+.bulk-invite-cta strong { font-size: 14px; color: var(--text-main, #1e293b); }
+.bulk-invite-cta p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-muted, #64748b);
+  max-width: 60ch;
+}

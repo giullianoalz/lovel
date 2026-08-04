@@ -10,6 +10,7 @@ import TeacherProfileModal from './TeacherProfileModal';
 import SnackCabinetModal from './SnackCabinetModal';
 import AddStudentModal from './AddStudentModal';
 import ImportStudentsModal from './ImportStudentsModal';
+import BulkInviteModal from './BulkInviteModal';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './StudentsList.css';
 
@@ -36,6 +37,7 @@ const StudentsList = () => {
   // Only set when an invite was created but the email couldn't go out, so the
   // admin can still hand the link over.
   const [manualInvite, setManualInvite] = useState(null);
+  const [showBulkInvite, setShowBulkInvite] = useState(false);
 
   const loadData = async () => {
     setLoadError(null);
@@ -411,6 +413,22 @@ const StudentsList = () => {
       {/* Parents Tab — who can actually sign in, and the invite queue */}
       {activeTab === 'parents' && (
         <>
+          {/* The backlog is not a parents-only problem — staff accounts were
+              created the same way and are just as locked out — so this opens a
+              picker over everyone rather than only the list below. */}
+          <div className="bulk-invite-cta">
+            <div>
+              <strong>Invite people in bulk</strong>
+              <p>
+                Create sign-in access for everyone at once, across parents, teachers and staff.
+                Works even while email delivery is down — you get the links to pass on by hand.
+              </p>
+            </div>
+            <button className="action-btn primary" onClick={() => setShowBulkInvite(true)}>
+              <Send size={14} /> Bulk invite
+            </button>
+          </div>
+
           {manualInvite && (
             <div className="invite-manual-banner">
               <div>
@@ -535,6 +553,15 @@ const StudentsList = () => {
         <ImportStudentsModal
           onClose={() => setShowImportModal(false)}
           onImported={loadData}
+        />
+      )}
+
+      {showBulkInvite && (
+        <BulkInviteModal
+          onClose={() => setShowBulkInvite(false)}
+          // Reload rather than patch: the rows below show who can sign in, and
+          // a batch of invites has just changed that for several of them.
+          onDone={loadParents}
         />
       )}
     </div>
