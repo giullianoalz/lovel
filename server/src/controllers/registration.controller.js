@@ -329,7 +329,13 @@ export const submitRegistrationRequest = async (req, res, next) => {
               studentId,
               amount: billing.totalQuarterly,
               type: 'CHARGE',
-              description: `Registration - ${term.name} - ${className}`
+              description: `Registration - ${term.name} - ${className}`,
+              // Tags this as the student's Q1 charge for this term. Without it,
+              // the quarterly billing run has no way to see that registration
+              // already charged the full first quarter, and would charge it
+              // again — this is what makes it recognize the student as billed.
+              termId,
+              quarter: 1,
             }
           });
         }
@@ -1446,7 +1452,13 @@ export const adminRegisterStudent = async (req, res, next) => {
         data: { status: 'ACTIVE' },
       });
 
-      const postCharge = async (amount, className) => {
+      // `markQuarter` tags the row as the student's Q1 charge for this term, so
+      // the quarterly billing run recognizes them as already billed instead of
+      // charging the full quarter a second time. Only one row per
+      // (student, term, quarter) is allowed at the database level — a
+      // registration that charges several classes as separate line items
+      // must tag exactly one of them, never all.
+      const postCharge = async (amount, className, { markQuarter = true } = {}) => {
         if (familyId && amount > 0) {
           await tx.transaction.create({
             data: {
@@ -1454,7 +1466,8 @@ export const adminRegisterStudent = async (req, res, next) => {
               studentId,
               amount,
               type: 'CHARGE',
-              description: `Admin Registration - ${term.name} - ${className}`
+              description: `Admin Registration - ${term.name} - ${className}`,
+              ...(markQuarter ? { termId, quarter: 1 } : {}),
             }
           });
         }
@@ -1489,12 +1502,17 @@ export const adminRegisterStudent = async (req, res, next) => {
         // first seat that clears, so waitlisting everything charges nothing
         // at all, matching how a single fully-waitlisted request already works.
         let extrasCharged = false;
+        let quarterMarked = false;
         for (const o of outcomes) {
           if (!o.enrolled) continue;
           const classRate = calculateRegistrationBilling({ term, groupType: o.class.groupType, priceOverride: o.class.priceOverride }).baseRate;
           const extras = extrasCharged ? 0 : billing.electivesTotal + billing.ixlTotal;
           extrasCharged = true;
-          await postCharge(classRate + extras, o.class.name);
+          // Every enrolled class bills, but only the first charge in this
+          // registration carries the Q1 marker — the unique index allows just
+          // one such row per student per term per quarter.
+          await postCharge(classRate + extras, o.class.name, { markQuarter: !quarterMarked });
+          quarterMarked = true;
         }
 
         return { status, requestId: request.id, className: outcomes.map((o) => o.class.name).join(', '), electives };
