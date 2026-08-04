@@ -5,6 +5,7 @@ import { validate, createTransactionSchema, createInvoiceSchema } from '../utils
 import {
   listTransactions,
   createTransaction,
+  deleteTransaction,
   listInvoices,
   createInvoice,
   generateEmaBatch,
@@ -27,6 +28,10 @@ router.get('/transactions', authenticate, requireRole('ADMIN'), listTransactions
 
 // POST /api/billing/transactions — Create a transaction (Admin)
 router.post('/transactions', authenticate, requireRole('ADMIN'), validate(createTransactionSchema), createTransaction);
+
+// DELETE /api/billing/transactions/:id — Remove a mistaken/test entry (Admin).
+// Refused once an invoice or payment depends on it — see the controller.
+router.delete('/transactions/:id', authenticate, requireRole('ADMIN'), deleteTransaction);
 
 // Standing monthly charges (Admin). "due" and "run" are declared before "/:id"
 // so neither word is ever read as an id.

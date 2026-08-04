@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User
+  UploadCloud, FileText, Check, User, Trash2
 } from 'lucide-react';
 import { database } from '../../lib/database';
 import { useToast } from '../Layout/ToastProvider';
@@ -159,6 +159,25 @@ const BillingPanel = () => {
     } catch (err) {
       setLoading(false);
       toast.error(err.userMessage || 'Could not save the transaction. Please try again.');
+    }
+  };
+
+  const [deletingTxId, setDeletingTxId] = useState(null);
+
+  // Only offered on rows the server would actually accept — see `deletable`
+  // in listTransactions. The 409 case (invoiced/paid) is still handled here
+  // too, since the list this ran from could be a few seconds stale.
+  const handleDeleteTransaction = async (tx) => {
+    if (!window.confirm(`Remove this ${tx.type.toLowerCase()} of $${Math.abs(tx.amount).toFixed(2)}? This cannot be undone.`)) return;
+    setDeletingTxId(tx.id);
+    try {
+      await database.deleteTransaction(tx.id);
+      setTransactions(prev => prev.filter(t => t.id !== tx.id));
+      toast.success('Transaction removed.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not remove the transaction.');
+    } finally {
+      setDeletingTxId(null);
     }
   };
 
@@ -851,6 +870,7 @@ const BillingPanel = () => {
                     <th>Charges & Discounts</th>
                     <th>Payments & Refunds</th>
                     <th>Balance</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -878,10 +898,22 @@ const BillingPanel = () => {
                         <td style={{fontWeight: 700, color: tx.runningBalance > 0 ? '#dc2626' : '#166534'}}>
                           {tx.runningBalance < 0 ? `($${Math.abs(tx.runningBalance).toFixed(2)} credit)` : `$${tx.runningBalance.toFixed(2)}`}
                         </td>
+                        <td>
+                          {tx.deletable && (
+                            <button
+                              className="tx-delete-btn"
+                              title="Remove this entry"
+                              onClick={() => handleDeleteTransaction(tx)}
+                              disabled={deletingTxId === tx.id}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
-                  {ledgerTxs.length === 0 && <tr><td colSpan="6" className="text-center text-muted">No transactions found.</td></tr>}
+                  {ledgerTxs.length === 0 && <tr><td colSpan="7" className="text-center text-muted">No transactions found.</td></tr>}
                 </tbody>
               </table>
             </div>

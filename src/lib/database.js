@@ -338,6 +338,13 @@ export const database = {
     return response.data.transaction;
   },
 
+  // Only succeeds for a charge that has never touched an invoice or a
+  // payment — the server refuses anything else with a 409 explaining why.
+  deleteTransaction: async (id) => {
+    const response = await api.delete(`/billing/transactions/${id}`);
+    return response.data;
+  },
+
   // --- Standing monthly charges ---
   // The arrangement, not the money: creating one bills nobody today. The
   // nightly job raises one transaction per month from it.

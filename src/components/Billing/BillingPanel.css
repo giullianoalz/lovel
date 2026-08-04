@@ -1018,3 +1018,19 @@ select.form-control {
   .recurring-btn { flex: 1; text-align: center; }
   .recurring-paused-tag { margin-top: 8px; }
 }
+
+.tx-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tx-delete-btn:hover { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
+.tx-delete-btn:disabled { opacity: 0.5; cursor: not-allowed; }

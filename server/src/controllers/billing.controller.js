@@ -36,9 +36,64 @@ export const listTransactions = async (req, res, next) => {
       description: t.description || '',
       date: t.date.toISOString().split('T')[0],
       invoiceId: t.invoice?.invoiceNumber || null,
+      // Whether this row can be deleted outright — see DELETE /transactions/:id.
+      // Exposed as a plain boolean rather than making the UI infer it from
+      // invoiceId/paymentId, so the one rule lives in one place.
+      deletable: !t.invoiceId && !t.paymentId,
     }));
 
     res.json({ transactions: mapped });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/billing/transactions/:id
+ * Removes a mistaken or test entry from a family's ledger (Admin only).
+ *
+ * Deliberately narrow: only a row that has never touched an invoice or a
+ * payment can go this way. Once either exists, deleting the transaction would
+ * leave the invoice's total or the payment's allocation pointing at money that
+ * no longer has a reason on the books — the correct fix at that point is a
+ * reversing entry (a refund, a credit), not erasing the original one. A row
+ * raised by a recurring charge or the quarterly billing run is real, billed
+ * money too, so the same rule applies to it — nothing here is special-cased
+ * for how a transaction was created, only for what, if anything, already
+ * depends on it.
+ */
+export const deleteTransaction = async (req, res, next) => {
+  try {
+    const existing = await prisma.transaction.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true, familyId: true, amount: true, type: true, description: true,
+        invoiceId: true, paymentId: true,
+      },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Not Found', message: 'That transaction does not exist.' });
+    }
+    if (existing.invoiceId) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'This charge is already on an invoice. Void or credit the invoice instead of deleting the charge underneath it.',
+      });
+    }
+    if (existing.paymentId) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A payment is already applied to this. Refund the payment instead of deleting the transaction underneath it.',
+      });
+    }
+
+    await prisma.transaction.delete({ where: { id: req.params.id } });
+
+    // No audit table for the ledger exists yet, so the server log is the only
+    // trace of who removed what — worth a real record if this is ever disputed.
+    console.log(`[Billing] ${req.user.email} deleted transaction ${existing.id}: ${existing.type} $${existing.amount} "${existing.description || ''}" (family ${existing.familyId})`);
+
+    res.json({ message: 'Transaction removed.' });
   } catch (error) {
     next(error);
   }
