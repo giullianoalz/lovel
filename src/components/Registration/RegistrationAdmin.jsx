@@ -135,6 +135,11 @@ const RegistrationAdmin = () => {
     applicationId: null,
   });
   const [manualStudentSearch, setManualStudentSearch] = useState('');
+  // Filters the class picker in step 3 — a term can carry 20+ coves/classes,
+  // and scanning that whole wall of buttons to find one is the thing this
+  // fixes. Selected classes stay visible regardless of what's typed, so
+  // narrowing the search can never silently hide a pick already made.
+  const [manualClassSearch, setManualClassSearch] = useState('');
   // The student picker only knows the students /students returned (first page).
   // A child who just self-registered may not be among them, so the name is kept
   // here rather than looked up in that list.
@@ -213,6 +218,7 @@ const RegistrationAdmin = () => {
   const handleManualTermChange = async (termId) => {
     updateManualForm({ termId, classIds: [], secondChoiceClassId: '', electiveIds: [] });
     setManualPreview(null);
+    setManualClassSearch('');
     if (!termId) { setManualTermClasses([]); setManualTermElectives([]); return; }
     try {
       const [classRes, electiveRes] = await Promise.all([
@@ -1322,20 +1328,37 @@ const RegistrationAdmin = () => {
                   {manualForm.termId && (
                     <div className="manual-reg-section">
                       <label className="reg-form-label">3. Classes <span className="text-muted">(select every class to assign)</span></label>
+                      <input
+                        type="text"
+                        className="form-control reg-input-full manual-reg-class-search"
+                        placeholder={`Search ${manualTermClasses.length} classes…`}
+                        value={manualClassSearch}
+                        onChange={e => setManualClassSearch(e.target.value)}
+                      />
                       <div className="manual-reg-electives">
-                        {manualTermClasses.map(c => {
-                          const isFull = c.enrolled >= c.capacity;
-                          return (
-                            <button
-                              key={c.id}
-                              type="button"
-                              className={`badge manual-reg-elective-btn ${manualForm.classIds.includes(c.id) ? 'active' : ''}`}
-                              onClick={() => handleManualClassToggle(c.id)}
-                            >
-                              {c.name} ({c.enrolled}/{c.capacity}{isFull ? ' · FULL' : ''})
-                            </button>
-                          );
-                        })}
+                        {(() => {
+                          const q = manualClassSearch.trim().toLowerCase();
+                          // A class already picked stays visible no matter what's
+                          // typed — narrowing the search must never look like it
+                          // silently dropped a selection.
+                          const shown = manualTermClasses.filter(c => manualForm.classIds.includes(c.id) || c.name.toLowerCase().includes(q));
+                          if (shown.length === 0) {
+                            return <p className="text-muted manual-reg-class-empty">No classes match "{manualClassSearch}".</p>;
+                          }
+                          return shown.map(c => {
+                            const isFull = c.enrolled >= c.capacity;
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className={`badge manual-reg-elective-btn ${manualForm.classIds.includes(c.id) ? 'active' : ''}`}
+                                onClick={() => handleManualClassToggle(c.id)}
+                              >
+                                {c.name} ({c.enrolled}/{c.capacity}{isFull ? ' · FULL' : ''})
+                              </button>
+                            );
+                          });
+                        })()}
                       </div>
                       {manualForm.classIds.some(id => {
                         const cls = manualTermClasses.find(c => c.id === id);

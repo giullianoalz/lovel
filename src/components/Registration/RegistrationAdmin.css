@@ -943,6 +943,14 @@
   font-size: inherit;
 }
 
+.manual-reg-class-search {
+  margin-top: 8px;
+}
+.manual-reg-class-empty {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
 /* Electives */
 .manual-reg-electives {
   display: flex;
