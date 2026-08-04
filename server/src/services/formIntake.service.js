@@ -68,6 +68,16 @@ const importUid = () => `form_${crypto.randomUUID()}`;
 const slug = (s) => clean(s).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '').slice(0, 40);
 
 /**
+ * Same name, ignoring incidental spacing/punctuation ("Elliana Martin (Ellie)"
+ * vs "Elliana Martin ( Ellie)"). Sibling matching has to be this lenient
+ * because `slug()` already collapses that punctuation when it builds a
+ * student's synthetic email — an exact-string mismatch here doesn't stop a
+ * second "new" student from being created, it just makes the synthetic email
+ * collide with the real one and fail as a 409 instead of a clean duplicate.
+ */
+const sameName = (a, b) => slug(a) === slug(b);
+
+/**
  * Everything the parent answered, kept verbatim and in the form's own wording.
  * Staff place from the parent's words, not from our guess at what they meant —
  * and it means a question added to the form later still lands somewhere useful
@@ -154,7 +164,7 @@ export const ingestFormResponse = async (payload) => {
     where: { familyId: family.id, role: 'child' },
     include: { user: { select: { id: true, fullName: true } } },
   });
-  let student = siblings.find((m) => m.user.fullName.toLowerCase() === studentName.toLowerCase())?.user;
+  let student = siblings.find((m) => sameName(m.user.fullName, studentName))?.user;
 
   if (!student) {
     student = await prisma.user.create({
