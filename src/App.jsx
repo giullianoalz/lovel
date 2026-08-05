@@ -31,6 +31,7 @@ const AcademyFeed = lazy(() => import('./components/Feed/AcademyFeed'))
 const NotificationSettings = lazy(() => import('./components/Settings/NotificationSettings'))
 const Integrations = lazy(() => import('./components/Settings/Integrations'))
 const FamilySignup = lazy(() => import('./components/Auth/FamilySignup'))
+const ResetPassword = lazy(() => import('./components/Auth/ResetPassword'))
 
 const RouteFallback = () => (
   <div className="app-loader">
@@ -98,6 +99,18 @@ function App() {
             element={
               <Suspense fallback={<RouteFallback />}>
                 <FamilySignup />
+              </Suspense>
+            }
+          />
+
+          {/* Where invitation links land. Public by necessity — the whole point
+              is that the visitor has no password yet. Firebase's own hosted
+              page can't serve this project (no Hosting site), so we host it. */}
+          <Route
+            path="/reset-password"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <ResetPassword />
               </Suspense>
             }
           />

@@ -30,6 +30,10 @@ const Login = () => {
     error: 'Something went wrong opening that invitation. Please try again, or contact the academy.',
   }[searchParams.get('invite')];
 
+  // Set by /reset-password on success. Landing on a bare sign-in form after
+  // choosing a password leaves people wondering whether it took.
+  const passwordJustSet = searchParams.get('reset') === 'done';
+
   const handleLogin = async (e) => {
     e.preventDefault();
     if (!email || !password) {
@@ -129,6 +133,13 @@ const Login = () => {
           <div className="login-notice-banner">
             <KeyRound size={18} />
             <span>{notice}</span>
+          </div>
+        )}
+
+        {passwordJustSet && !error && !notice && (
+          <div className="login-notice-banner">
+            <KeyRound size={18} />
+            <span>Your password is set. Sign in with it below.</span>
           </div>
         )}
 

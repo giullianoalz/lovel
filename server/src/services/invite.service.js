@@ -68,23 +68,29 @@ const ensureFirebaseAccount = async (user) => {
 };
 
 /**
- * Builds a Firebase "set your password" link. The continue URL sends them back
- * to our login page once Firebase accepts the new password; if that domain
- * isn't in the project's authorized list Firebase rejects the whole call, so
- * fall back to a plain link rather than leaving the admin with no invite at all.
+ * Builds a "set your password" link pointing at OUR page.
  *
- * Short-lived by construction: Firebase expires these after an hour and offers
+ * We ask Firebase for a reset link only to obtain the one-time `oobCode` inside
+ * it, then throw the rest away: the URL Firebase builds points at
+ * <project>.firebaseapp.com/__/auth/action, and this project has no Firebase
+ * Hosting site, so that address answers "Site Not Found" and its form can never
+ * load a config — every link sent through it died with "API key not valid".
+ *
+ * Our /reset-password page redeems the same code with the web SDK, so the
+ * password still goes straight from the browser to Firebase and never touches
+ * this server.
+ *
+ * Short-lived by construction: the code expires in an hour and Firebase offers
  * no way to change that. Nothing should put one in an email — see
  * `buildInviteLink`.
  */
 const firebaseResetLink = async (email) => {
-  const url = `${process.env.FRONTEND_URL || ''}/login`;
-  try {
-    return await firebaseAuth.generatePasswordResetLink(email, { url, handleCodeInApp: false });
-  } catch (error) {
-    console.warn(`[Invite] Continue URL rejected (${error.message}) — falling back to a plain link.`);
-    return firebaseAuth.generatePasswordResetLink(email);
-  }
+  const firebaseUrl = await firebaseAuth.generatePasswordResetLink(email);
+  const code = new URL(firebaseUrl).searchParams.get('oobCode');
+  if (!code) throw new Error('Firebase returned a reset link with no oobCode.');
+
+  const appOrigin = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+  return `${appOrigin}/reset-password?oobCode=${encodeURIComponent(code)}`;
 };
 
 /** How long an issued invite stays good. Long enough to survive a weekend. */

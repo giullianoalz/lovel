@@ -15,8 +15,12 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Not sync:false any more. It was left for the dashboard and the dashboard
+      # held "http://localhost:5173", which every invite link inherited — they
+      # pointed at the recipient's own machine. It is a public address, not a
+      # secret, so the blueprint is the right place for it.
       - key: FRONTEND_URL
-        sync: false
+        value: https://lovelearning-three.vercel.app
       # This service's own public URL. Invitation links point at it so they can
       # outlive Firebase's one-hour password links (see invite.service.js).
       # fromService reads it from Render rather than trusting a hand-typed copy.
