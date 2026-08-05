@@ -493,10 +493,23 @@ export const getMessages = async (req, res, next) => {
       data: { lastReadAt: new Date() },
     });
 
+    // The sidebar's unread badge is a different counter — unread rows in the
+    // Notification table, not lastReadAt above — so it needs its own update or
+    // it stays stuck after the user has actually read every message.
+    const { count: notifsCleared } = await prisma.notification.updateMany({
+      where: { userId, referenceType: 'chat_thread', referenceId: threadId, isRead: false },
+      data: { isRead: true, readAt: new Date() },
+    });
+
     // Tell the other participant(s) in real time so their sent messages flip to
     // "Seen" without a refresh.
     const io = req.app.get('io');
-    if (io) io.to(threadId).emit('messages_read', { threadId, userId, readAt: new Date() });
+    if (io) {
+      io.to(threadId).emit('messages_read', { threadId, userId, readAt: new Date() });
+      // Nudges this user's own bell (useNotifications) to refetch and drop the
+      // badge — the same "something changed" signal a new notification sends.
+      if (notifsCleared > 0) io.to(`user_${userId}`).emit('notification', { type: 'read_sync' });
+    }
 
     res.json({ messages: formattedMessages, othersLastReadAt });
   } catch (error) {
