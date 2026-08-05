@@ -90,6 +90,18 @@ const firebaseResetLink = async (email) => {
   if (!code) throw new Error('Firebase returned a reset link with no oobCode.');
 
   const appOrigin = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+
+  // A localhost link in production points at the recipient's own machine: it
+  // fails for them, silently, days later, with nothing to tell the admin who
+  // sent it. Refuse instead — sendAccountInvite turns this into a message on
+  // the screen of the person who can actually fix it.
+  if (process.env.NODE_ENV === 'production' && (!appOrigin || /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(appOrigin))) {
+    throw new Error(
+      `FRONTEND_URL is "${appOrigin || '(unset)'}", which cannot work for anyone but this server. ` +
+      'Set it to the public app URL before sending invites.'
+    );
+  }
+
   return `${appOrigin}/reset-password?oobCode=${encodeURIComponent(code)}`;
 };
 
