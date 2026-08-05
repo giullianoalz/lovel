@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import prisma from '../config/database.js';
 import { firebaseAuth } from '../config/firebase-admin.js';
 import { notifyAdmins } from '../jobs/notification.helper.js';
-import { redeemInviteToken } from '../services/invite.service.js';
+import { redeemInviteToken, resolveAppOrigin } from '../services/invite.service.js';
 
 // Categories every new account gets a preference row for. Shared by the admin
 // path and the self-signup path so a self-registered parent isn't silently
@@ -37,7 +37,9 @@ export const getMe = async (req, res) => {
  * login page reads `?invite=` and says what to do next.
  */
 export const activateInvite = async (req, res, next) => {
-  const loginUrl = `${process.env.FRONTEND_URL || ''}/login`;
+  // Same resolver the links use: a failure message that redirects to localhost
+  // is as useless as the broken link that sent them here.
+  const loginUrl = `${resolveAppOrigin()}/login`;
   try {
     const result = await redeemInviteToken(req.params.token);
     if (!result.ok) return res.redirect(302, `${loginUrl}?invite=${result.reason}`);

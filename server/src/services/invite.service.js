@@ -68,6 +68,37 @@ const ensureFirebaseAccount = async (user) => {
 };
 
 /**
+ * Where the app lives, for links that have to work in someone else's inbox.
+ *
+ * The production address is a constant rather than a required env var on
+ * purpose. It used to read FRONTEND_URL, Render's dashboard held
+ * "http://localhost:5173", and every invite quietly pointed at the recipient's
+ * own machine — a dead link that nothing on the sending side could reveal. This
+ * is a public, single, stable address; keeping it in the repo means a deploy is
+ * enough to fix it and no dashboard can silently break it again.
+ *
+ * FRONTEND_URL still wins when it names a real host, so staging or a renamed
+ * domain needs no code change. It is ignored only when it points at localhost
+ * while we are running in production, which can only ever be a mistake.
+ */
+const PRODUCTION_APP_ORIGIN = 'https://lovelearning-three.vercel.app';
+
+export const resolveAppOrigin = () => {
+  const configured = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+  const isLocal = !configured || /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(configured);
+
+  if (process.env.NODE_ENV === 'production' && isLocal) {
+    console.warn(
+      `[Invite] FRONTEND_URL is "${configured || '(unset)'}" in production — ` +
+      `using ${PRODUCTION_APP_ORIGIN} instead so invite links reach their recipients.`
+    );
+    return PRODUCTION_APP_ORIGIN;
+  }
+
+  return configured || PRODUCTION_APP_ORIGIN;
+};
+
+/**
  * Builds a "set your password" link pointing at OUR page.
  *
  * We ask Firebase for a reset link only to obtain the one-time `oobCode` inside
@@ -89,20 +120,7 @@ const firebaseResetLink = async (email) => {
   const code = new URL(firebaseUrl).searchParams.get('oobCode');
   if (!code) throw new Error('Firebase returned a reset link with no oobCode.');
 
-  const appOrigin = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
-
-  // A localhost link in production points at the recipient's own machine: it
-  // fails for them, silently, days later, with nothing to tell the admin who
-  // sent it. Refuse instead — sendAccountInvite turns this into a message on
-  // the screen of the person who can actually fix it.
-  if (process.env.NODE_ENV === 'production' && (!appOrigin || /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(appOrigin))) {
-    throw new Error(
-      `FRONTEND_URL is "${appOrigin || '(unset)'}", which cannot work for anyone but this server. ` +
-      'Set it to the public app URL before sending invites.'
-    );
-  }
-
-  return `${appOrigin}/reset-password?oobCode=${encodeURIComponent(code)}`;
+  return `${resolveAppOrigin()}/reset-password?oobCode=${encodeURIComponent(code)}`;
 };
 
 /** How long an issued invite stays good. Long enough to survive a weekend. */
