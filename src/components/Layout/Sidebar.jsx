@@ -30,6 +30,7 @@ import NotifDrawer from '../Notifications/NotifDrawer';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useToast } from './ToastProvider';
 import { InstallNavItem } from './InstallNavItem';
+import { PushNotificationNavItem } from './PushNotificationNavItem';
 import { getNotificationLink } from '../../lib/notificationLink';
 import './Sidebar.css';
 
@@ -247,6 +248,7 @@ const Sidebar = () => {
                 <span>My Payroll</span>
               </NavLink>
             )}
+            <PushNotificationNavItem userId={user?.id} onNavigate={closeMenu} />
             <InstallNavItem onNavigate={closeMenu} />
           </div>
 
