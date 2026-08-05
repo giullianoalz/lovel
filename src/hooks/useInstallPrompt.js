@@ -6,7 +6,14 @@ const REPROMPT_AFTER_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 const isStandalone = () =>
   window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 
-const isIOSDevice = () => /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+// iPadOS 13+ reports itself as "Macintosh"; the touch points are what give it
+// away. Without that second check an iPad matched neither branch and never got
+// an install button at all.
+const isIOSDevice = () => {
+  const ua = window.navigator.userAgent;
+  if (/iphone|ipad|ipod/i.test(ua)) return true;
+  return /macintosh/i.test(ua) && window.navigator.maxTouchPoints > 1;
+};
 
 const isDismissed = () => {
   const raw = localStorage.getItem(LS_DISMISSED_AT);

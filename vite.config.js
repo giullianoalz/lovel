@@ -20,6 +20,18 @@ export default defineConfig({
         // Pre-cache all build output (JS chunks, CSS, index.html)
         globPatterns: ['**/*.{js,css,html,svg,png,webp,ico,woff,woff2}'],
 
+        // Firebase's background-push handlers get folded INTO this worker
+        // instead of living in a second one. Two workers can't share the '/'
+        // scope: registering one replaces the other, and when the Firebase
+        // worker won it took the fetch handler with it — no fetch handler
+        // means Chrome never fires beforeinstallprompt, so the "Install app"
+        // button silently disappeared on Android. See src/lib/fcm.js.
+        importScripts: ['firebase-messaging-sw.js'],
+
+        // It's imported above, so precaching it too would only risk serving a
+        // stale copy of the push handlers from the cache.
+        globIgnores: ['firebase-messaging-sw.js'],
+
         // Runtime caching strategies for API and assets
         runtimeCaching: [
           {

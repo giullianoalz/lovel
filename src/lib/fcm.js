@@ -21,7 +21,14 @@ export const requestAndSaveFcmToken = async (userId) => {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') return;
 
-    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+    // Reuse the worker vite-plugin-pwa already registered (/sw.js) — it imports
+    // firebase-messaging-sw.js, so it handles background pushes itself.
+    // Registering the Firebase worker separately would evict /sw.js from the '/'
+    // scope and cost us the PWA install prompt on Android.
+    const existing = await navigator.serviceWorker.getRegistration('/');
+    const registration = existing
+      ? await navigator.serviceWorker.ready
+      : await navigator.serviceWorker.register('/sw.js');
     const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration });
     if (token) {
       await api.put(`/users/${userId}`, { fcmToken: token });
