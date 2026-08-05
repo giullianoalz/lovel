@@ -17,6 +17,14 @@ services:
         value: production
       - key: FRONTEND_URL
         sync: false
+      # This service's own public URL. Invitation links point at it so they can
+      # outlive Firebase's one-hour password links (see invite.service.js).
+      # fromService reads it from Render rather than trusting a hand-typed copy.
+      - key: PUBLIC_API_URL
+        fromService:
+          type: web
+          name: academy-management-api
+          property: host
       # ENABLE_TEST_LOGIN is deliberately NOT set here — it defaults to off in
       # production. The old value: "true" let anyone log in as any seeded user
       # (including the admin) with no password via an x-dev-user-email header.

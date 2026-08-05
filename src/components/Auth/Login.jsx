@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import {
   ShieldCheck,
   Lock,
@@ -18,6 +18,17 @@ const Login = () => {
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Where GET /api/auth/activate/:token sends someone whose invite link didn't
+  // work. Without this they'd land on a plain login form with no idea why, and
+  // no account to sign in with — every message here has to end in a way out.
+  const inviteProblem = {
+    expired: 'That invitation link has expired. Enter your email below and use "Forgot your password?" to get a new one.',
+    invalid: 'That invitation link is not valid. It may have been replaced by a newer one — check for a more recent email, or ask the academy to send another.',
+    blocked: 'That invitation cannot be used. Please contact the academy so they can sort out your account.',
+    error: 'Something went wrong opening that invitation. Please try again, or contact the academy.',
+  }[searchParams.get('invite')];
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -118,6 +129,15 @@ const Login = () => {
           <div className="login-notice-banner">
             <KeyRound size={18} />
             <span>{notice}</span>
+          </div>
+        )}
+
+        {/* Hidden once the user acts, so a stale ?invite= in the URL doesn't
+            keep shouting over the message their action just produced. */}
+        {inviteProblem && !error && !notice && (
+          <div className="login-error-banner">
+            <AlertCircle size={18} />
+            <span>{inviteProblem}</span>
           </div>
         )}
 

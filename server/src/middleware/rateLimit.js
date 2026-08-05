@@ -86,6 +86,25 @@ export const apiLimiter = rateLimit({
 });
 
 /**
+ * Invite activation. Looser than authLimiter because these arrive in bursts
+ * from one address for legitimate reasons — a family opening links on the
+ * office wifi, or a mail scanner fetching every link in a batch of invites —
+ * and the endpoint only ever yields a password-reset link, never a session.
+ * 30 requests per 15 minutes per client IP.
+ */
+export const inviteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  keyGenerator: ipKey,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Too Many Requests',
+    message: 'Too many invite attempts. Please wait 15 minutes.',
+  },
+});
+
+/**
  * Strict rate limiter for auth endpoints
  * 10 requests per 15 minutes per client IP.
  */

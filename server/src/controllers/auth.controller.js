@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import prisma from '../config/database.js';
 import { firebaseAuth } from '../config/firebase-admin.js';
 import { notifyAdmins } from '../jobs/notification.helper.js';
+import { redeemInviteToken } from '../services/invite.service.js';
 
 // Categories every new account gets a preference row for. Shared by the admin
 // path and the self-signup path so a self-registered parent isn't silently
@@ -18,6 +19,36 @@ const NOTIFICATION_CATEGORIES = [
  */
 export const getMe = async (req, res) => {
   res.json({ user: req.user });
+};
+
+/**
+ * GET /api/auth/activate/:token
+ *
+ * The link that goes in an invitation email. Trades our long-lived handle for a
+ * Firebase set-password link generated right now and redirects to it, so the
+ * hour Firebase gives that link starts when the person clicks — not when the
+ * admin wrote the email.
+ *
+ * Public by necessity: the recipient has no account yet. The token is the
+ * credential, and it only ever buys a password-reset link.
+ *
+ * Answers are redirects, never JSON: whoever follows this is a human in a mail
+ * client, and a failure should land them somewhere that explains itself. The
+ * login page reads `?invite=` and says what to do next.
+ */
+export const activateInvite = async (req, res, next) => {
+  const loginUrl = `${process.env.FRONTEND_URL || ''}/login`;
+  try {
+    const result = await redeemInviteToken(req.params.token);
+    if (!result.ok) return res.redirect(302, `${loginUrl}?invite=${result.reason}`);
+    return res.redirect(302, result.link);
+  } catch (error) {
+    // A broken invite link is a dead end for someone who can't sign in to
+    // report it, so log loudly and still send them somewhere with a way out.
+    console.error('[Invite] Redeeming a token failed:', error);
+    if (res.headersSent) return next(error);
+    return res.redirect(302, `${loginUrl}?invite=error`);
+  }
 };
 
 /**

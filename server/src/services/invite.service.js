@@ -68,12 +68,16 @@ const ensureFirebaseAccount = async (user) => {
 };
 
 /**
- * Builds the "set your password" link. The continue URL sends them back to our
- * login page once Firebase accepts the new password; if that domain isn't in
- * the project's authorized list Firebase rejects the whole call, so fall back
- * to a plain link rather than leaving the admin with no invite at all.
+ * Builds a Firebase "set your password" link. The continue URL sends them back
+ * to our login page once Firebase accepts the new password; if that domain
+ * isn't in the project's authorized list Firebase rejects the whole call, so
+ * fall back to a plain link rather than leaving the admin with no invite at all.
+ *
+ * Short-lived by construction: Firebase expires these after an hour and offers
+ * no way to change that. Nothing should put one in an email — see
+ * `buildInviteLink`.
  */
-const buildInviteLink = async (email) => {
+const firebaseResetLink = async (email) => {
   const url = `${process.env.FRONTEND_URL || ''}/login`;
   try {
     return await firebaseAuth.generatePasswordResetLink(email, { url, handleCodeInApp: false });
@@ -81,6 +85,93 @@ const buildInviteLink = async (email) => {
     console.warn(`[Invite] Continue URL rejected (${error.message}) — falling back to a plain link.`);
     return firebaseAuth.generatePasswordResetLink(email);
   }
+};
+
+/** How long an issued invite stays good. Long enough to survive a weekend. */
+const INVITE_TTL_DAYS = 7;
+
+const hashToken = (raw) => crypto.createHash('sha256').update(raw).digest('hex');
+
+/**
+ * Issues a fresh invite handle, replacing any outstanding one — re-inviting
+ * someone is how an admin says "the last link is no good".
+ *
+ * Only the digest is stored: a leaked database backup shouldn't hand out
+ * working invites. The raw token is returned once and never again.
+ */
+const issueInviteToken = async (userId) => {
+  const raw = crypto.randomBytes(32).toString('base64url');
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      inviteTokenHash: hashToken(raw),
+      inviteTokenExpiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000),
+    },
+  });
+  return raw;
+};
+
+/**
+ * Builds the link that actually goes in the invitation email.
+ *
+ * It points at our own redeem endpoint rather than at Firebase, because the
+ * Firebase link's one-hour life can't be extended and an invitation has to
+ * survive the gap between writing the email and the recipient reading it.
+ * Opening ours mints the Firebase link on the spot, so the password is still
+ * typed on Firebase's page and still never travels through us.
+ *
+ * Needs PUBLIC_API_URL (this service's own public origin) — the process has no
+ * other way to know the URL the outside world reaches it on. Without it, fall
+ * back to the old short-lived link: an invite that expires quickly beats no
+ * invite, and the warning says which one the admin is holding.
+ */
+const buildInviteLink = async (user) => {
+  // Render's `fromService` fills this with a bare hostname, a hand-typed value
+  // usually has the scheme. Normalise rather than care: a link missing its
+  // scheme is a relative path, and relative paths in an email go nowhere.
+  const configured = (process.env.PUBLIC_API_URL || '').trim().replace(/\/+$/, '');
+  const apiOrigin = configured && !/^https?:\/\//i.test(configured) ? `https://${configured}` : configured;
+
+  if (!apiOrigin) {
+    console.warn('[Invite] PUBLIC_API_URL is not set — falling back to a Firebase link that expires in an hour.');
+    return firebaseResetLink(user.email);
+  }
+
+  const token = await issueInviteToken(user.id);
+  return `${apiOrigin}/api/auth/activate/${token}`;
+};
+
+/**
+ * Redeems an invite handle for a fresh Firebase set-password link.
+ *
+ * Deliberately NOT single-use. Corporate mail scanners follow links in incoming
+ * mail, and burning the token on that first automated fetch would lock out the
+ * very people the invite is for. The expiry is what bounds it, and redeeming
+ * hands out a password link rather than a session — the same exposure as the
+ * "Forgot your password?" button anyone can already press.
+ *
+ * @returns {Promise<{ok: true, link: string} | {ok: false, reason: 'invalid'|'expired'|'blocked'}>}
+ */
+export const redeemInviteToken = async (rawToken) => {
+  if (!rawToken || typeof rawToken !== 'string') return { ok: false, reason: 'invalid' };
+
+  const user = await prisma.user.findUnique({ where: { inviteTokenHash: hashToken(rawToken) } });
+  if (!user) return { ok: false, reason: 'invalid' };
+  if (!user.inviteTokenExpiresAt || user.inviteTokenExpiresAt.getTime() < Date.now()) {
+    return { ok: false, reason: 'expired' };
+  }
+  // Re-checked here, not just at issue time: a week is long enough for someone
+  // to be suspended after being invited.
+  if (user.status === 'SUSPENDED' || isPlaceholderEmail(user.email)) return { ok: false, reason: 'blocked' };
+
+  const firebaseUser = await ensureFirebaseAccount(user);
+  if (firebaseUser.uid !== user.firebaseUid) {
+    const clash = await prisma.user.findUnique({ where: { firebaseUid: firebaseUser.uid } });
+    if (clash && clash.id !== user.id) return { ok: false, reason: 'blocked' };
+    await prisma.user.update({ where: { id: user.id }, data: { firebaseUid: firebaseUser.uid } });
+  }
+
+  return { ok: true, link: await firebaseResetLink(user.email) };
 };
 
 /**
@@ -134,7 +225,7 @@ export const sendAccountInvite = async (userId, { deliver = true } = {}) => {
 
   let link;
   try {
-    link = await buildInviteLink(user.email);
+    link = await buildInviteLink(user);
   } catch (error) {
     console.error('[Invite] Could not generate the password link:', error);
     return { ok: false, message: `Could not generate an invite link: ${error.message}` };

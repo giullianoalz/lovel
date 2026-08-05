@@ -42,6 +42,16 @@ model User {
   // can sign in, so this is what tells the directory "invited, waiting on them"
   // apart from "never invited".
   invitedAt              DateTime?                 @map("invited_at") @db.Timestamptz(6)
+  // The invite handle we hand out, as a SHA-256 digest — the raw token is a
+  // credential and is shown once, at the moment the invite is issued.
+  //
+  // It exists because Firebase's own password links die after an hour and that
+  // is not configurable (there is no expiry field anywhere in the Identity
+  // Platform project config). An hour is useless for an invitation someone
+  // opens after lunch, so the long-lived handle is ours and redeeming it mints
+  // a fresh Firebase link at click time.
+  inviteTokenHash        String?                   @unique @map("invite_token_hash") @db.VarChar(64)
+  inviteTokenExpiresAt   DateTime?                 @map("invite_token_expires_at") @db.Timestamptz(6)
   createdAt              DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt              DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   baseSalary             Decimal?                  @map("base_salary") @db.Decimal(10, 2)
