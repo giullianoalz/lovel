@@ -306,6 +306,15 @@ export const enrollStudent = async (req, res, next) => {
       },
     });
 
+    // A self-signup account starts INACTIVE until staff settle its placement.
+    // Enrolling them here is that decision, so lift the parking status the
+    // same way the full registration flow does — scoped to INACTIVE so a
+    // SUSPENDED student can never be revived just by re-enrolling them.
+    await prisma.user.updateMany({
+      where: { id: studentId, status: 'INACTIVE' },
+      data: { status: 'ACTIVE' },
+    });
+
     // Enrollments affect class counts and portal data
     invalidate('classes:*', 'registration:classes:*', 'portal:student:*', 'portal:parent:*');
     res.status(201).json({ message: 'Student enrolled successfully.', enrollment });

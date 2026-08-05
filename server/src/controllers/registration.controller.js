@@ -347,6 +347,9 @@ export const submitRegistrationRequest = async (req, res, next) => {
         await tx.classEnrollment.create({
           data: { classId: firstChoiceClassId, studentId, status: 'active' }
         });
+        // Same INACTIVE-parking lift as the admin placement flow — a
+        // self-signup account shouldn't stay parked once actually enrolled.
+        await tx.user.updateMany({ where: { id: studentId, status: 'INACTIVE' }, data: { status: 'ACTIVE' } });
 
         const request = await tx.registrationRequest.create({
           data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'enrolled_first', ...billingData }
@@ -380,6 +383,7 @@ export const submitRegistrationRequest = async (req, res, next) => {
           await tx.classEnrollment.create({
             data: { classId: secondChoiceClassId, studentId, status: 'active' }
           });
+          await tx.user.updateMany({ where: { id: studentId, status: 'INACTIVE' }, data: { status: 'ACTIVE' } });
 
           const request = await tx.registrationRequest.create({
             data: { termId, studentId, firstChoiceClassId, secondChoiceClassId, status: 'waitlisted_first_enrolled_second', ...billingData }
@@ -589,6 +593,7 @@ export const promoteFromWaitlist = async (req, res, next) => {
       await tx.classEnrollment.create({
         data: { classId, studentId: nextInLine.studentId, status: 'active' }
       });
+      await tx.user.updateMany({ where: { id: nextInLine.studentId, status: 'INACTIVE' }, data: { status: 'ACTIVE' } });
 
       // 2. Mark waitlist entry as promoted
       await tx.waitlistEntry.update({
