@@ -6,6 +6,7 @@ import {
   Calendar, Search, User, CheckCircle, XCircle, AlertCircle, Ban,
 } from 'lucide-react';
 import api from '../../lib/api';
+import { formatTimeOfDay } from '../../lib/time';
 import './SupervisionPanel.css';
 
 const SupervisionPanel = () => {
@@ -78,7 +79,7 @@ const SupervisionPanel = () => {
   });
 
   const fmtDate = (d) => new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-  const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const fmtTime = formatTimeOfDay;
 
   const attendanceSummary = (att) => {
     const present = att?.filter(a => a.status === 'PRESENT').length || 0;

@@ -80,25 +80,37 @@ export const sendPushNotification = async (userIds, title, body, data = {}) => {
 };
 
 /**
- * Broadcasts a push notification to all active teachers and admins (e.g. for Lock Down)
+ * Everyone holding any of `roles`, primary or secondary.
+ *
+ * Front desk is a hat worn on top of another role — the people covering
+ * reception are teachers whose primary role stays TEACHER — so matching on
+ * `role` alone would silently drop them from every alert broadcast below.
+ */
+const activeUserIdsWithAnyRole = async (roles) => {
+  const users = await prisma.user.findMany({
+    where: {
+      status: 'ACTIVE',
+      OR: [{ role: { in: roles } }, { secondaryRoles: { hasSome: roles } }],
+    },
+    select: { id: true },
+  });
+  return users.map((u) => u.id);
+};
+
+/**
+ * Broadcasts a push notification to all active teachers, admins and front desk
+ * (e.g. for Lock Down)
  */
 export const broadcastToStaff = async (title, body, data = {}) => {
-  const staff = await prisma.user.findMany({
-    where: { role: { in: ['TEACHER', 'ADMIN'] }, status: 'ACTIVE' },
-    select: { id: true }
-  });
-  const userIds = staff.map(s => s.id);
+  const userIds = await activeUserIdsWithAnyRole(['TEACHER', 'ADMIN', 'RECEPTIONIST']);
   await sendPushNotification(userIds, title, body, data);
 };
 
 /**
- * Broadcasts a push notification to management (e.g. for Medic, Student Out, Support)
+ * Broadcasts a push notification to whoever works the front desk queue
+ * (e.g. for Medic, Student Out, Support) — admins and receptionists.
  */
 export const broadcastToManagement = async (title, body, data = {}) => {
-  const management = await prisma.user.findMany({
-    where: { role: 'ADMIN', status: 'ACTIVE' },
-    select: { id: true }
-  });
-  const userIds = management.map(m => m.id);
+  const userIds = await activeUserIdsWithAnyRole(['ADMIN', 'RECEPTIONIST']);
   await sendPushNotification(userIds, title, body, data);
 };

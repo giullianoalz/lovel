@@ -1,5 +1,6 @@
 import api from './api';
 import { resolveMeetingUrl } from './meetingLink';
+import { formatTimeOfDay } from './time';
 
 /**
  * Database Service Layer
@@ -640,7 +641,7 @@ export const database = {
         return sessions.map(s => ({
           id: s.id,
           title: s.class?.name || 'Class Session',
-          time: new Date(s.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + ' - ' + new Date(s.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+          time: `${formatTimeOfDay(s.startTime)} - ${formatTimeOfDay(s.endTime)}`,
           studentsCount: 0, // Should come from enrollments ideally
           status: s.status === 'COMPLETED' ? 'completed' : 'pending',
           link: resolveMeetingUrl(s) || '#'

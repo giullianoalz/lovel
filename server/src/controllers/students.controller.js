@@ -160,9 +160,11 @@ export const exportStudentsCsv = async (req, res, next) => {
 export const listStudents = async (req, res, next) => {
   try {
     const { status, search, familyId, page = 1, limit = 50 } = req.query;
-    // Parent contact stays out of any teacher's reach unless they're also an
-    // admin — being a parent yourself doesn't earn you other families' details.
-    const hideParentContact = hasRole(req.user, 'TEACHER') && !hasRole(req.user, 'ADMIN');
+    // Parent contact is admin-only. It stays out of any teacher's reach —
+    // being a parent yourself doesn't earn you other families' details — and
+    // equally out of the front desk's, which reads this list to hand out
+    // seashells, not to hold a phone book.
+    const hideParentContact = !hasRole(req.user, 'ADMIN');
 
     // Every clause is ANDed rather than merged onto one object: rosterScope can
     // itself be an OR (a teacher who is also a parent), and assigning

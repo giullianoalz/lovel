@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
 import { withCache } from '../middleware/cache.js';
+import { isOnly } from '../utils/roles.js';
 import {
   listClasses,
   getClass,
@@ -14,15 +15,21 @@ import {
 
 const router = Router();
 
+// A teacher-only account is scoped to their own classes inside the
+// controller; the cache key has to carry that scope too, or a teacher-scoped
+// response (or an admin/receptionist's unscoped one) could be served back to
+// the wrong caller for the rest of the TTL.
+const scopeKey = (req) => (isOnly(req.user, 'TEACHER') ? `teacher:${req.user.id}` : 'unscoped');
+
 // GET /api/classes — key includes query string so filters get their own cache slot
 router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'),
-  withCache(req => `classes:${new URLSearchParams(req.query).toString() || 'all'}`, 60),
+  withCache(req => `classes:${scopeKey(req)}:${new URLSearchParams(req.query).toString() || 'all'}`, 60),
   listClasses
 );
 
 // GET /api/classes/:id — Get class details (Admin/Teacher)
 router.get('/:id', authenticate, requireRole('ADMIN', 'TEACHER'),
-  withCache(req => `classes:${req.params.id}`, 60),
+  withCache(req => `classes:${req.params.id}:${scopeKey(req)}`, 60),
   getClass
 );
 

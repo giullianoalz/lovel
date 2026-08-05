@@ -15,6 +15,7 @@ import { apiLimiter, ipLimiter } from './middleware/rateLimit.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { cacheStats } from './middleware/cache.js';
 import { isTestLoginAuthorized } from './middleware/auth.js';
+import { hasRole } from './utils/roles.js';
 
 // Routes
 import authRoutes from './routes/auth.routes.js';
@@ -118,7 +119,7 @@ io.use(async (socket, next) => {
     if (devEmail && isTestLoginAuthorized(socket.handshake.auth?.devSecret)) {
       const devUser = await prisma.user.findUnique({
         where: { email: devEmail },
-        select: { id: true, role: true, status: true },
+        select: { id: true, role: true, secondaryRoles: true, status: true },
       });
       if (devUser && devUser.status !== 'SUSPENDED') {
         socket.user = devUser;
@@ -131,7 +132,7 @@ io.use(async (socket, next) => {
     const decoded = await firebaseAuth.verifyIdToken(token);
     const user = await prisma.user.findUnique({
       where: { firebaseUid: decoded.uid },
-      select: { id: true, role: true, status: true },
+      select: { id: true, role: true, secondaryRoles: true, status: true },
     });
 
     if (!user) return next(new Error('User not found'));
@@ -281,9 +282,9 @@ io.on('connection', (socket) => {
   });
 
   // Admin/front-desk users auto-join the admin_room for real-time alerts.
-  // Validated: only ADMIN users are allowed into the admin room.
+  // Validated: only ADMIN or RECEPTIONIST users are allowed into the admin room.
   socket.on('join_admin', () => {
-    if (socket.user.role !== 'ADMIN') return;
+    if (!hasRole(socket.user, 'ADMIN', 'RECEPTIONIST')) return;
     socket.join('admin_room');
     console.log(`[Socket.IO] ${socket.id} joined admin_room`);
   });

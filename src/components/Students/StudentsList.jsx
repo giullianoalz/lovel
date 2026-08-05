@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, UserPlus, AlertCircle, Cookie, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy } from 'lucide-react';
+import { Search, UserPlus, AlertCircle, Cookie, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy, Shell, Check, X } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -38,6 +38,19 @@ const StudentsList = () => {
   // admin can still hand the link over.
   const [manualInvite, setManualInvite] = useState(null);
   const [showBulkInvite, setShowBulkInvite] = useState(false);
+  // Seashells handed out straight from the directory card — the front desk
+  // awards them while the student is standing there, without opening a profile.
+  const [awardTarget, setAwardTarget] = useState(null);
+  const [awardPoints, setAwardPoints] = useState('');
+  const [awardReason, setAwardReason] = useState('');
+  const [awarding, setAwarding] = useState(false);
+
+  // The front desk reaches this screen for one thing — handing out seashells —
+  // so each capability is gated by the roles its own endpoint accepts rather
+  // than by one blanket flag, or a receptionist gets buttons that 403.
+  const canAwardShells = hasRole('ADMIN', 'TEACHER', 'RECEPTIONIST'); // /rewards/seashells/award
+  const canManageSnacks = hasRole('ADMIN', 'TEACHER');                // /rewards/snacks/*
+  const canOpenProfile = hasRole('ADMIN', 'TEACHER');                 // GET /students/:id
 
   const loadData = async () => {
     setLoadError(null);
@@ -127,6 +140,33 @@ const StudentsList = () => {
     }
   };
 
+  const openAwardForm = (studentId) => {
+    setAwardTarget(studentId);
+    setAwardPoints('');
+    setAwardReason('');
+  };
+
+  const handleAwardShells = async (student) => {
+    const points = parseInt(awardPoints, 10);
+    if (awarding || !awardReason.trim() || !Number.isFinite(points) || points <= 0) return;
+    setAwarding(true);
+    try {
+      await database.awardSeashells(student.id, awardReason.trim(), points);
+      // Patch the balance locally instead of refetching the whole directory —
+      // the award is the only thing that changed, and a reload would drop the
+      // admin's scroll position mid-handout.
+      setStudents(list => list.map(s =>
+        s.id === student.id ? { ...s, seashells: (s.seashells || 0) + points } : s
+      ));
+      toast.success(`🐚 ${points} seashell${points === 1 ? '' : 's'} for ${student.name}.`);
+      setAwardTarget(null);
+    } catch (err) {
+      toast.error(err.userMessage || 'Could not award the seashells.');
+    } finally {
+      setAwarding(false);
+    }
+  };
+
   const handleExportCsv = async () => {
     if (exporting) return;
     setExporting(true);
@@ -162,14 +202,16 @@ const StudentsList = () => {
         <div style={{ display: 'flex', gap: '12px' }}>
           {activeTab === 'students' && (
             <>
-              <button 
-                className="action-btn outline" 
-                style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
-                onClick={() => setIsSnackManagerOpen(true)}
-              >
-                <ShoppingBag size={18} />
-                <span className="desk-only">Snack Cabinet</span>
-              </button>
+              {canManageSnacks && (
+                <button
+                  className="action-btn outline"
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
+                  onClick={() => setIsSnackManagerOpen(true)}
+                >
+                  <ShoppingBag size={18} />
+                  <span className="desk-only">Snack Cabinet</span>
+                </button>
+              )}
               {hasRole('ADMIN') && (
                 <>
                   <button
@@ -316,9 +358,73 @@ const StudentsList = () => {
                         <span className="text-muted" style={{ fontSize: '12px' }}>Standard Plan (No snacks)</span>
                       )}
                     </div>
+
+                    <div className="detail-item">
+                      <span className="detail-label">Seashells:</span>
+                      <span className="seashell-badge">
+                        <Shell size={14} />
+                        {student.seashells || 0}
+                      </span>
+                    </div>
                   </div>
 
+                  {awardTarget === student.id && (
+                    <div className="award-shells-form">
+                      <input
+                        type="text"
+                        placeholder="What for? (e.g. Great participation)"
+                        value={awardReason}
+                        onChange={(e) => setAwardReason(e.target.value)}
+                        autoFocus
+                      />
+                      <div className="award-shells-row">
+                        <input
+                          type="number"
+                          min="1"
+                          placeholder="Shells"
+                          value={awardPoints}
+                          onChange={(e) => setAwardPoints(e.target.value)}
+                          className="award-shells-points"
+                        />
+                        {[1, 5, 10].map(n => (
+                          <button
+                            key={n}
+                            type="button"
+                            className="award-shells-quick"
+                            onClick={() => setAwardPoints(String(n))}
+                          >
+                            +{n}
+                          </button>
+                        ))}
+                        <button
+                          className="action-btn primary"
+                          onClick={() => handleAwardShells(student)}
+                          disabled={awarding || !awardReason.trim() || !(parseInt(awardPoints, 10) > 0)}
+                        >
+                          <Check size={14} /> {awarding ? 'Giving…' : 'Give'}
+                        </button>
+                        <button
+                          className="icon-btn"
+                          aria-label="Cancel"
+                          onClick={() => setAwardTarget(null)}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="card-actions">
+                    {canAwardShells && (
+                      <button
+                        className="icon-btn"
+                        title={`Give seashells to ${student.name}`}
+                        aria-label={`Give seashells to ${student.name}`}
+                        onClick={() => (awardTarget === student.id ? setAwardTarget(null) : openAwardForm(student.id))}
+                      >
+                        <Shell size={18} />
+                      </button>
+                    )}
                     {student.parentEmail && student.parentEmail !== 'N/A' && (
                       <a
                         className="icon-btn"
@@ -337,7 +443,9 @@ const StudentsList = () => {
                     >
                       <MessageSquare size={18} />
                     </button>
-                    <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>
+                    {canOpenProfile && (
+                      <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>
+                    )}
                   </div>
                 </div>
               ))}

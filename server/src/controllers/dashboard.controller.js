@@ -1,5 +1,23 @@
 import prisma from '../config/database.js';
 import { resolveMeetingUrl } from '../utils/meetingLink.js';
+import { sessionScope } from './sessions.controller.js';
+
+// Session.date and Session.startTime are date-only / time-only columns stamped
+// at UTC. Formatting them with the local getters shifts a 2:10 PM class to
+// 9:10 AM and can move it to the previous day, so read the UTC parts.
+const utcDayKey = (value) => new Date(value).toISOString().slice(0, 10);
+
+const utcTimeLabel = (value) => {
+  const d = new Date(value);
+  const h = d.getUTCHours();
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(d.getUTCMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+};
+
+const utcWeekday = (value) =>
+  ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][
+    new Date(value).getUTCDay()
+  ];
 
 /**
  * GET /api/dashboard
@@ -12,11 +30,32 @@ export const getDashboard = async (req, res, next) => {
     const endOfWeek = new Date(today);
     endOfWeek.setDate(today.getDate() + 7);
 
-    // 1. Upcoming sessions (next 7 days)
+    // "Today"/"Tomorrow" are judged against the local calendar day — the day the
+    // reader is living in — then compared to the session's own UTC-stamped day.
+    const localDayKey = (d) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayKey = localDayKey(today);
+    const tomorrowDate = new Date(today);
+    tomorrowDate.setDate(today.getDate() + 1);
+    const tomorrowKey = localDayKey(tomorrowDate);
+
+    // Same "only what this account may see" rule the calendar runs on: a
+    // teacher's dashboard is their own classes, not the academy's whole
+    // timetable with every colleague's name and teaching hours on it.
+    const scope = await sessionScope(req.user);
+
+    // 1. Upcoming sessions (next 7 days). Bounded from midnight of today's date,
+    // not from the current instant: session.date is stamped at UTC midnight, so
+    // a `gte: now` filter dropped today's own classes off the dashboard.
     const sessions = await prisma.session.findMany({
       where: {
-        date: { gte: today, lte: endOfWeek },
-        status: { not: 'CANCELLED' },
+        AND: [
+          {
+            date: { gte: new Date(`${todayKey}T00:00:00.000Z`), lte: endOfWeek },
+            status: { not: 'CANCELLED' },
+          },
+          scope,
+        ],
       },
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
       include: {
@@ -33,23 +72,13 @@ export const getDashboard = async (req, res, next) => {
     });
 
     const upcomingSessions = sessions.map((s) => {
-      const sessionDate = new Date(s.date);
-      const isToday = sessionDate.toDateString() === today.toDateString();
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1);
-      const isTomorrow = sessionDate.toDateString() === tomorrow.toDateString();
-
-      const startTime = new Date(s.startTime).toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      });
+      const sessionKey = utcDayKey(s.date);
+      const startTime = utcTimeLabel(s.startTime);
 
       let timeLabel;
-      if (isToday) timeLabel = `Today, ${startTime}`;
-      else if (isTomorrow) timeLabel = `Tomorrow, ${startTime}`;
-      else
-        timeLabel = `${sessionDate.toLocaleDateString('en-US', { weekday: 'long' })}, ${startTime}`;
+      if (sessionKey === todayKey) timeLabel = `Today, ${startTime}`;
+      else if (sessionKey === tomorrowKey) timeLabel = `Tomorrow, ${startTime}`;
+      else timeLabel = `${utcWeekday(s.date)}, ${startTime}`;
 
       return {
         id: s.id,
@@ -70,8 +99,7 @@ export const getDashboard = async (req, res, next) => {
 
     const recentSessionsRaw = await prisma.session.findMany({
       where: {
-        date: { gte: twoWeeksAgo, lte: today },
-        status: 'COMPLETED',
+        AND: [{ date: { gte: twoWeeksAgo, lte: today }, status: 'COMPLETED' }, scope],
       },
       orderBy: { date: 'desc' },
       take: 5,
@@ -179,9 +207,7 @@ export const getDashboard = async (req, res, next) => {
       notifications: formattedNotifications,
       stats: {
         totalStudents,
-        classesToday: sessions.filter(
-          (s) => new Date(s.date).toDateString() === today.toDateString()
-        ).length,
+        classesToday: sessions.filter((s) => utcDayKey(s.date) === todayKey).length,
       },
     });
   } catch (error) {

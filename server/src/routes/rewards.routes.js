@@ -25,7 +25,10 @@ router.get('/snacks/reload-requests', authenticate, requireRole('ADMIN', 'TEACHE
 router.post('/snacks/reload-requests/:id/fulfill', authenticate, requireRole('ADMIN', 'TEACHER'), fulfillReloadRequest);
 
 // --- Seashells / prizes ---
-router.post('/seashells/award', authenticate, requireRole('ADMIN', 'TEACHER'), awardSeashells);
+// The front desk hands shells out too — a student walks up, does something
+// worth rewarding, and the receptionist is who's standing there. Redeeming
+// stays ADMIN/TEACHER: that one spends a balance and hands over a prize.
+router.post('/seashells/award', authenticate, requireRole('ADMIN', 'TEACHER', 'RECEPTIONIST'), awardSeashells);
 router.post('/seashells/redeem', authenticate, requireRole('ADMIN', 'TEACHER'), redeemSeashells);
 
 export default router;

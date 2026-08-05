@@ -28,8 +28,10 @@ router.get('/parent', authenticate, requireRole('PARENT'),
   getParentPortal
 );
 
+// The day being viewed is part of the key: without it, browsing to tomorrow
+// would be served today's cached roster (and would then poison it for 30 s).
 router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'),
-  withCache(req => `portal:teacher:${req.user.id}`, 30),
+  withCache(req => `portal:teacher:${req.user.id}:${req.query.date || 'today'}`, 30),
   getTeacherPortal
 );
 

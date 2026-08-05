@@ -1,5 +1,5 @@
 import prisma from '../config/database.js';
-import { hasRole } from '../utils/roles.js';
+import { hasRole, isOnly } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
 
 const MAX_STUDENTS_CAP = 100;
@@ -53,7 +53,15 @@ export const listClasses = async (req, res, next) => {
     const { teacherId, status, search, page = 1, limit = 50, includeRoster } = req.query;
 
     const where = {};
-    if (teacherId) where.teacherId = teacherId;
+    // A teacher sees only their own classes — override whatever teacherId they
+    // passed, so this can't be used to probe another teacher's roster. Only an
+    // ADMIN is broad enough to escape the narrowing; a teacher who also covers
+    // the front desk stays scoped to their own, same as on the calendar.
+    if (isOnly(req.user, 'TEACHER')) {
+      where.teacherId = req.user.id;
+    } else if (teacherId) {
+      where.teacherId = teacherId;
+    }
     if (status) where.status = status;
     if (search) {
       where.OR = [
@@ -129,6 +137,13 @@ export const getClass = async (req, res, next) => {
         },
       },
     });
+
+    // Same rule as listClasses: a teacher-only account can't fetch another
+    // teacher's class by guessing/enumerating IDs. 404 rather than 403 so the
+    // response doesn't confirm the class exists.
+    if (isOnly(req.user, 'TEACHER') && classData.teacherId !== req.user.id) {
+      return res.status(404).json({ error: 'Not Found', message: 'Class not found.' });
+    }
 
     res.json({ class: classData });
   } catch (error) {

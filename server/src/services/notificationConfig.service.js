@@ -158,8 +158,16 @@ export const updateEventConfig = async (eventKey, patch, updatedById) => {
 // ─────────────────────────────────────────────────────────────
 
 export const getAdminUserIds = async () => {
+  // Receptionists get the same "ADMINS" notifications as admins (class
+  // alerts, cancellations, no-shows) — they're the front desk, view-only.
   const admins = await prisma.user.findMany({
-    where: { role: 'ADMIN', status: 'ACTIVE' },
+    where: {
+      status: 'ACTIVE',
+      OR: [
+        { role: { in: ['ADMIN', 'RECEPTIONIST'] } },
+        { secondaryRoles: { hasSome: ['ADMIN', 'RECEPTIONIST'] } },
+      ],
+    },
     select: { id: true },
   });
   return admins.map((a) => a.id);

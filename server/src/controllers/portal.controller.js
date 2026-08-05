@@ -39,18 +39,50 @@ const buildPunchHistory = (purchases = [], reloads = []) => {
   return [...spent, ...added].sort((a, b) => new Date(b.date) - new Date(a.date));
 };
 
-// GET /api/portal/teacher — Teacher dashboard (Today's classes, roster, etc)
+// Validates a "YYYY-MM-DD" day, returning it unchanged or null. A typo should
+// surface as a 400, not silently answer with today's roster.
+const parseDayString = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split('-').map(Number);
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  const roundTrips =
+    probe.getUTCFullYear() === y && probe.getUTCMonth() === m - 1 && probe.getUTCDate() === d;
+  return roundTrips ? value : null;
+};
+
+// Today in the academy's local timezone. Deliberately not the UTC date: in
+// Florida that flips over at 8pm, which would swap a teacher's evening portal
+// to tomorrow's classes while they're still teaching today's.
+const localDayString = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+};
+
+// GET /api/portal/teacher — Teacher dashboard (roster for one day, announcements)
+// Optional ?date=YYYY-MM-DD; defaults to today. Teachers need to look ahead at
+// tomorrow's roster and back at a day they still owe notes for.
 export const getTeacherPortal = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    
-    // Get today's start and end of day
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-    
-    // Get today's sessions for this teacher
+
+    const { date } = req.query;
+    const day = date === undefined ? localDayString() : parseDayString(String(date));
+    if (!day) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'date must be a calendar date in YYYY-MM-DD format.',
+      });
+    }
+
+    // session.date is a date-only column stamped at UTC midnight — that is how
+    // it is written everywhere else (sessions.controller, cron.jobs). Bracketing
+    // it with a *local* midnight, as this endpoint used to, shifted the whole
+    // day by one for any timezone behind UTC: a class dated Aug 10 surfaced in
+    // the portal on Aug 9, and today's classes never showed up at all.
+    const startOfDay = new Date(`${day}T00:00:00.000Z`);
+    const endOfDay = new Date(`${day}T23:59:59.999Z`);
+
+    // Sessions this teacher runs on the requested day
     const todaySessions = await prisma.session.findMany({
       where: {
         date: {
@@ -128,6 +160,7 @@ export const getTeacherPortal = async (req, res, next) => {
     }));
 
     res.json({
+      date: day,
       schedule,
       announcements: unreadAnnouncements
     });

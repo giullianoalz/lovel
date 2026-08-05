@@ -13,8 +13,11 @@ const router = Router();
 // POST /api/behavior — Log a behavior entry (Teacher/Admin)
 router.post('/', authenticate, requireRole('ADMIN', 'TEACHER'), createBehaviorLog);
 
-// GET /api/behavior — List all logs (Admin sees all, Teacher sees own)
-router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listBehaviorLogs);
+// GET /api/behavior — List all logs (Admin sees all, Teacher sees own).
+// Receptionists read it too — the front desk screen surfaces warnings and slips
+// alongside the alert queue — but they never reach the POST/PUT routes below,
+// so their access stays view-only.
+router.get('/', authenticate, requireRole('ADMIN', 'TEACHER', 'RECEPTIONIST'), listBehaviorLogs);
 
 // GET /api/behavior/student/:studentId — Behavior history for a student
 router.get('/student/:studentId', authenticate, requireRole('ADMIN', 'TEACHER'), getStudentBehavior);

@@ -12,9 +12,17 @@ export const getCalendarData = async (req, res, next) => {
 
     // `orgWide` powers the shared read-only calendar grid (Month/Week views),
     // where front desk/admins need to see everyone's time off at a glance.
-    // It's gated to staff roles and never used by the self-service "My PTO"
-    // panel, which always omits it and stays scoped to the caller only.
-    const isOrgWide = orgWide === 'true' && hasRole(req.user, 'ADMIN', 'TEACHER');
+    // It's never used by the self-service "My PTO" panel, which always omits it
+    // and stays scoped to the caller only.
+    //
+    // Teachers are deliberately excluded, the same way sessionScope excludes
+    // them from each other's classes: another teacher's sick days and vacation
+    // are their schedule, and nothing a colleague needs. A teacher who also
+    // covers reception is still a teacher, so the front-desk hat doesn't
+    // reopen it.
+    const isFrontDesk = hasRole(req.user, 'RECEPTIONIST') && !hasRole(req.user, 'TEACHER');
+    const canSeeOrgWide = hasRole(req.user, 'ADMIN') || isFrontDesk;
+    const isOrgWide = orgWide === 'true' && canSeeOrgWide;
 
     let sessions = [];
     let ptoRequests = [];
@@ -53,6 +61,16 @@ export const getCalendarData = async (req, res, next) => {
           user: { select: { id: true, fullName: true } }
         }
       });
+
+      // Everyone needs to see *that* a room is taken, or they'd book on top of
+      // each other. Only the people allowed the org-wide view get to see whose
+      // booking it is and what for — to a teacher, someone else's reservation
+      // is just a busy room.
+      if (!canSeeOrgWide) {
+        spaceReservations = spaceReservations.map((r) =>
+          r.userId === userId ? r : { ...r, purpose: null, user: null }
+        );
+      }
     }
 
     res.json({

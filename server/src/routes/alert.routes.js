@@ -8,10 +8,10 @@ const router = Router();
 // Only teachers and admins can create alerts
 router.post('/', authenticate, requireRole('TEACHER', 'ADMIN'), createAlert);
 
-// Only front desk/admins can list all alerts
-router.get('/', authenticate, requireRole('ADMIN'), listAlerts);
+// Admins and receptionists can list all alerts (receptionists are view-only)
+router.get('/', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), listAlerts);
 
-// Front desk/admins can resolve alerts
-router.patch('/:id', authenticate, requireRole('ADMIN'), updateAlert);
+// Front desk closes out the alerts it just handled, same as admins
+router.patch('/:id', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), updateAlert);
 
 export default router;

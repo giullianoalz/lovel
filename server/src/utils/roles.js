@@ -21,6 +21,7 @@ const BROADER_THAN = {
   TEACHER: ['ADMIN'],
   PARENT: ['ADMIN', 'TEACHER'],
   STUDENT: ['ADMIN', 'TEACHER'],
+  RECEPTIONIST: ['ADMIN'],
 };
 
 /** Every role this user holds, primary first. */

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import api from '../../lib/api';
 import { requestAndSaveFcmToken, listenForForegroundMessages } from '../../lib/fcm';
+import { timeOfDayMinutes, nowMinutes } from '../../lib/time';
 import NotifDrawer from '../Notifications/NotifDrawer';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useToast } from './ToastProvider';
@@ -39,6 +40,7 @@ const ROLE_LABELS = {
   TEACHER: 'Teacher',
   PARENT: 'Parent',
   STUDENT: 'Student',
+  RECEPTIONIST: 'Front Desk',
 };
 
 const Sidebar = () => {
@@ -65,13 +67,10 @@ const Sidebar = () => {
     if (!hasRole('TEACHER', 'ADMIN')) return;
     let schedule = [];
     const checkSoon = () => {
-      const now = new Date();
+      const now = nowMinutes();
       setClassStartingSoon(schedule.some(cls => {
         if (!cls.startTime) return false;
-        const [h, m] = cls.startTime.split(':').map(Number);
-        const start = new Date(now);
-        start.setHours(h, m, 0, 0);
-        const diffMin = (start - now) / 60000;
+        const diffMin = timeOfDayMinutes(cls.startTime) - now;
         return diffMin >= 0 && diffMin <= 15;
       }));
     };
@@ -208,7 +207,7 @@ const Sidebar = () => {
                 <span>Family Portal</span>
               </NavLink>
             )}
-            {hasRole('ADMIN') && (
+            {hasRole('ADMIN', 'RECEPTIONIST') && (
               <NavLink to="/alerts" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Bell size={20} />
                 <span>Front Desk Alerts</span>
@@ -236,7 +235,7 @@ const Sidebar = () => {
               <Calendar size={20} />
               <span>Calendar</span>
             </NavLink>
-            {hasRole('ADMIN', 'TEACHER') && (
+            {hasRole('ADMIN', 'TEACHER', 'RECEPTIONIST') && (
               <NavLink to="/students" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
                 <Users size={20} />
                 <span>Directory</span>

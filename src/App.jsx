@@ -46,13 +46,16 @@ const SmartRoot = () => {
   if (role === 'ADMIN' || role === 'TEACHER') return <Navigate to="/portal/teacher" replace />;
   if (role === 'STUDENT') return <Navigate to="/portal/student" replace />;
   if (role === 'PARENT')  return <Navigate to="/portal/parent"  replace />;
+  if (role === 'RECEPTIONIST') return <Navigate to="/alerts" replace />;
   return <Navigate to="/dashboard" replace />;
 };
 
-// ADMIN/TEACHER land on Teacher Portal; STUDENT/PARENT use Dashboard
+// ADMIN/TEACHER land on Teacher Portal; RECEPTIONIST lands on the alert
+// dashboard (their main job); STUDENT/PARENT use Dashboard
 const SmartDashboard = () => {
   const { role } = useAuth();
   if (role === 'ADMIN' || role === 'TEACHER') return <Navigate to="/portal/teacher" replace />;
+  if (role === 'RECEPTIONIST') return <Navigate to="/alerts" replace />;
   return <Dashboard />;
 };
 
@@ -158,14 +161,16 @@ function App() {
                         } 
                       />
 
-                      {/* Admin & Teacher access */}
-                      <Route 
-                        path="/students" 
+                      {/* Admin & Teacher access — plus the front desk, which
+                          uses the roster to hand out seashells. The screen
+                          itself hides everything else from them. */}
+                      <Route
+                        path="/students"
                         element={
-                          <ProtectedRoute allowedRoles={['ADMIN', 'TEACHER']}>
+                          <ProtectedRoute allowedRoles={['ADMIN', 'TEACHER', 'RECEPTIONIST']}>
                             <StudentsList />
                           </ProtectedRoute>
-                        } 
+                        }
                       />
                       <Route path="/session" element={<Navigate to="/portal/teacher" replace />} />
                       <Route 
@@ -229,7 +234,7 @@ function App() {
                       <Route
                         path="/alerts"
                         element={
-                          <ProtectedRoute allowedRoles={['ADMIN']}>
+                          <ProtectedRoute allowedRoles={['ADMIN', 'RECEPTIONIST']}>
                             <FrontDeskAlerts />
                           </ProtectedRoute>
                         }

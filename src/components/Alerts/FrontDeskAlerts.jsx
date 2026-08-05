@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign, Cookie } from 'lucide-react';
+import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign, Cookie, AlertTriangle, FileWarning } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { getSocket } from '../../lib/socket';
+import { useAuth } from '../../context/AuthContext';
 import './FrontDeskAlerts.css';
 
 const ALERT_TYPES = {
@@ -11,10 +12,27 @@ const ALERT_TYPES = {
   'Medic': { icon: AlertCircle, color: '#ef4444' } // Red
 };
 
+// Behavior tracking feeds this screen too: the front desk is where a parent
+// asks about an incident, so warnings and slips have to be readable here.
+// Positive notes are deliberately left out — nothing for the desk to handle.
+const BEHAVIOR_TYPES = {
+  WARNING: { label: 'Warning', icon: AlertTriangle, color: '#f59e0b' },
+  SLIP: { label: 'Disciplinary Slip', icon: FileWarning, color: '#ef4444' },
+};
+
 const FrontDeskAlerts = () => {
+  // This screen mixes queues that answer to different endpoints, so each block
+  // is gated by the roles its own endpoint accepts — one blanket flag would
+  // either hide work the front desk may do or show buttons that 403.
+  const { hasRole } = useAuth();
+  const canResolveAlerts = hasRole('ADMIN', 'RECEPTIONIST');   // PATCH /alerts/:id
+  const canReviewCancellations = hasRole('ADMIN');             // /sessions/cancellations
+  const canHandleSnacks = hasRole('ADMIN', 'TEACHER');         // /rewards/snacks/*
+  const canOpenStudent = hasRole('ADMIN', 'TEACHER', 'RECEPTIONIST'); // /students directory
+  const canSeeBehavior = hasRole('ADMIN', 'RECEPTIONIST', 'TEACHER'); // GET /behavior
   const [alerts, setAlerts] = useState([]);
   const [historyAlerts, setHistoryAlerts] = useState([]);
-  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
+  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'behavior' | 'history'
   const socketRef = useRef(null);
   const navigate = useNavigate();
 
@@ -29,13 +47,32 @@ const FrontDeskAlerts = () => {
   const [reloads, setReloads] = useState([]);
   const [reloadFulfilling, setReloadFulfilling] = useState(null);
 
+  /* Behavior tracking — warnings + slips, read-only from this screen */
+  const [behaviorLogs, setBehaviorLogs] = useState([]);
+  const [behaviorLoading, setBehaviorLoading] = useState(true);
+
+  /**
+   * The same alert reaches this screen in two shapes: the socket event sends
+   * flat `teacherName` / `studentName`, GET /alerts sends nested `reportedBy` /
+   * `student`. The cards render the flat shape, so anything loaded over REST —
+   * i.e. every alert still open after a page refresh — showed "Reported by"
+   * with no name and "Class Alert" instead of the student. Flatten on the way in.
+   */
+  const normalizeAlert = (alert) => ({
+    ...alert,
+    teacherName: alert.teacherName || alert.reportedBy?.fullName,
+    studentName: alert.studentName || alert.student?.fullName,
+    studentId: alert.studentId || alert.student?.id,
+  });
+
   const loadAlerts = async (status = 'active') => {
     try {
       const response = await api.get('/alerts', { params: { status } });
+      const alerts = response.data.alerts.map(normalizeAlert);
       if (status === 'active') {
-        setAlerts(response.data.alerts);
+        setAlerts(alerts);
       } else {
-        setHistoryAlerts(response.data.alerts);
+        setHistoryAlerts(alerts);
       }
     } catch (error) {
       console.error('Error loading alerts:', error);
@@ -60,6 +97,43 @@ const FrontDeskAlerts = () => {
     }
   };
 
+  /**
+   * Same two-shapes problem as alerts: the `behavior_logged` socket event sends
+   * flat names, GET /behavior sends nested student/teacher. Flatten on the way in
+   * so one row renderer covers both.
+   */
+  const normalizeBehavior = (log) => ({
+    ...log,
+    studentName: log.studentName || log.student?.fullName,
+    studentId: log.studentId || log.student?.id,
+    teacherName: log.teacherName || log.teacher?.fullName,
+    status: log.status || 'RECORDED',
+  });
+
+  /**
+   * The API filters by a single type, so ask for warnings and slips separately
+   * and merge — cheaper than pulling every positive note just to drop it here.
+   */
+  const loadBehavior = async () => {
+    setBehaviorLoading(true);
+    try {
+      const responses = await Promise.all(
+        Object.keys(BEHAVIOR_TYPES).map(type =>
+          api.get('/behavior', { params: { type, limit: 25 } })
+        )
+      );
+      const merged = responses
+        .flatMap(r => r.data.logs)
+        .map(normalizeBehavior)
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setBehaviorLogs(merged);
+    } catch (error) {
+      console.error('Error loading behavior logs:', error);
+    } finally {
+      setBehaviorLoading(false);
+    }
+  };
+
   const handleFulfillReload = async (id) => {
     setReloadFulfilling(id);
     try {
@@ -75,8 +149,9 @@ const FrontDeskAlerts = () => {
   useEffect(() => {
     loadAlerts('active');
     loadAlerts('resolved');
-    loadCancellations();
-    loadReloads();
+    if (canReviewCancellations) loadCancellations();
+    if (canHandleSnacks) loadReloads();
+    if (canSeeBehavior) loadBehavior();
 
     // Share the app-wide authenticated socket (also used by chat + the
     // notification bell) instead of opening a second, unauthenticated one.
@@ -91,11 +166,21 @@ const FrontDeskAlerts = () => {
     };
     const onCancellationPending = (data) => setCancellations(prev => [data, ...prev]);
     const onCancellationResolved = ({ id }) => setCancellations(prev => prev.filter(c => c.id !== id));
+    const onBehaviorLogged = (log) => {
+      // Positive notes go to the Behavior module only; the desk queue is
+      // warnings and slips. Guard against a duplicate id in case a refetch
+      // raced the event.
+      if (!BEHAVIOR_TYPES[log.type]) return;
+      setBehaviorLogs(prev =>
+        prev.some(l => l.id === log.id) ? prev : [normalizeBehavior(log), ...prev]
+      );
+    };
 
     socket.on('class_alert', onClassAlert);
     socket.on('class_alert_update', onClassAlertUpdate);
     socket.on('cancellation_pending', onCancellationPending);
     socket.on('cancellation_resolved', onCancellationResolved);
+    socket.on('behavior_logged', onBehaviorLogged);
 
     return () => {
       // Detach only our own listeners — the socket is shared, so never
@@ -104,6 +189,7 @@ const FrontDeskAlerts = () => {
       socket.off('class_alert_update', onClassAlertUpdate);
       socket.off('cancellation_pending', onCancellationPending);
       socket.off('cancellation_resolved', onCancellationResolved);
+      socket.off('behavior_logged', onBehaviorLogged);
     };
   }, []);
 
@@ -169,6 +255,9 @@ const FrontDeskAlerts = () => {
     return timeUrgency;
   };
 
+  // "Pending" = logged but no admin has set a severity / decided on it yet.
+  const pendingBehaviorCount = behaviorLogs.filter(l => l.status === 'RECORDED').length;
+
   return (
     <div className="regulation-container">
       <header className="regulation-header">
@@ -178,7 +267,7 @@ const FrontDeskAlerts = () => {
             {alerts.length > 0 && <span className="pulse-dot" />}
           </div>
           <div>
-            <p className="text-muted">Real-time alerts for student absences, class support, and medical needs.</p>
+            <p className="text-muted">Real-time alerts for student absences, class support, and medical needs — plus behavior warnings and slips.</p>
           </div>
         </div>
         {alerts.length > 0 && (
@@ -190,7 +279,7 @@ const FrontDeskAlerts = () => {
       </header>
 
       {/* Cancellation-charge review queue */}
-      {cancellations.length > 0 && (
+      {canReviewCancellations && cancellations.length > 0 && (
         <div className="cancellation-queue">
           <h2 className="cancellation-queue-title"><Ban size={16} /> Cancellations Needing a Decision ({cancellations.length})</h2>
           <div className="cancellation-queue-grid">
@@ -220,7 +309,7 @@ const FrontDeskAlerts = () => {
       )}
 
       {/* Snack reload queue — parent-approved, awaiting top-up + charge */}
-      {reloads.length > 0 && (
+      {canHandleSnacks && reloads.length > 0 && (
         <div className="cancellation-queue">
           <h2 className="cancellation-queue-title"><Cookie size={16} /> Snack Reloads Approved ({reloads.length})</h2>
           <div className="cancellation-queue-grid">
@@ -257,6 +346,15 @@ const FrontDeskAlerts = () => {
         <button className={`reg-tab ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
           <Bell size={14} /> Active Alerts ({alerts.length})
         </button>
+        {canSeeBehavior && (
+          <button
+            className={`reg-tab ${activeTab === 'behavior' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('behavior'); loadBehavior(); }}
+          >
+            <AlertTriangle size={14} /> Warnings & Slips ({behaviorLogs.length})
+            {pendingBehaviorCount > 0 && <span className="reg-tab-pending">{pendingBehaviorCount} pending</span>}
+          </button>
+        )}
         <button className={`reg-tab ${activeTab === 'history' ? 'active' : ''}`} onClick={() => { setActiveTab('history'); loadAlerts('resolved'); }}>
           <Clock size={14} /> History
         </button>
@@ -287,14 +385,18 @@ const FrontDeskAlerts = () => {
                         </div>
                         <div>
                           {alert.studentName ? (
-                            <button
-                              className="alert-student-name-link"
-                              onClick={() => navigate(`/students?highlight=${alert.studentId}`)}
-                              title="View student profile"
-                            >
-                              {alert.studentName}
-                              <ExternalLink size={12} />
-                            </button>
+                            canOpenStudent ? (
+                              <button
+                                className="alert-student-name-link"
+                                onClick={() => navigate(`/students?highlight=${alert.studentId}`)}
+                                title="View student profile"
+                              >
+                                {alert.studentName}
+                                <ExternalLink size={12} />
+                              </button>
+                            ) : (
+                              <h3 className="alert-student-name">{alert.studentName}</h3>
+                            )
                           ) : (
                             <h3 className="alert-student-name">Class Alert</h3>
                           )}
@@ -346,14 +448,105 @@ const FrontDeskAlerts = () => {
                       )}
                     </div>
 
-                    <button className="return-btn" onClick={() => handleMarkResolved(alert.id)}>
-                      <CheckCircle size={16} />
-                      Mark as Resolved
-                    </button>
+                    {canResolveAlerts && (
+                      <button className="return-btn" onClick={() => handleMarkResolved(alert.id)}>
+                        <CheckCircle size={16} />
+                        Mark as Resolved
+                      </button>
+                    )}
                   </div>
                 );
               })}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Behavior — warnings and slips from the Behavior Tracking module */}
+      {activeTab === 'behavior' && canSeeBehavior && (
+        <div className="history-panel">
+          {behaviorLoading ? (
+            <div className="behavior-desk-loading">
+              <span className="app-inline-loader"><span className="app-spinner-sm" />Loading warnings and slips…</span>
+            </div>
+          ) : behaviorLogs.length === 0 ? (
+            <div className="no-alerts">
+              <Shield size={40} />
+              <h3>Nothing logged</h3>
+              <p>No warnings or disciplinary slips have been recorded.</p>
+            </div>
+          ) : (
+            <table className="history-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Student</th>
+                  <th>Category</th>
+                  <th>Severity</th>
+                  <th>Description</th>
+                  <th>Logged By</th>
+                  <th>When</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {behaviorLogs.map(log => {
+                  const config = BEHAVIOR_TYPES[log.type] || BEHAVIOR_TYPES.WARNING;
+                  const TypeIcon = config.icon;
+                  const when = new Date(log.createdAt);
+                  const pending = log.status === 'RECORDED';
+
+                  return (
+                    <tr key={log.id}>
+                      <td>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: config.color, fontWeight: '600', fontSize: '0.85rem' }}>
+                          <TypeIcon size={14} /> {config.label}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="student-cell">
+                          <div className="student-avatar-mini">{log.studentName?.[0] || '?'}</div>
+                          {canOpenStudent && log.studentId ? (
+                            <button
+                              className="alert-student-name-link"
+                              onClick={() => navigate(`/students?highlight=${log.studentId}`)}
+                              title="View student profile"
+                            >
+                              {log.studentName || 'Unknown'}
+                              <ExternalLink size={12} />
+                            </button>
+                          ) : (
+                            <span>{log.studentName || 'Unknown'}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td><span className="behavior-desk-pill">{log.category}</span></td>
+                      <td>
+                        {/* Severity is only meaningful once an admin has reviewed it —
+                            before that the stored value is just the schema default. */}
+                        {pending ? (
+                          <span className="behavior-desk-badge pending">Pending</span>
+                        ) : (
+                          <span className={`behavior-desk-badge sev-${(log.severity || 'minor').toLowerCase()}`}>
+                            {log.severity}
+                          </span>
+                        )}
+                      </td>
+                      <td className="reason-cell" title={log.description}>{log.description}</td>
+                      <td>{log.teacherName || 'System'}</td>
+                      <td title={when.toLocaleString()}>
+                        {when.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td>
+                        <span className={`behavior-desk-badge status-${log.status.toLowerCase()}`}>
+                          {log.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       )}

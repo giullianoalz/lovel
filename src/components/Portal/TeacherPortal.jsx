@@ -11,15 +11,31 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
+import { formatTimeOfDay, timeOfDayMinutes, nowMinutes } from '../../lib/time';
 import StudentProfileModal from '../Students/StudentProfileModal';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './TeacherPortal.css';
 
 /* ── Helpers ────────────────────────────────────────────────── */
-const fmtTime = (t) =>
-  typeof t === 'string' && t.length <= 5
-    ? t
-    : new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+/* Day strings are plain "YYYY-MM-DD" in the teacher's own timezone. Going
+   through Date.toISOString() here would shift the day for anyone west of UTC
+   after ~7pm — the exact hours a teacher is writing up the day just taught. */
+const toDayString = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const todayString = () => toDayString(new Date());
+
+const shiftDay = (dayStr, delta) => {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return toDayString(new Date(y, m - 1, d + delta));
+};
+
+const fmtDayLabel = (dayStr) => {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+};
+
+const fmtTime = formatTimeOfDay;
 
 /* ============================================================ */
 const TeacherPortal = () => {
@@ -32,6 +48,8 @@ const TeacherPortal = () => {
   const [toast, setToast] = useState(null);
 
   /* ── Portal data ── */
+  const [selectedDate, setSelectedDate] = useState(todayString());
+  const [dayLoading, setDayLoading] = useState(false); // switching days, not first paint
   const [schedule, setSchedule] = useState([]);
   const [selectedClassIdx, setSelectedClassIdx] = useState(null);
   const [myClasses, setMyClasses] = useState([]); // all of the teacher's classes, not just today's schedule
@@ -40,6 +58,7 @@ const TeacherPortal = () => {
   const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [emergencyModal, setEmergencyModal] = useState(null);
   const [emergencySending, setEmergencySending] = useState(false);
+  const [emergencyError, setEmergencyError] = useState('');
   const [selectedStudentOut, setSelectedStudentOut] = useState(null);
 
   /* ── Per-student alert modal ── */
@@ -104,6 +123,7 @@ const TeacherPortal = () => {
   const fileInputRef    = useRef(null);
   const videoInputRef   = useRef(null);
   const filterRef       = useRef(null);
+  const firstLoad       = useRef(true);
   const sizeDropdownRef = useRef(null);
   const linkDropdownRef = useRef(null);
 
@@ -111,19 +131,24 @@ const TeacherPortal = () => {
      LOAD DATA
   ═══════════════════════════════════════════════════════════ */
   const loadPortalData = useCallback(async () => {
-    setLoading(true);
+    // Only the very first load gets the full-page skeleton; stepping through
+    // days keeps the date bar on screen so the teacher can keep clicking.
+    if (firstLoad.current) setLoading(true); else setDayLoading(true);
     setScheduleError(null);
     try {
-      const portalRes = await api.get('/portal/teacher');
+      const portalRes = await api.get('/portal/teacher', { params: { date: selectedDate } });
       setSchedule(portalRes.data.schedule || []);
+      setSelectedClassIdx(null);
     } catch (err) {
       setScheduleError(err.userMessage || 'Could not load your schedule.');
     } finally {
+      firstLoad.current = false;
       setLoading(false);
+      setDayLoading(false);
     }
     api.get('/announcements').then(r => setAnnouncements(r.data.announcements || [])).catch(() => {});
     api.get('/lesson-plans').then(r => setLessonPlans(r.data.lessonPlans || [])).catch(() => {});
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -235,9 +260,19 @@ const TeacherPortal = () => {
   const unreadAnnouncements = announcements.filter(a => !a.isRead);
   const pinnedAnnouncements = announcements.filter(a => a.isPinned);
 
+  // "LIVE now" only means anything on the day it is: on any other date the
+  // clock comparison would light up a class that already happened last Tuesday.
+  const isToday = selectedDate === todayString();
+
   const currentClass = schedule[selectedClassIdx];
   const roster = currentClass?.roster || [];
   const allStudents = schedule.flatMap((c) => c.roster);
+  // "Student out" has to work even when the teacher isn't sitting on a class —
+  // between periods, or when today's schedule is empty. Fall back to everyone on
+  // today's schedule (deduped, since a student can appear in two classes).
+  const studentOutRoster = roster.length
+    ? roster
+    : [...new Map(allStudents.map((s) => [s.id, s])).values()];
   const selectedCount = Object.values(selectedForPrize).filter(Boolean).length;
 
   /* ── Attendance ── */
@@ -327,6 +362,7 @@ const TeacherPortal = () => {
   const handleEmergencyConfirm = async () => {
     if (!emergencyModal) return;
     setEmergencySending(true);
+    setEmergencyError('');
     try {
       await api.post('/alerts', {
         alertType: emergencyModal.type,
@@ -334,11 +370,16 @@ const TeacherPortal = () => {
         studentId: emergencyModal.type === 'STUDENT OUT' && selectedStudentOut ? selectedStudentOut.id : undefined,
       });
       showToast(`✅ ${emergencyModal.label} alert sent!`);
-    } catch {
-      showToast('⚠️ Alert sent (offline mode)');
+      setEmergencyModal(null);
+    } catch (err) {
+      // There is no offline queue: a failure here means nobody was alerted. Say
+      // so and keep the modal open so the teacher can retry or call for help
+      // another way, instead of walking away from a real emergency reassured.
+      setEmergencyError(
+        err?.response?.data?.message || err?.userMessage || 'Alert could NOT be sent. Retry, or radio the front desk.'
+      );
     } finally {
       setEmergencySending(false);
-      setEmergencyModal(null);
     }
   };
 
@@ -347,8 +388,8 @@ const TeacherPortal = () => {
     try {
       await api.post('/alerts', { studentId: student.id, alertType: type, reason: `${type} — from Teacher Portal` });
       showToast(`✅ ${type} alert sent for ${student.name}`);
-    } catch {
-      showToast('⚠️ Alert sent (offline mode)');
+    } catch (err) {
+      showToast(`❌ Alert NOT sent — ${err?.response?.data?.message || err?.userMessage || 'try again'}`);
     }
     setAlertModal(null);
   };
@@ -421,7 +462,7 @@ const TeacherPortal = () => {
           <div className="emergency-strip-buttons">
             {emergencyButtons.map((btn) => (
               <button key={btn.type} className={`emergency-btn ${btn.cssClass}`}
-                onClick={() => { setEmergencyModal(btn); setSelectedStudentOut(null); }}>
+                onClick={() => { setEmergencyModal(btn); setSelectedStudentOut(null); setEmergencyError(''); }}>
                 {btn.icon} {btn.label}
               </button>
             ))}
@@ -449,22 +490,29 @@ const TeacherPortal = () => {
               {emergencyModal.type === 'CLASS SUPPORT' && 'This will notify management that you need support in your classroom.'}
             </p>
             {emergencyModal.type === 'STUDENT OUT' && (
-              <div className="student-roster-picker">
-                {roster.map((s) => (
-                  <div key={s.id} className={`roster-pick-item ${selectedStudentOut?.id === s.id ? 'selected' : ''}`}
-                    onClick={() => setSelectedStudentOut(s)}>
-                    <div className="roster-avatar">{s.name.split(' ').map((n) => n[0]).join('')}</div>
-                    {s.name}
-                    {selectedStudentOut?.id === s.id && <Check size={16} color="var(--primary)" style={{ marginLeft: 'auto' }} />}
-                  </div>
-                ))}
-              </div>
+              studentOutRoster.length > 0 ? (
+                <div className="student-roster-picker">
+                  {studentOutRoster.map((s) => (
+                    <div key={s.id} className={`roster-pick-item ${selectedStudentOut?.id === s.id ? 'selected' : ''}`}
+                      onClick={() => setSelectedStudentOut(s)}>
+                      <div className="roster-avatar">{s.name.split(' ').map((n) => n[0]).join('')}</div>
+                      {s.name}
+                      {selectedStudentOut?.id === s.id && <Check size={16} color="var(--primary)" style={{ marginLeft: 'auto' }} />}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="emergency-modal-note">
+                  No students on today's schedule to pick from — the alert will still reach the front desk without a name.
+                </p>
+              )
             )}
+            {emergencyError && <p className="emergency-modal-error"><AlertTriangle size={14} /> {emergencyError}</p>}
             <div className="emergency-modal-actions">
               <button className="modal-btn-cancel" onClick={() => setEmergencyModal(null)} disabled={emergencySending}>Cancel</button>
               <button className={`modal-btn-confirm ${emergencyModal.color}`} onClick={handleEmergencyConfirm}
-                disabled={emergencySending || (emergencyModal.type === 'STUDENT OUT' && !selectedStudentOut)}>
-                {emergencySending ? 'Sending...' : 'Send Alert'}
+                disabled={emergencySending || (emergencyModal.type === 'STUDENT OUT' && studentOutRoster.length > 0 && !selectedStudentOut)}>
+                {emergencySending ? 'Sending...' : emergencyError ? 'Retry' : 'Send Alert'}
               </button>
             </div>
           </div>
@@ -497,25 +545,46 @@ const TeacherPortal = () => {
         <button className="ann-view-feed-link" onClick={() => navigate('/feed')}>View Announcements →</button>
       </div>
 
-      {/* ── TOP BAR: title + notification bell ───────────────── */}
+      {/* ── TOP BAR: day picker + class count ────────────────── */}
       <div className="tp-topbar">
         <div className="tp-topbar-left">
-          <span className="tp-greeting">{schedule.length > 0 ? `${schedule.length} class${schedule.length !== 1 ? 'es' : ''} today` : 'No classes scheduled'}</span>
+          <span className="tp-greeting">
+            {schedule.length > 0
+              ? `${schedule.length} class${schedule.length !== 1 ? 'es' : ''} ${isToday ? 'today' : `on ${fmtDayLabel(selectedDate)}`}`
+              : `No classes scheduled ${isToday ? 'today' : `on ${fmtDayLabel(selectedDate)}`}`}
+          </span>
+        </div>
+        <div className="tp-day-picker">
+          <button className="tp-day-nav" onClick={() => setSelectedDate((d) => shiftDay(d, -1))}
+            aria-label="Previous day" title="Previous day">
+            <ChevronDown size={16} style={{ transform: 'rotate(90deg)' }} />
+          </button>
+          <label className="tp-day-input">
+            <CalendarIcon size={14} />
+            <input type="date" value={selectedDate}
+              onChange={(e) => e.target.value && setSelectedDate(e.target.value)} />
+          </label>
+          <button className="tp-day-nav" onClick={() => setSelectedDate((d) => shiftDay(d, 1))}
+            aria-label="Next day" title="Next day">
+            <ChevronDown size={16} style={{ transform: 'rotate(-90deg)' }} />
+          </button>
+          {!isToday && (
+            <button className="tp-day-today" onClick={() => setSelectedDate(todayString())}>Today</button>
+          )}
+          {dayLoading && <span className="tp-day-loading">Loading…</span>}
         </div>
       </div>
 
       {/* ── TODAY'S CLASSES STRIP ───────────────────────────── */}
       {schedule.length > 0 && (
         <div className="today-strip">
-          <span className="today-strip-label">Today</span>
+          <span className="today-strip-label">{isToday ? 'Today' : fmtDayLabel(selectedDate)}</span>
           {schedule.map((cls, idx) => {
-            const now = new Date();
-            const [startH, startM] = cls.startTime.split(':').map(Number);
-            const [endH,   endM  ] = cls.endTime.split(':').map(Number);
-            const start = new Date(); start.setHours(startH, startM, 0);
-            const end   = new Date(); end.setHours(endH,   endM,   0);
-            const isLive = now >= start && now <= end;
-            const isPast = now > end;
+            const now = nowMinutes();
+            const start = timeOfDayMinutes(cls.startTime);
+            const end   = timeOfDayMinutes(cls.endTime);
+            const isLive = isToday && now >= start && now <= end;
+            const isPast = isToday && now > end;
             return (
               <button key={cls.classId}
                 className={`today-class-chip ${isLive ? 'live' : ''} ${isPast ? 'past' : ''} ${idx === selectedClassIdx ? 'selected' : ''}`}
@@ -562,19 +631,17 @@ const TeacherPortal = () => {
             {schedule.length === 0 && (
               <div className="no-announcements">
                 <Users size={20} style={{ marginBottom: 6, opacity: 0.4 }} /><br />
-                No classes scheduled for today.
+                No classes scheduled for {isToday ? 'today' : fmtDayLabel(selectedDate)}.
               </div>
             )}
             {/* Class accordion — each class expands inline */}
             <div className="class-accordion-list">
               {schedule.map((cls, idx) => {
                 const isOpen = idx === selectedClassIdx;
-                const now = new Date();
-                const [sh, sm] = (cls.startTime || '0:0').split(':').map(Number);
-                const [eh, em] = (cls.endTime || '0:0').split(':').map(Number);
-                const start = new Date(); start.setHours(sh, sm, 0, 0);
-                const end = new Date(); end.setHours(eh, em, 0, 0);
-                const live = now >= start && now <= end;
+                const now = nowMinutes();
+                const start = timeOfDayMinutes(cls.startTime);
+                const end = timeOfDayMinutes(cls.endTime);
+                const live = isToday && now >= start && now <= end;
                 const count = cls.roster?.length || 0;
                 return (
                   <div key={cls.classId} className="class-acc-item">

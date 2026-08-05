@@ -972,10 +972,11 @@ model MarketingPhoto {
 }
 
 enum UserRole {
-  ADMIN   @map("admin")
-  TEACHER @map("teacher")
-  STUDENT @map("student")
-  PARENT  @map("parent")
+  ADMIN        @map("admin")
+  TEACHER      @map("teacher")
+  STUDENT      @map("student")
+  PARENT       @map("parent")
+  RECEPTIONIST @map("receptionist")
 
   @@map("user_role")
 }

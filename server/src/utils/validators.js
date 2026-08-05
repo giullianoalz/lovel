@@ -8,7 +8,7 @@ export const registerUserSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
-  role: z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT']),
+  role: z.enum(['ADMIN', 'TEACHER', 'STUDENT', 'PARENT', 'RECEPTIONIST']),
   phone: z.string().optional(),
 });
 

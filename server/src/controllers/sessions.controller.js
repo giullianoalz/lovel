@@ -1,5 +1,5 @@
 import prisma from '../config/database.js';
-import { hasRole } from '../utils/roles.js';
+import { hasRole, isOnly } from '../utils/roles.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 import {
@@ -33,7 +33,10 @@ const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
  * Returns a Prisma filter, so it composes with the caller's own filters
  * (date range, classId, teacherId) instead of replacing them.
  */
-const sessionScope = async (user) => {
+export const sessionScope = async (user) => {
+  // RECEPTIONIST deliberately grants nothing here. Front desk is a hat worn on
+  // top of another role — the teachers who cover reception still see only their
+  // own classes on the calendar, exactly like any other teacher.
   if (hasRole(user, 'ADMIN')) return {};
 
   // Each role the account holds contributes what it may see, and the branches
@@ -71,6 +74,39 @@ const sessionScope = async (user) => {
 
   if (branches.length === 0) return { id: { in: [] } }; // no role, nothing visible
   return branches.length === 1 ? branches[0] : { OR: branches };
+};
+
+/**
+ * The same "own classes only" rule as sessionScope, for the write routes.
+ *
+ * Reads compose a Prisma filter; the write handlers instead take a classId or a
+ * session id straight off the request, so each has to check ownership itself.
+ * Without this a teacher could retime, cancel, take attendance on or write notes
+ * against another teacher's class by id alone — and the attendance response
+ * would confirm that class's roster back to them.
+ *
+ * Returns null when the caller may proceed, or a ready-to-send 404 body. 404
+ * rather than 403, matching getClass: the answer must not tell a teacher whether
+ * someone else's session exists.
+ */
+const NOT_FOUND = { error: 'Not Found', message: 'Session not found.' };
+
+const denyForeignClass = async (user, classId) => {
+  if (!isOnly(user, 'TEACHER')) return null;
+  const cls = await prisma.class.findUnique({
+    where: { id: classId },
+    select: { teacherId: true },
+  });
+  return cls && cls.teacherId === user.id ? null : NOT_FOUND;
+};
+
+const denyForeignSession = async (user, sessionId) => {
+  if (!isOnly(user, 'TEACHER')) return null;
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { class: { select: { teacherId: true } } },
+  });
+  return session && session.class?.teacherId === user.id ? null : NOT_FOUND;
 };
 
 /**
@@ -162,6 +198,9 @@ export const createSession = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: 'classId, date, startTime, and endTime are required.' });
     }
 
+    const denied = await denyForeignClass(req.user, classId);
+    if (denied) return res.status(404).json(denied);
+
     // Convert startTime/endTime strings to proper DateTime objects for PostgreSQL TIME column
     const startObj = new Date(`1970-01-01T${startTime}:00Z`);
     const endObj = new Date(`1970-01-01T${endTime}:00Z`);
@@ -199,6 +238,9 @@ export const bulkScheduleSessions = async (req, res, next) => {
     if (!classId || !startDate || !endDate || !Array.isArray(weekdays) || weekdays.length === 0 || !startTime || !endTime) {
       return res.status(400).json({ error: 'Validation Error', message: 'classId, startDate, endDate, weekdays[], startTime, and endTime are required.' });
     }
+
+    const denied = await denyForeignClass(req.user, classId);
+    if (denied) return res.status(404).json(denied);
 
     // Parse as UTC-midnight dates and check weekday with getUTCDay() throughout —
     // mixing local getDay() with UTC-parsed dates shifts the matched weekday
@@ -336,6 +378,10 @@ export const bulkUpdateSessions = async (req, res, next) => {
 export const updateSession = async (req, res, next) => {
   try {
     const { status, date, startTime, endTime, meetingUrl } = req.body;
+
+    const denied = await denyForeignSession(req.user, req.params.id);
+    if (denied) return res.status(404).json(denied);
+
     const updateData = {};
 
     if (status) updateData.status = status.toUpperCase();
@@ -368,6 +414,9 @@ export const updateAttendance = async (req, res, next) => {
     if (!Array.isArray(attendanceRecords)) {
       return res.status(400).json({ error: 'Validation Error', message: 'attendanceRecords must be an array.' });
     }
+
+    const denied = await denyForeignSession(req.user, req.params.id);
+    if (denied) return res.status(404).json(denied);
 
     // Execute all updates in a transaction
     await prisma.$transaction(
@@ -625,6 +674,9 @@ export const supervisionSessions = async (req, res, next) => {
 export const addSessionNote = async (req, res, next) => {
   try {
     const { notes, visibility = 'all' } = req.body;
+
+    const denied = await denyForeignSession(req.user, req.params.id);
+    if (denied) return res.status(404).json(denied);
 
     const note = await prisma.sessionNote.create({
       data: {

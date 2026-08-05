@@ -39,6 +39,89 @@
   letter-spacing: -0.02em;
 }
 
+/* ---- Day picker (top bar) ---- */
+.tp-day-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tp-day-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  background: white;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tp-day-nav:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.tp-day-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  background: white;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.tp-day-input:focus-within {
+  border-color: var(--primary);
+}
+
+.tp-day-input input {
+  border: none;
+  outline: none;
+  background: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.tp-day-today {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--primary);
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  animation: tp-fadeIn 0.2s ease;
+}
+
+.tp-day-today:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.tp-day-loading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  animation: tp-fadeIn 0.2s ease;
+}
+
 .tp-bell-btn {
   position: relative;
   display: flex;
@@ -394,6 +477,34 @@
   color: var(--text-muted);
   line-height: 1.5;
   margin-bottom: 24px;
+}
+
+.emergency-modal-note {
+  font-size: 13px !important;
+  color: var(--text-muted);
+  background: #f9fafb;
+  border: 1px dashed var(--border-light);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 20px !important;
+}
+
+/* An alert that failed to send is the one thing in this modal the teacher must
+   not miss, so it shouts rather than whispers. */
+.emergency-modal-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 13px !important;
+  font-weight: 600;
+  color: #b91c1c !important;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 18px !important;
+  animation: tp-fadeIn 0.2s ease;
 }
 
 .emergency-modal-actions {
@@ -1031,6 +1142,12 @@
   .emergency-strip {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .tp-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
   }
 
   .emergency-btn {

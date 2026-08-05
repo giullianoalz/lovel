@@ -4,6 +4,7 @@ import {
   Clock, Download, Eye, FileText, Bell, TrendingUp, Star, ChevronRight,
 } from 'lucide-react';
 import api from '../../lib/api';
+import { formatTimeOfDay, formatDateOnly } from '../../lib/time';
 import ErrorBanner from '../Layout/ErrorBanner';
 import StatHistoryModal from './StatHistoryModal';
 import './StudentPortal.css';
@@ -152,8 +153,8 @@ const StudentPortal = () => {
                       <span className="sp-next-teacher">with {next.teacherName}</span>
                       <div className="sp-next-date">
                         <Clock size={13} />
-                        {fmt(next.date)}
-                        {next.startTime && ` · ${next.startTime}`}
+                        {formatDateOnly(next.date)}
+                        {next.startTime && ` · ${formatTimeOfDay(next.startTime)}`}
                       </div>
                     </div>
                   ) : <p className="sp-empty">No upcoming sessions</p>;
@@ -225,8 +226,8 @@ const StudentPortal = () => {
                         {e.upcomingSessions.slice(0, 5).map((s, j) => (
                           <div key={j} className="sp-session-row">
                             <Clock size={13} />
-                            <span>{fmt(s.date)}</span>
-                            {s.startTime && <span className="sp-sess-time">{s.startTime}</span>}
+                            <span>{formatDateOnly(s.date)}</span>
+                            {s.startTime && <span className="sp-sess-time">{formatTimeOfDay(s.startTime)}</span>}
                           </div>
                         ))}
                       </div>

@@ -12,8 +12,11 @@ import {
 
 const router = Router();
 
-// GET /api/students — List all students (Admin/Teacher)
-router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listStudents);
+// GET /api/students — List all students (Admin/Teacher/Front desk)
+// The front desk needs the roster to hand out seashells and to know who's who
+// at the door. Detail below stays ADMIN/TEACHER — the profile carries medical
+// and billing history the desk has no business reading.
+router.get('/', authenticate, requireRole('ADMIN', 'TEACHER', 'RECEPTIONIST'), listStudents);
 
 // GET /api/students/export — Download all students as CSV (Admin)
 // Registered before '/:id' so "export" isn't captured as an id param.

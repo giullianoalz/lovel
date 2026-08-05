@@ -219,6 +219,89 @@
   font-weight: 600;
 }
 
+.seashell-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  color: #0e7490;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Inline hand-out form: appears on the card itself so the front desk never
+   has to open the profile to reward a student in front of them. */
+.award-shells-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #ecfeff;
+  border: 1px solid #a5f3fc;
+  animation: award-shells-in var(--dur, 0.2s) var(--ease-out, ease);
+}
+
+@keyframes award-shells-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.award-shells-form input {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #a5f3fc;
+  background: white;
+  font-size: 13px;
+  width: 100%;
+}
+
+.award-shells-form input:focus {
+  outline: none;
+  border-color: #0891b2;
+  box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.15);
+}
+
+.award-shells-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.award-shells-points {
+  width: 80px;
+  flex: 0 0 auto;
+}
+
+.award-shells-quick {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #a5f3fc;
+  background: white;
+  color: #0e7490;
+  font-size: 12px;
+  font-weight: 700;
+  transition: background var(--dur-fast, 0.15s) var(--ease-out, ease),
+              transform var(--dur-fast, 0.15s) var(--ease-out, ease);
+}
+
+.award-shells-quick:hover {
+  background: #cffafe;
+  transform: translateY(-1px);
+}
+
+.award-shells-row .action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .card-actions {
   display: flex;
   justify-content: flex-end;

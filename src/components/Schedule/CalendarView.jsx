@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Vi
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { resolveMeetingUrl } from '../../lib/meetingLink';
+import { formatTimeOfDay } from '../../lib/time';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
 import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
@@ -14,16 +15,9 @@ const DAY_NAME_TO_NUM = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursd
 
 const toISODate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-// Prisma stores Session.startTime/endTime as a bare TIME value on a 1970-01-01
-// placeholder date — always read it back with the UTC getters, never local ones.
-const formatTimeOfDay = (isoTimeStr) => {
-  const d = new Date(isoTimeStr);
-  let h = d.getUTCHours();
-  const m = d.getUTCMinutes();
-  const period = h >= 12 ? 'PM' : 'AM';
-  h = h % 12; if (h === 0) h = 12;
-  return `${h}:${String(m).padStart(2, '0')} ${period}`;
-};
+// formatTimeOfDay lives in lib/time.js — the calendar was the only screen
+// reading these bare TIME values correctly, so the helper moved there and the
+// portals now share it instead of each rolling their own.
 
 const to24h = (tStr) => {
   const [t, p] = tStr.trim().split(' ');
@@ -564,12 +558,17 @@ const CalendarView = () => {
     loadSessions(view, currentDate);
   }, [view, currentDate]);
 
-  // Org-wide time off + shared-space bookings, merged read-only into the
-  // Month/Week grids so front desk sees "who's out" alongside actual classes
-  // instead of digging through the separate PTO/Spaces side panels. Staff-only —
-  // students/parents don't get teacher absence info on their calendar.
+  // Time off + shared-space bookings, merged read-only into the Month/Week grids
+  // so front desk sees "who's out" alongside actual classes instead of digging
+  // through the separate PTO/Spaces side panels. Staff-only — students/parents
+  // don't get teacher absence info on their calendar.
+  //
+  // Only admins and front desk get the org-wide view; a teacher sees their own
+  // time off and nobody else's, matching what the server will hand back either
+  // way (asking for orgWide as a teacher is simply ignored there).
   const [staffEvents, setStaffEvents] = useState([]);
   const canSeeStaffEvents = hasRole('ADMIN', 'TEACHER');
+  const canSeeOrgWide = hasRole('ADMIN') || (hasRole('RECEPTIONIST') && !hasRole('TEACHER'));
 
   const staffEventsSeqRef = useRef(0);
   const loadStaffEvents = async (viewMode, date) => {
@@ -578,16 +577,18 @@ const CalendarView = () => {
     try {
       const { start, end } = getVisibleRange(viewMode, date);
       const res = await api.get(
-        `/calendar?showPTO=true&showSharedSpaces=true&orgWide=true&from=${toISODate(start)}&to=${toISODate(end)}`
+        `/calendar?showPTO=true&showSharedSpaces=true${canSeeOrgWide ? '&orgWide=true' : ''}&from=${toISODate(start)}&to=${toISODate(end)}`
       );
       if (seq !== staffEventsSeqRef.current) return;
+      // `teacher` only comes back on the org-wide view; without it the rows are
+      // the caller's own time off, so they're labelled as such.
       const pto = (res.data.ptoRequests || []).map(r => ({
         id: `pto-${r.id}`,
         kind: 'pto',
         dateStr: new Date(r.date).toISOString().split('T')[0],
         time: 'All day',
         teacherName: r.teacher?.fullName || '',
-        title: `${r.type === 'SICK' ? 'Out Sick' : 'Vacation'} — ${r.teacher?.fullName || 'Staff'}`,
+        title: `${r.type === 'SICK' ? 'Out Sick' : 'Vacation'} — ${r.teacher?.fullName || 'You'}`,
       }));
       const spaces = (res.data.spaceReservations || []).map(r => {
         // Written with a forced "Z" suffix (see reserveSpace on the server) —
@@ -1515,7 +1516,10 @@ const CalendarView = () => {
   // PTO badge — a tutor who's out AND has no sessions today is unscheduled.
   const todaysPtoTeachers = searchForm.hideUnscheduled ? [] : staffEvents
     .filter(se => se.kind === 'pto' && se.dateStr === toISODate(currentDate))
-    .map(se => se.teacherName);
+    .map(se => se.teacherName)
+    // Own-PTO rows carry no name (the server only names people on the org-wide
+    // view), and a nameless column would render as a blank tutor lane.
+    .filter(Boolean);
   const uniqueTeachers = [...new Set([...events.map(e => e.teacher), ...todaysPtoTeachers])].sort();
 
   // Moves currentDate by one unit of whatever's currently in view — this is
@@ -1983,7 +1987,9 @@ const CalendarView = () => {
           <div className="cal-panel-list">
             {spaceReservations.length > 0 ? spaceReservations.map(r => (
               <div key={r.id} className="cal-panel-item">
-                <span><strong>{r.space?.name}</strong> — {r.reservedBy?.fullName || 'You'}</span>
+                {/* The owner's name only comes back on your own bookings unless
+                    you're admin/front desk — everyone else's read as "Reserved". */}
+                <span><strong>{r.space?.name}</strong> — {r.user?.fullName || 'Reserved'}</span>
                 <span className="text-muted" style={{fontSize: 12}}>{new Date(r.startTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} – {new Date(r.endTime).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span>
               </div>
             )) : <p className="text-muted" style={{fontSize: 13}}>No reservations yet.</p>}
