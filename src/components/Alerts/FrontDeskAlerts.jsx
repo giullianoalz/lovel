@@ -98,6 +98,25 @@ const FrontDeskAlerts = () => {
   };
 
   /**
+   * The sidebar's "Front Desk Alerts" badge counts unread rows in the
+   * Notification table (Sidebar.jsx, alertsUnread) — a different counter from
+   * the queues on this screen. Nothing cleared it, so it stayed stuck even
+   * after the desk had handled everything. Opening the screen is the read
+   * receipt: mark exactly the buckets this page displays. The server emits back
+   * to this user's room, which makes the sidebar's bell refetch and the number
+   * drop without a reload.
+   */
+  const clearAlertNotifications = async () => {
+    try {
+      await api.post('/notifications/read-by-reference', {
+        referenceTypes: ['classAlert', 'sessionCancellation', 'snackReload'],
+      });
+    } catch (error) {
+      console.error('Error clearing front-desk notifications:', error);
+    }
+  };
+
+  /**
    * Same two-shapes problem as alerts: the `behavior_logged` socket event sends
    * flat names, GET /behavior sends nested student/teacher. Flatten on the way in
    * so one row renderer covers both.
@@ -152,6 +171,7 @@ const FrontDeskAlerts = () => {
     if (canReviewCancellations) loadCancellations();
     if (canHandleSnacks) loadReloads();
     if (canSeeBehavior) loadBehavior();
+    clearAlertNotifications();
 
     // Share the app-wide authenticated socket (also used by chat + the
     // notification bell) instead of opening a second, unauthenticated one.
