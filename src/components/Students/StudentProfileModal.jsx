@@ -234,7 +234,6 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               {!isTeacher && (
                 <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Student Contact</h4>
-                  <p style={{ marginBottom: '4px' }}><strong>Email:</strong> {student.email || 'N/A'}</p>
                   <p style={{ marginBottom: '0' }}><strong>Phone:</strong> {student.phone || 'N/A'}</p>
                 </div>
               )}
