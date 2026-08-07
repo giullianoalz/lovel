@@ -1,7 +1,42 @@
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { formatCurrency } from '../utils/helpers.js';
 
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+// Resend needs a verified sending domain, which is stuck behind Wix's DNS
+// editor (no NS/MX-subdomain access — see the invite service's own notes).
+// Gmail SMTP with an App Password sidesteps that entirely: the academy already
+// owns the mailbox, so there's no domain to verify.
+const GMAIL_USER = process.env.GMAIL_USER;
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
+
+const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+    })
+  : null;
+
+/**
+ * Sends one email. Never throws — every caller here turns a failure into
+ * { ok: false, error } instead of losing the record of what happened.
+ */
+const send = async ({ to, subject, html, attachments }) => {
+  if (!transporter) return { ok: false, error: 'GMAIL_USER/GMAIL_APP_PASSWORD not configured' };
+  if (!to) return { ok: false, error: 'No recipient email' };
+
+  try {
+    await transporter.sendMail({
+      from: `"Love Learning Explorers" <${GMAIL_USER}>`,
+      to,
+      subject,
+      html,
+      // nodemailer attachments take the same {path, filename} shape Resend's did.
+      attachments,
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+};
 
 const IXL_LABELS = {
   NONE: 'None',
@@ -43,32 +78,20 @@ const buildBillingEmailHtml = ({ studentName, className, electiveNames, request,
  * rolling back the enrollment that already happened.
  */
 export const sendRegistrationBillingEmail = async ({ to, studentName, className, electiveNames = [], request, term }) => {
-  if (!resend) {
-    return { ok: false, error: 'RESEND_API_KEY not configured' };
+  const attachments = [];
+  if (term.calendarAssetUrl) {
+    attachments.push({ path: term.calendarAssetUrl, filename: 'Academic-Calendar-2026.pdf' });
   }
 
-  try {
-    const attachments = [];
-    if (term.calendarAssetUrl) {
-      attachments.push({ path: term.calendarAssetUrl, filename: 'Academic-Calendar-2026.pdf' });
-    }
-
-    const { error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'noreply@lovelearning.app',
-      to,
-      subject: `Registration & Billing Confirmation — ${term.name}`,
-      html: buildBillingEmailHtml({ studentName, className, electiveNames, request, term }),
-      attachments,
-    });
-    if (error) return { ok: false, error: error.message };
-
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
+  return send({
+    to,
+    subject: `Registration & Billing Confirmation — ${term.name}`,
+    html: buildBillingEmailHtml({ studentName, className, electiveNames, request, term }),
+    attachments,
+  });
 };
 
-export const isEmailConfigured = () => resend !== null;
+export const isEmailConfigured = () => transporter !== null;
 
 const buildNotificationEmailHtml = ({ title, message, actionUrl }) => `
   <div style="font-family: Arial, sans-serif; color: #222; max-width: 560px;">
@@ -110,23 +133,13 @@ const buildInviteEmailHtml = ({ fullName, link, isReminder }) => `
  * record; the admin sees the failure and can retry or hand over the link.
  */
 export const sendInviteEmail = async ({ to, fullName, link, isReminder = false }) => {
-  if (!resend) return { ok: false, error: 'RESEND_API_KEY not configured' };
-  if (!to) return { ok: false, error: 'No recipient email' };
-
-  try {
-    const { error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'noreply@lovelearning.app',
-      to,
-      subject: isReminder
-        ? 'Reminder: set up your Love Learning Explorers account'
-        : 'Welcome to Love Learning Explorers — set your password',
-      html: buildInviteEmailHtml({ fullName, link, isReminder }),
-    });
-    if (error) return { ok: false, error: error.message };
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
+  return send({
+    to,
+    subject: isReminder
+      ? 'Reminder: set up your Love Learning Explorers account'
+      : 'Welcome to Love Learning Explorers — set your password',
+    html: buildInviteEmailHtml({ fullName, link, isReminder }),
+  });
 };
 
 /**
@@ -138,19 +151,5 @@ export const sendInviteEmail = async ({ to, fullName, link, isReminder = false }
  * that triggered the notification.
  */
 export const sendNotificationEmail = async ({ to, title, message, actionUrl = null }) => {
-  if (!resend) return { ok: false, error: 'RESEND_API_KEY not configured' };
-  if (!to) return { ok: false, error: 'No recipient email' };
-
-  try {
-    const { error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM || 'noreply@lovelearning.app',
-      to,
-      subject: title,
-      html: buildNotificationEmailHtml({ title, message, actionUrl }),
-    });
-    if (error) return { ok: false, error: error.message };
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error.message };
-  }
+  return send({ to, subject: title, html: buildNotificationEmailHtml({ title, message, actionUrl }) });
 };
