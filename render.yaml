@@ -77,3 +77,5 @@ services:
         sync: false
       - key: DRIVE_CHAT_FOLDER_ID
         sync: false
+      - key: DRIVE_WAIVERS_FOLDER_ID
+        sync: false
