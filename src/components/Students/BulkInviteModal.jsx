@@ -3,6 +3,8 @@ import { X, Send, Copy, CheckCircle2, AlertCircle, Link2, Mail, Users } from 'lu
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
+import EmailPreviewModal from '../Layout/EmailPreviewModal';
+import { DEFAULT_INVITE_MESSAGE, defaultInviteSubject, INVITE_FIXED_NOTE } from '../../lib/emailDefaults';
 import './BulkInviteModal.css';
 
 // The server refuses more than this in one call — mailing real families is not
@@ -35,6 +37,7 @@ const BulkInviteModal = ({ onClose, onDone }) => {
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -92,12 +95,18 @@ const BulkInviteModal = ({ onClose, onDone }) => {
     }
   };
 
-  const handleSend = async () => {
+  // The "Invite N" button opens the preview instead of sending straight away.
+  const handleSend = () => {
     if (selected.length === 0) return;
+    setShowPreview(true);
+  };
+
+  const confirmSend = async ({ subject, message }) => {
     setSending(true);
     try {
-      const res = await api.post('/users/invite-bulk', { userIds: selected });
+      const res = await api.post('/users/invite-bulk', { userIds: selected, subject, message });
       setResults(res.data);
+      setShowPreview(false);
       onDone?.();
     } catch (err) {
       toast.error(err.response?.data?.message || err.userMessage || 'Could not send the invites.');
@@ -302,6 +311,21 @@ const BulkInviteModal = ({ onClose, onDone }) => {
           </>
         )}
       </div>
+
+      {showPreview && (
+        <EmailPreviewModal
+          recipients={invitable.filter(p => selected.includes(p.id))}
+          // Some of these may already be invited (a reminder) and some not
+          // (a first invite) — one subject has to cover both, so this stays
+          // with the first-invite wording rather than picking a side.
+          defaultSubject={defaultInviteSubject(false)}
+          defaultMessage={DEFAULT_INVITE_MESSAGE}
+          note={INVITE_FIXED_NOTE}
+          onClose={() => setShowPreview(false)}
+          onConfirm={confirmSend}
+          sending={sending}
+        />
+      )}
     </div>
   );
 };

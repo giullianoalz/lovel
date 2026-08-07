@@ -230,7 +230,8 @@ export const updateUserStatus = async (req, res, next) => {
  */
 export const inviteUser = async (req, res, next) => {
   try {
-    const result = await sendAccountInvite(req.params.id);
+    const { subject, message } = req.body || {};
+    const result = await sendAccountInvite(req.params.id, { subject, message });
 
     if (!result.ok) {
       return res.status(result.message === 'User not found.' ? 404 : 400).json({
@@ -273,7 +274,7 @@ export const inviteUser = async (req, res, next) => {
  */
 export const inviteUsersBulk = async (req, res, next) => {
   try {
-    const { userIds } = req.body;
+    const { userIds, subject, message } = req.body;
 
     if (!Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({ error: 'Validation Error', message: 'userIds must be a non-empty array.' });
@@ -288,7 +289,7 @@ export const inviteUsersBulk = async (req, res, next) => {
     const results = [];
     for (const id of userIds) {
       try {
-        const r = await sendAccountInvite(id);
+        const r = await sendAccountInvite(id, { subject, message });
         results.push(
           r.ok
             ? { id, ok: true, emailed: Boolean(r.emailed), email: r.user.email, fullName: r.user.fullName, link: r.link || null }

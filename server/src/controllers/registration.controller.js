@@ -1366,6 +1366,9 @@ export const declineApplication = async (req, res, next) => {
 export const resendBillingEmail = async (req, res, next) => {
   try {
     const { id } = req.params;
+    // Optional overrides from the admin's review-before-sending modal; without
+    // them the service falls back to the standard wording.
+    const { subject, message } = req.body || {};
     const request = await prisma.registrationRequest.findUniqueOrThrow({
       where: { id },
       include: {
@@ -1389,6 +1392,8 @@ export const resendBillingEmail = async (req, res, next) => {
       electiveNames: request.electiveChoices.map(c => c.elective.name),
       request,
       term: request.term,
+      subject,
+      message,
     });
 
     await prisma.registrationRequest.update({
@@ -1444,6 +1449,9 @@ export const adminRegisterStudent = async (req, res, next) => {
       ixlPlan = 'NONE',
       skipEmail = false,
       applicationId = null,
+      // Optional overrides from the admin's review-before-sending modal.
+      emailSubject,
+      emailMessage,
     } = req.body;
 
     const classIds = [...new Set(
@@ -1673,6 +1681,8 @@ export const adminRegisterStudent = async (req, res, next) => {
             electiveNames: result.electives.map(e => e.name),
             request: requestRow,
             term,
+            subject: emailSubject,
+            message: emailMessage,
           })
         : { ok: false, error: 'No hay correo de destinatario' };
 

@@ -11,6 +11,8 @@ import SnackCabinetModal from './SnackCabinetModal';
 import AddStudentModal from './AddStudentModal';
 import ImportStudentsModal from './ImportStudentsModal';
 import BulkInviteModal from './BulkInviteModal';
+import EmailPreviewModal from '../Layout/EmailPreviewModal';
+import { DEFAULT_INVITE_MESSAGE, defaultInviteSubject, INVITE_FIXED_NOTE } from '../../lib/emailDefaults';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './StudentsList.css';
 
@@ -38,6 +40,8 @@ const StudentsList = () => {
   // admin can still hand the link over.
   const [manualInvite, setManualInvite] = useState(null);
   const [showBulkInvite, setShowBulkInvite] = useState(false);
+  // The parent awaiting confirmation in the invite-preview modal — null when closed.
+  const [inviteTarget, setInviteTarget] = useState(null);
   // Seashells handed out straight from the directory card — the front desk
   // awards them while the student is standing there, without opening a profile.
   const [awardTarget, setAwardTarget] = useState(null);
@@ -119,11 +123,16 @@ const StudentsList = () => {
     (p.email || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleInvite = async (parent) => {
+  // Opens the preview modal instead of sending straight away, so the admin
+  // reads (and can edit) the subject/message first.
+  const handleInvite = (parent) => setInviteTarget(parent);
+
+  const confirmInvite = async ({ subject, message }) => {
+    const parent = inviteTarget;
     setInvitingId(parent.id);
     setManualInvite(null);
     try {
-      const res = await api.post(`/users/${parent.id}/invite`);
+      const res = await api.post(`/users/${parent.id}/invite`, { subject, message });
       setParents(ps => ps.map(p => (p.id === parent.id ? { ...p, ...res.data.user } : p)));
       if (res.data.emailed) {
         toast.success(res.data.message);
@@ -133,6 +142,7 @@ const StudentsList = () => {
         toast.error(res.data.message);
         setManualInvite({ name: parent.fullName, link: res.data.link });
       }
+      setInviteTarget(null);
     } catch (err) {
       toast.error(err.response?.data?.message || err.userMessage || 'Could not send the invite.');
     } finally {
@@ -670,6 +680,18 @@ const StudentsList = () => {
           // Reload rather than patch: the rows below show who can sign in, and
           // a batch of invites has just changed that for several of them.
           onDone={loadParents}
+        />
+      )}
+
+      {inviteTarget && (
+        <EmailPreviewModal
+          recipients={[{ id: inviteTarget.id, fullName: inviteTarget.fullName, email: inviteTarget.email }]}
+          defaultSubject={defaultInviteSubject(Boolean(inviteTarget.invitedAt))}
+          defaultMessage={DEFAULT_INVITE_MESSAGE}
+          note={INVITE_FIXED_NOTE}
+          onClose={() => setInviteTarget(null)}
+          onConfirm={confirmInvite}
+          sending={invitingId === inviteTarget.id}
         />
       )}
     </div>

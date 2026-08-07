@@ -3,6 +3,8 @@ import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check,
 import api from '../../lib/api';
 import { interestLabel } from '../../lib/enrollmentInterests';
 import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
+import EmailPreviewModal from '../Layout/EmailPreviewModal';
+import { defaultBillingSubject, defaultBillingMessage, BILLING_FIXED_NOTE } from '../../lib/emailDefaults';
 import './RegistrationAdmin.css';
 
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -106,6 +108,10 @@ const RegistrationAdmin = () => {
   const [billingRequests, setBillingRequests] = useState([]);
   const [billingLoading, setBillingLoading] = useState(false);
   const [resendingId, setResendingId] = useState(null);
+  // The billing row awaiting confirmation in the email review modal.
+  const [resendTarget, setResendTarget] = useState(null);
+  // True while the manual registration is waiting on its email review.
+  const [manualEmailReview, setManualEmailReview] = useState(false);
   // The request awaiting confirmation, then the one being cancelled — cancelling
   // frees a seat and deletes a charge, so it asks first.
   const [cancelModal, setCancelModal] = useState(null);
@@ -250,12 +256,22 @@ const RegistrationAdmin = () => {
     });
   };
 
-  const handleManualSubmit = async (e) => {
+  const handleManualSubmit = (e) => {
     e.preventDefault();
     if (!manualForm.termId || !manualForm.studentId || manualForm.classIds.length === 0) return;
+    // "Skip email" means nothing is being sent, so there is nothing to review.
+    if (manualForm.skipEmail) return submitManualRegistration();
+    setManualEmailReview(true);
+  };
+
+  const submitManualRegistration = async (email) => {
     setManualSubmitting(true);
     try {
-      const res = await api.post('/registration/admin-register', manualForm);
+      const res = await api.post('/registration/admin-register', {
+        ...manualForm,
+        ...(email ? { emailSubject: email.subject, emailMessage: email.message } : {}),
+      });
+      setManualEmailReview(false);
       setManualResult({ ...res.data, applicationApproved: Boolean(manualForm.applicationId) });
       // Reset form
       setManualForm({ termId: '', studentId: '', classIds: [], secondChoiceClassId: '', electiveIds: [], ixlPlan: 'NONE', skipEmail: false, applicationId: null });
@@ -533,11 +549,17 @@ const RegistrationAdmin = () => {
     }
   };
 
-  const handleResendEmail = async (requestId) => {
-    setResendingId(requestId);
+  // Opens the review modal rather than sending on the click — nothing reaches a
+  // family without an admin having read it first.
+  const handleResendEmail = (request) => setResendTarget(request);
+
+  const confirmResendEmail = async ({ subject, message }) => {
+    const request = resendTarget;
+    setResendingId(request.id);
     try {
-      await api.post(`/registration/requests/${requestId}/resend-email`);
+      await api.post(`/registration/requests/${request.id}/resend-email`, { subject, message });
       showAlert('Email resent successfully.', 'Success', 'info');
+      setResendTarget(null);
       loadBillingSummary();
     } catch (error) {
       showAlert(error.response?.data?.message || 'Error resending the email', 'Error', 'warning');
@@ -2215,7 +2237,7 @@ const RegistrationAdmin = () => {
                           <button
                             className="btn-text"
                             disabled={resendingId === r.id}
-                            onClick={() => handleResendEmail(r.id)}
+                            onClick={() => handleResendEmail(r)}
                           >
                             <Mail size={14} /> {resendingId === r.id ? 'Sending...' : 'Resend'}
                           </button>
@@ -2403,6 +2425,33 @@ const RegistrationAdmin = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Nothing addressed to a family leaves without an admin reading it.
+          The Billing tab only ever lists one term's rows — the one selected
+          above — so that is the term these emails are about. */}
+      {resendTarget && (
+        <EmailPreviewModal
+          recipients={[{ id: resendTarget.id, fullName: resendTarget.studentName, email: resendTarget.recipientEmail || 'the family on file' }]}
+          defaultSubject={defaultBillingSubject(terms.find(t => t.id === selectedTermForRoster)?.name || 'this term')}
+          defaultMessage={defaultBillingMessage(resendTarget.studentName, resendTarget.className)}
+          note={BILLING_FIXED_NOTE}
+          onClose={() => setResendTarget(null)}
+          onConfirm={confirmResendEmail}
+          sending={resendingId === resendTarget.id}
+        />
+      )}
+
+      {manualEmailReview && (
+        <EmailPreviewModal
+          recipients={[{ id: manualForm.studentId, fullName: manualStudentName || 'the student', email: 'the family on file' }]}
+          defaultSubject={defaultBillingSubject(terms.find(t => String(t.id) === String(manualForm.termId))?.name || 'this term')}
+          defaultMessage={defaultBillingMessage(manualStudentName || 'your student', '')}
+          note={BILLING_FIXED_NOTE}
+          onClose={() => setManualEmailReview(false)}
+          onConfirm={submitManualRegistration}
+          sending={manualSubmitting}
+        />
       )}
 
       {/* Cancel Registration Modal — spells out the side effects, because this

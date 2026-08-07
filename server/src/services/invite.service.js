@@ -221,9 +221,13 @@ export const redeemInviteToken = async (rawToken) => {
  * sends its own welcome message from the school's Gmail account and puts the
  * link inside it, so a second email from us would be noise.
  *
+ * `subject`/`message` let an admin edit the wording before it goes out (see
+ * the invite-preview modal); omitted, `sendInviteEmail` falls back to the
+ * standard copy.
+ *
  * @returns {Promise<{ok: boolean, message?: string, emailed?: boolean, link?: string, user?: object}>}
  */
-export const sendAccountInvite = async (userId, { deliver = true } = {}) => {
+export const sendAccountInvite = async (userId, { deliver = true, subject, message } = {}) => {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return { ok: false, message: 'User not found.' };
 
@@ -269,7 +273,7 @@ export const sendAccountInvite = async (userId, { deliver = true } = {}) => {
 
   const isReminder = Boolean(user.invitedAt);
   const delivery = deliver
-    ? await sendInviteEmail({ to: user.email, fullName: user.fullName, link, isReminder })
+    ? await sendInviteEmail({ to: user.email, fullName: user.fullName, link, isReminder, subject, message })
     : { ok: false, skipped: true };
 
   const updated = await prisma.user.update({
