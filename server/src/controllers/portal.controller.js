@@ -477,7 +477,7 @@ export const getParentPortal = async (req, res, next) => {
     }
 
     // Batch all child-data queries in a single Promise.all — O(1) DB round-trips
-    const [enrollments, behaviorLogs, prizeHistories, materials, announcements, pendingReloads, snackPurchases, fulfilledReloads] = await Promise.all([
+    const [enrollments, behaviorLogs, prizeHistories, materials, announcements, pendingReloads, snackPurchases, fulfilledReloads, waivers] = await Promise.all([
       prisma.classEnrollment.findMany({
         where: { studentId: { in: studentIds }, status: 'active' },
         include: {
@@ -534,6 +534,13 @@ export const getParentPortal = async (req, res, next) => {
         where: { studentId: { in: studentIds }, status: 'FULFILLED' },
         orderBy: { fulfilledAt: 'desc' },
       }),
+      // Signed liability waivers. The signature image itself is deliberately not
+      // selected — the portal only needs to know whether one exists, and it is
+      // the largest column on the row.
+      prisma.liabilityWaiver.findMany({
+        where: { studentId: { in: studentIds } },
+        select: { id: true, studentId: true, signedAt: true },
+      }),
     ]);
 
     // Index results by studentId for O(1) lookups during assembly
@@ -589,6 +596,9 @@ export const getParentPortal = async (req, res, next) => {
       if (!reloadByStudent[r.studentId]) reloadByStudent[r.studentId] = r;
     }
 
+    const waiverByStudent = {};
+    for (const w of waivers) waiverByStudent[w.studentId] = w;
+
     // Assemble final response — pure JS, zero additional DB calls
     const children = studentMeta.map(({ user, familyName }) => {
       const studentEnrollments = enrollmentsByStudent[user.id] || [];
@@ -615,6 +625,9 @@ export const getParentPortal = async (req, res, next) => {
               punchCount: reloadByStudent[user.id].punchCount,
               price: Number(reloadByStudent[user.id].price),
             }
+          : null,
+        waiver: waiverByStudent[user.id]
+          ? { id: waiverByStudent[user.id].id, signedAt: waiverByStudent[user.id].signedAt }
           : null,
       };
     });

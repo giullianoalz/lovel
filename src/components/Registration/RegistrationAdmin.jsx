@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone, Pencil } from 'lucide-react';
+import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone, Pencil, FileSignature, Download } from 'lucide-react';
 import api from '../../lib/api';
 import { interestLabel } from '../../lib/enrollmentInterests';
 import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
@@ -117,6 +117,12 @@ const RegistrationAdmin = () => {
   const [applicationsLoading, setApplicationsLoading] = useState(false);
   const [applicationFilter, setApplicationFilter] = useState('PENDING');
   const [declineModal, setDeclineModal] = useState({ isOpen: false, application: null, staffNotes: '', submitting: false });
+
+  // ── Liability waivers state ────────────────────────────────────────────────
+  const [waivers, setWaivers] = useState([]);
+  const [waiversLoading, setWaiversLoading] = useState(false);
+  const [waiverFilter, setWaiverFilter] = useState('UNSIGNED');
+  const [waiverDownloading, setWaiverDownloading] = useState(null);
 
   // ── Manual Registration state ──────────────────────────────────────────────
   const [manualTermElectives, setManualTermElectives] = useState([]);
@@ -282,6 +288,43 @@ const RegistrationAdmin = () => {
       setApplicationsLoading(false);
     }
   };
+
+  // ── Liability waivers ──────────────────────────────────────────────────────
+
+  const loadWaivers = async () => {
+    setWaiversLoading(true);
+    try {
+      const res = await api.get('/waivers');
+      setWaivers(res.data || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setWaiversLoading(false);
+    }
+  };
+
+  // Behind auth like every other endpoint, so the file has to come back through
+  // the client rather than as a plain link.
+  const handleDownloadWaiver = async (waiverId, studentName) => {
+    setWaiverDownloading(waiverId);
+    try {
+      const res = await api.get(`/waivers/${waiverId}/pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `waiver-${(studentName || 'signed').replace(/[^a-zA-Z0-9]+/g, '-')}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setWaiverDownloading(null);
+    }
+  };
+
+  const visibleWaivers = waivers.filter(w =>
+    waiverFilter === 'ALL' ? true : waiverFilter === 'SIGNED' ? w.signed : !w.signed
+  );
 
   // The term a placement should default to: the nearest one still accepting
   // registrations. Terms arrive newest-first, so the last one that has not
@@ -540,6 +583,7 @@ const RegistrationAdmin = () => {
   // Its own effect: the queue has nothing to do with the roster term selector.
   useEffect(() => {
     if (activeTab === 'applications') loadApplications();
+    if (activeTab === 'waivers') loadWaivers();
   }, [activeTab]);
 
   useEffect(() => {
@@ -1030,6 +1074,9 @@ const RegistrationAdmin = () => {
             <span className="tab-count">{applicationCounts.PENDING}</span>
           )}
         </button>
+        <button className={`tab ${activeTab === 'waivers' ? 'active' : ''}`} onClick={() => setActiveTab('waivers')}>
+          Waivers
+        </button>
         <button className={`tab ${activeTab === 'billing' ? 'active' : ''}`} onClick={() => setActiveTab('billing')}>
           Billing
         </button>
@@ -1216,6 +1263,72 @@ const RegistrationAdmin = () => {
                       {app.reviewedAt && ` on ${formatDateForDisplay(app.reviewedAt)}`}
                       {app.staffNotes && ` — ${app.staffNotes}`}
                     </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── WAIVERS TAB ─────────────────────────────────────────────────── */}
+        {activeTab === 'waivers' && (
+          <div className="waivers-view">
+            <div className="filters-bar glass-card">
+              <select
+                className="form-control"
+                style={{ width: '200px' }}
+                value={waiverFilter}
+                onChange={(e) => setWaiverFilter(e.target.value)}
+              >
+                <option value="UNSIGNED">Not signed</option>
+                <option value="SIGNED">Signed</option>
+                <option value="ALL">All students</option>
+              </select>
+              <span className="text-muted text-sm">
+                {waivers.filter(w => w.signed).length} of {waivers.length} signed
+              </span>
+              <div style={{ flex: 1 }}></div>
+              <button className="btn-outline" onClick={loadWaivers} disabled={waiversLoading}>
+                <RefreshCw size={14} /> Refresh
+              </button>
+            </div>
+
+            {!waiversLoading && visibleWaivers.length === 0 && (
+              <div className="glass-card applications-empty">
+                <FileSignature size={36} style={{ opacity: 0.35 }} />
+                <h3>{waiverFilter === 'UNSIGNED' ? 'Everyone has signed' : 'Nothing here'}</h3>
+                <p className="text-muted">
+                  {waiverFilter === 'UNSIGNED'
+                    ? 'Every student has a liability waiver on file.'
+                    : 'No students match this filter.'}
+                </p>
+              </div>
+            )}
+
+            <div className="waivers-list">
+              {visibleWaivers.map(w => (
+                <div key={w.studentId} className="glass-card waiver-row">
+                  <div className="waiver-row-info">
+                    <h4>
+                      {w.studentName}
+                      <span className={`badge ${w.signed ? 'active' : 'danger'}`}>
+                        {w.signed ? 'Signed' : 'Not signed'}
+                      </span>
+                    </h4>
+                    <p className="text-muted text-sm">
+                      {w.familyName || 'No family'}
+                      {w.signed && ` · signed by ${w.signedByName} on ${formatDateForDisplay(w.signedAt)}`}
+                    </p>
+                  </div>
+                  {w.signed && (
+                    <button
+                      className="btn-outline"
+                      disabled={waiverDownloading === w.waiverId}
+                      onClick={() => handleDownloadWaiver(w.waiverId, w.studentName)}
+                    >
+                      <Download size={14} />
+                      {waiverDownloading === w.waiverId ? 'Preparing...' : 'Download PDF'}
+                    </button>
                   )}
                 </div>
               ))}

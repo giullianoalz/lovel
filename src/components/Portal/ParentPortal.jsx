@@ -5,12 +5,14 @@ import {
   Shell, AlertTriangle, ThumbsUp, Clock, Calendar, Gift, BookOpen,
   CreditCard, Receipt, CheckCircle, AlertCircle, ExternalLink, Download,
   ChevronDown, ChevronUp, Bell, Award, GraduationCap, Smartphone, Landmark, Copy,
-  ClipboardList, Lock, Star, Hourglass,
+  ClipboardList, Lock, Star, Hourglass, FileSignature,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
+import { useAuth } from '../../context/AuthContext';
 import ErrorBanner from '../Layout/ErrorBanner';
 import StatHistoryModal from './StatHistoryModal';
+import WaiverForm from '../Waiver/WaiverForm';
 import './ParentPortal.css';
 
 const RELATIONSHIPS = ['Parent', 'Guardian', 'Grandparent', 'Aunt/Uncle', 'Sibling', 'Family Friend', 'Other'];
@@ -433,7 +435,10 @@ const ParentPortal = () => {
   const [regError, setRegError]     = useState(null);
   const [regSubmitting, setRegSubmitting] = useState(null);
   const [reloadSubmitting, setReloadSubmitting] = useState(null);
+  const [waiverChild, setWaiverChild] = useState(null);
+  const [waiverDownloading, setWaiverDownloading] = useState(null);
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const handleCopy = (id, value) => {
     navigator.clipboard?.writeText(value);
@@ -526,6 +531,38 @@ const ParentPortal = () => {
     handleRegSubmit(studentId, priorityClassId, null, electiveIds, ixlPlan);
 
   const handlePickupCreated = (auth) => setPickupAuths(prev => [auth, ...prev]);
+
+  // Patch the one child locally instead of refetching the whole portal — the
+  // banner has to disappear the moment the signature lands, and a round-trip
+  // here reads as the button not having worked.
+  const handleWaiverSigned = (studentId, waiver) => {
+    setData(d => ({
+      ...d,
+      children: d.children.map(c =>
+        c.id === studentId ? { ...c, waiver: { id: waiver.id, signedAt: waiver.signedAt } } : c
+      ),
+    }));
+    setWaiverChild(null);
+  };
+
+  // The PDF sits behind the same auth as everything else, so it has to be
+  // fetched with the token rather than opened as a plain link.
+  const handleDownloadWaiver = async (waiverId, childName) => {
+    setWaiverDownloading(waiverId);
+    try {
+      const res = await api.get(`/waivers/${waiverId}/pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `waiver-${(childName || 'signed').replace(/[^a-zA-Z0-9]+/g, '-')}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setWaiverDownloading(null);
+    }
+  };
 
   const handleDeleteAuth = async (id) => {
     try {
@@ -694,6 +731,45 @@ const ParentPortal = () => {
                     <AlertTriangle size={15} />
                     {child.allergies && <span><strong>Allergies:</strong> {child.allergies}</span>}
                     {child.medicalNotes && <span><strong>Medical:</strong> {child.medicalNotes}</span>}
+                  </div>
+                )}
+
+                {/* The liability waiver is required before a child takes part.
+                    Shown here rather than in the signup wizard because it also
+                    has to reach families who registered before it existed. */}
+                {!child.waiver ? (
+                  <div className="pp-waiver-banner">
+                    <div className="pp-waiver-copy">
+                      <FileSignature size={18} />
+                      <div>
+                        <h4>Liability waiver required</h4>
+                        <p>
+                          We need a signed waiver for {child.fullName?.split(' ')[0]} before
+                          they can take part in activities.
+                        </p>
+                      </div>
+                    </div>
+                    <button className="pp-waiver-sign" onClick={() => setWaiverChild(child)}>
+                      <FileSignature size={15} /> Read &amp; sign
+                    </button>
+                  </div>
+                ) : (
+                  <div className="pp-waiver-banner signed">
+                    <div className="pp-waiver-copy">
+                      <ShieldCheck size={18} />
+                      <div>
+                        <h4>Liability waiver signed</h4>
+                        <p>Signed on {fmt(child.waiver.signedAt)}.</p>
+                      </div>
+                    </div>
+                    <button
+                      className="pp-waiver-download"
+                      disabled={waiverDownloading === child.waiver.id}
+                      onClick={() => handleDownloadWaiver(child.waiver.id, child.fullName)}
+                    >
+                      <Download size={15} />
+                      {waiverDownloading === child.waiver.id ? 'Preparing...' : 'Download PDF'}
+                    </button>
                   </div>
                 )}
 
@@ -1070,6 +1146,15 @@ const ParentPortal = () => {
           children={inPersonChildren}
           onClose={() => setShowPickupModal(false)}
           onCreated={handlePickupCreated}
+        />
+      )}
+
+      {waiverChild && (
+        <WaiverForm
+          child={waiverChild}
+          parentName={user?.fullName || ''}
+          onClose={() => setWaiverChild(null)}
+          onSigned={(waiver) => handleWaiverSigned(waiverChild.id, waiver)}
         />
       )}
 

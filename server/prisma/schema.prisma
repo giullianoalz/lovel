@@ -121,6 +121,8 @@ model User {
   applicationsAsStudent  EnrollmentApplication[]   @relation("StudentApplications")
   applicationsSubmitted  EnrollmentApplication[]   @relation("SubmittedApplications")
   applicationsReviewed   EnrollmentApplication[]   @relation("ReviewedApplications")
+  liabilityWaiver        LiabilityWaiver?          @relation("StudentWaiver")
+  waiversSigned          LiabilityWaiver[]         @relation("SignedWaivers")
 
   @@map("users")
 }
@@ -141,6 +143,7 @@ model Family {
   snackReloads SnackReloadRequest[]
   applications EnrollmentApplication[]
   recurringCharges RecurringCharge[]
+  liabilityWaivers LiabilityWaiver[]
 
   @@map("families")
 }
@@ -1355,6 +1358,42 @@ enum ApplicationStatus {
   DECLINED
 
   @@map("application_status")
+}
+
+// A parent's signature on the liability waiver, one row per child.
+//
+// The names are snapshotted rather than read through the relations: this is a
+// legal record of what the parent saw and agreed to at that moment, so a later
+// rename of the account must not silently rewrite a signed document. Same
+// reason for documentVersion — if the waiver text is ever revised, existing
+// rows keep pointing at the wording that was actually on screen.
+//
+// The signature is the raw PNG the parent drew, kept inline because it is a few
+// kilobytes and losing it would void the record. The downloadable PDF is still
+// built from this row on demand — driveFileId is a second copy, archived to
+// Drive at signing time so a signed contract survives even if this row is ever
+// only read from a stale replica or exported without it.
+model LiabilityWaiver {
+  id              String   @id @default(uuid()) @db.Uuid
+  studentId       String   @unique @map("student_id") @db.Uuid
+  familyId        String   @map("family_id") @db.Uuid
+  signedById      String   @map("signed_by_id") @db.Uuid
+  minorName       String   @map("minor_name") @db.VarChar(255)
+  parentName      String   @map("parent_name") @db.VarChar(255)
+  signatureData   String   @map("signature_data")
+  documentVersion String   @default("2026-08") @map("document_version") @db.VarChar(20)
+  ipAddress       String?  @map("ip_address") @db.VarChar(64)
+  // Set once the signed PDF has been archived to Drive. Null just means the
+  // archive step hasn't run yet (or Drive wasn't configured at signing time) —
+  // it never blocks signing itself, and the app-generated PDF works either way.
+  driveFileId     String?  @map("drive_file_id") @db.VarChar(128)
+  signedAt        DateTime @default(now()) @map("signed_at") @db.Timestamptz(6)
+  student         User     @relation("StudentWaiver", fields: [studentId], references: [id], onDelete: Cascade)
+  family          Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  signedBy        User     @relation("SignedWaivers", fields: [signedById], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@map("liability_waivers")
 }
 
 enum ChatThreadStatus {
