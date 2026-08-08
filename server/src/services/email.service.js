@@ -125,6 +125,11 @@ const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
   ? nodemailer.createTransport({
       service: 'gmail',
       auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+      // Without these, a failed SMTP connection hangs forever and Render's
+      // load balancer drops the HTTP request with no status code ("- -").
+      connectionTimeout: 10_000,  // 10 s to open the TCP connection
+      greetingTimeout:   10_000,  // 10 s to receive the server greeting
+      socketTimeout:     15_000,  // 15 s of inactivity before giving up
     })
   : null;
 

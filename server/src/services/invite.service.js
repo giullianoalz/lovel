@@ -228,6 +228,7 @@ export const redeemInviteToken = async (rawToken) => {
  * @returns {Promise<{ok: boolean, message?: string, emailed?: boolean, link?: string, user?: object}>}
  */
 export const sendAccountInvite = async (userId, { deliver = true, subject, message } = {}) => {
+  console.log(`[Invite] Starting invite for userId=${userId}`);
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return { ok: false, message: 'User not found.' };
 
@@ -244,7 +245,9 @@ export const sendAccountInvite = async (userId, { deliver = true, subject, messa
 
   let firebaseUser;
   try {
+    console.log(`[Invite] Step 1: ensuring Firebase account for ${user.email}`);
     firebaseUser = await ensureFirebaseAccount(user);
+    console.log(`[Invite] Step 1 done: uid=${firebaseUser.uid}`);
   } catch (error) {
     console.error('[Invite] Could not create the Firebase account:', error);
     return { ok: false, message: `Could not create a sign-in account for ${user.email}: ${error.message}` };
@@ -265,22 +268,27 @@ export const sendAccountInvite = async (userId, { deliver = true, subject, messa
 
   let link;
   try {
+    console.log(`[Invite] Step 2: building invite link`);
     link = await buildInviteLink(user);
+    console.log(`[Invite] Step 2 done`);
   } catch (error) {
     console.error('[Invite] Could not generate the password link:', error);
     return { ok: false, message: `Could not generate an invite link: ${error.message}` };
   }
 
   const isReminder = Boolean(user.invitedAt);
+  console.log(`[Invite] Step 3: sending email to ${user.email}`);
   const delivery = deliver
     ? await sendInviteEmail({ to: user.email, fullName: user.fullName, link, isReminder, subject, message })
     : { ok: false, skipped: true };
+  console.log(`[Invite] Step 3 done: ok=${delivery.ok}${delivery.error ? ` error=${delivery.error}` : ''}`);
 
   const updated = await prisma.user.update({
     where: { id: user.id },
     data: { firebaseUid: firebaseUser.uid, invitedAt: new Date() },
   });
 
+  console.log(`[Invite] Complete: emailed=${delivery.ok}`);
   return {
     ok: true,
     emailed: delivery.ok,
