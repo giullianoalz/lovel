@@ -1514,7 +1514,7 @@ const CalendarView = () => {
 
   const getOverlapStyles = (event, layout) => {
     const { col, cols } = layout.get(event.id) || { col: 0, cols: 1 };
-    if (cols <= 1) return {};
+    if (cols <= 1) return { left: '3px', width: 'calc(100% - 6px)' };
     return {
       left: `calc(${(col * 100) / cols}% + 3px)`,
       width: `calc(${100 / cols}% - 6px)`,
