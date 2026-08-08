@@ -128,41 +128,107 @@ const textToHtmlParagraphs = (text) =>
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 
+// Gmail SMTP — works locally but Render blocks outbound SMTP on all ports.
+// Kept as a fallback for local development only.
 const transporter = GMAIL_USER && GMAIL_APP_PASSWORD
   ? nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 465,
       secure: true,
       auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-      // Without these, a failed SMTP connection hangs forever and Render's
-      // load balancer drops the HTTP request with no status code ("- -").
-      connectionTimeout: 10_000,  // 10 s to open the TCP connection
-      greetingTimeout:   10_000,  // 10 s to receive the server greeting
-      socketTimeout:     15_000,  // 15 s of inactivity before giving up
+      connectionTimeout: 10_000,
+      greetingTimeout:   10_000,
+      socketTimeout:     15_000,
     })
   : null;
 
-/**
- * Sends one email. Never throws — every caller here turns a failure into
- * { ok: false, error } instead of losing the record of what happened.
- */
-const send = async ({ to, subject, html, attachments }) => {
-  if (!transporter) return { ok: false, error: 'GMAIL_USER/GMAIL_APP_PASSWORD not configured' };
-  if (!to) return { ok: false, error: 'No recipient email' };
+// Resend HTTP API — works everywhere (HTTPS, not SMTP).
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM || (GMAIL_USER ? `Love Learning Explorers <${GMAIL_USER}>` : 'Love Learning Explorers <noreply@lovelearning.app>');
 
+/**
+ * Sends one email via Resend's HTTP API. Preferred on cloud platforms like
+ * Render that block outbound SMTP.
+ */
+const sendViaResend = async ({ to, subject, html, attachments }) => {
+  // Resend doesn't support CID inline images — swap for data URIs so the
+  // logo still renders. The same transform the preview modal uses.
+  const finalHtml = html.replaceAll(`cid:${LOGO_CID}`, logoDataUri);
+
+  // Build Resend-compatible attachments (skip the inline logo — it's now
+  // a data URI in the HTML).
+  const resendAttachments = [];
+  for (const att of (attachments || [])) {
+    if (att.cid) continue;
+    if (att.content) {
+      resendAttachments.push({
+        filename: att.filename,
+        content: Buffer.from(att.content).toString('base64'),
+      });
+    } else if (att.path) {
+      // URL-based attachment (e.g. the calendar PDF). Fetch and encode.
+      try {
+        const resp = await fetch(att.path);
+        if (resp.ok) {
+          const buf = Buffer.from(await resp.arrayBuffer());
+          resendAttachments.push({ filename: att.filename, content: buf.toString('base64') });
+        }
+      } catch { /* skip undownloadable attachments */ }
+    }
+  }
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to: [to],
+      subject,
+      html: finalHtml,
+      ...(resendAttachments.length && { attachments: resendAttachments }),
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    return { ok: false, error: err.message || `Resend API ${res.status}` };
+  }
+  return { ok: true };
+};
+
+/**
+ * Sends one email via Gmail SMTP (nodemailer). Fallback for local dev where
+ * SMTP is not blocked.
+ */
+const sendViaSmtp = async ({ to, subject, html, attachments }) => {
+  if (!transporter) return { ok: false, error: 'GMAIL_USER/GMAIL_APP_PASSWORD not configured' };
   try {
     await transporter.sendMail({
       from: `"Love Learning Explorers" <${GMAIL_USER}>`,
       to,
       subject,
       html,
-      // The logo rides along on every message — `layout` always references it.
       attachments: [logoAttachment, ...(attachments || [])],
     });
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };
   }
+};
+
+/**
+ * Sends one email. Never throws — every caller here turns a failure into
+ * { ok: false, error } instead of losing the record of what happened.
+ *
+ * Prefers Resend (HTTP) when available because cloud platforms like Render
+ * block outbound SMTP. Falls back to Gmail SMTP for local dev.
+ */
+const send = async ({ to, subject, html, attachments }) => {
+  if (!to) return { ok: false, error: 'No recipient email' };
+
+  if (RESEND_API_KEY) return sendViaResend({ to, subject, html, attachments });
+  return sendViaSmtp({ to, subject, html, attachments });
+
 };
 
 const IXL_LABELS = {
@@ -245,7 +311,7 @@ export const sendRegistrationBillingEmail = async ({ to, studentName, className,
   });
 };
 
-export const isEmailConfigured = () => transporter !== null;
+export const isEmailConfigured = () => Boolean(RESEND_API_KEY) || transporter !== null;
 
 export const buildNotificationEmailHtml = ({ title, message, actionUrl }) => layout({
   title,
