@@ -1,11 +1,21 @@
 .iep-modal {
-  max-width: 980px;
-  width: 100%;
+  max-width: 900px;
+  width: calc(100vw - 40px);
   padding: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   max-height: 88vh;
+  /* Card chrome that .modal-content.profile-modal has but the email modal was missing */
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0,0,0,0.04);
+  animation: modalSlideUp 0.3s ease-out forwards;
+}
+
+@keyframes modalSlideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0);    }
 }
 
 .iep-header {
@@ -27,13 +37,16 @@
 }
 
 .iep-body {
-  flex: 1 1 0;
+  flex: 0 0 360px;
+  width: 360px;
   min-width: 0;
-  padding: 18px 24px;
+  padding: 20px 24px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  background: #fafbfc;
+  border-right: 1px solid #e2e8f0;
 }
 
 .iep-preview-pane {
@@ -41,7 +54,6 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid #e2e8f0;
   background: #f1f5f9;
 }
 
@@ -89,7 +101,8 @@
 
 @media (max-width: 760px) {
   .iep-split { flex-direction: column; overflow-y: auto; }
-  .iep-preview-pane { border-left: none; border-top: 1px solid #e2e8f0; min-height: 360px; }
+  .iep-body { flex: none; width: 100%; border-right: none; border-bottom: 1px solid #e2e8f0; }
+  .iep-preview-pane { border-left: none; min-height: 360px; }
 }
 
 .iep-label {
@@ -142,7 +155,8 @@
   gap: 10px;
   padding: 14px 24px;
   border-top: 1px solid #e2e8f0;
-  background: rgba(248, 250, 252, 0.7);
+  background: #ffffff;
+  flex-shrink: 0;
 }
 
 .iep-btn-secondary, .iep-btn-primary {
