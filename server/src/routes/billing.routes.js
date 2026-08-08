@@ -10,6 +10,7 @@ import {
   listInvoices,
   createInvoice,
   voidInvoice,
+  editInvoice,
   generateEmaBatch,
   reconcileEmaRemittance,
   refundPayment,
@@ -52,6 +53,10 @@ router.get('/invoices', authenticate, requireRole('ADMIN'), listInvoices);
 
 // POST /api/billing/invoices — Generate an invoice (Admin)
 router.post('/invoices', authenticate, requireRole('ADMIN'), validate(createInvoiceSchema), createInvoice);
+
+// PATCH /api/billing/invoices/:id — Rewrite an invoice's line items (Admin).
+// Refused once a payment has touched it — see the controller.
+router.patch('/invoices/:id', authenticate, requireRole('ADMIN'), editInvoice);
 
 // DELETE /api/billing/invoices/:id — Void a mistaken invoice (Admin).
 // Refused once a payment has touched it — see the controller.

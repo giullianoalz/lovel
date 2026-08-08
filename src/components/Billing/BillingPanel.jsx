@@ -224,6 +224,57 @@ const BillingPanel = () => {
     }
   };
 
+  // Editing an invoice's line items — { invoice, lines: [{ id?, description, amount }] }.
+  // Lines without an `id` are new; a line present when the modal opened but
+  // missing on save is treated as deleted. Deleting every line voids the
+  // whole invoice (the server does the same thing either way).
+  const [editInvoiceModal, setEditInvoiceModal] = useState(null);
+  const [savingInvoiceEdit, setSavingInvoiceEdit] = useState(false);
+
+  const openEditInvoice = (inv) => {
+    setEditInvoiceModal({
+      invoice: inv,
+      lines: (inv.lines || []).map(l => ({ id: l.id, description: l.description, amount: l.amount.toFixed(2) })),
+    });
+  };
+
+  const updateEditLine = (index, field, value) => {
+    setEditInvoiceModal(prev => ({
+      ...prev,
+      lines: prev.lines.map((l, i) => i === index ? { ...l, [field]: value } : l),
+    }));
+  };
+
+  const addEditLine = () => {
+    setEditInvoiceModal(prev => ({ ...prev, lines: [...prev.lines, { description: '', amount: '' }] }));
+  };
+
+  const removeEditLine = (index) => {
+    setEditInvoiceModal(prev => ({ ...prev, lines: prev.lines.filter((_, i) => i !== index) }));
+  };
+
+  const handleSaveInvoiceEdit = async () => {
+    const lines = editInvoiceModal.lines.map(l => ({ id: l.id, description: l.description.trim(), amount: parseFloat(l.amount) }));
+    if (lines.some(l => !l.description || !isFinite(l.amount) || l.amount <= 0)) {
+      toast.error('Every line needs a description and a positive amount.');
+      return;
+    }
+    if (lines.length === 0 && !window.confirm('This removes every line, which voids the whole invoice. Continue?')) {
+      return;
+    }
+    setSavingInvoiceEdit(true);
+    try {
+      await database.editInvoice(editInvoiceModal.invoice.dbId, lines);
+      toast.success(lines.length === 0 ? 'Invoice voided.' : 'Invoice updated.');
+      setEditInvoiceModal(null);
+      await loadBilling();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not save the invoice.');
+    } finally {
+      setSavingInvoiceEdit(false);
+    }
+  };
+
   const handleRefund = async () => {
     if (!refundModal?.payment) return;
     const amount = parseFloat(refundModal.amount);
@@ -1035,6 +1086,15 @@ const BillingPanel = () => {
                             Refund
                           </button>
                         )}
+                        {inv.editable && (
+                          <button
+                            className="tx-delete-btn"
+                            title="Edit this invoice's line items"
+                            onClick={() => openEditInvoice(inv)}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
                         {inv.voidable && (
                           <button
                             className="tx-delete-btn"
@@ -1245,6 +1305,67 @@ const BillingPanel = () => {
             <div className="modal-actions" style={{marginTop: '24px'}}>
               <button className="btn-cancel" onClick={() => setRefundModal(null)}>Cancel</button>
               <button className="btn-send" onClick={handleRefund}>Confirm Refund</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Invoice Modal */}
+      {editInvoiceModal && (
+        <div className="modal-overlay" onClick={() => setEditInvoiceModal(null)}>
+          <div className="tx-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Edit {editInvoiceModal.invoice.id}</h3>
+              <button onClick={() => setEditInvoiceModal(null)}><X size={20}/></button>
+            </div>
+            <div className="tx-form">
+              {editInvoiceModal.lines.map((line, i) => (
+                <div key={line.id || `new-${i}`} style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', marginBottom: '10px' }}>
+                  <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+                    {i === 0 && <label>Description</label>}
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={line.description}
+                      onChange={e => updateEditLine(i, 'description', e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                    {i === 0 && <label>Amount</label>}
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={line.amount}
+                      min="0"
+                      step="0.01"
+                      onChange={e => updateEditLine(i, 'amount', e.target.value)}
+                    />
+                  </div>
+                  <button
+                    className="tx-delete-btn"
+                    title="Remove this line"
+                    onClick={() => removeEditLine(i)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+
+              <button className="action-btn" style={{ marginBottom: '12px' }} onClick={addEditLine}>
+                <Plus size={14} /> Add line
+              </button>
+
+              <p className="text-muted" style={{fontSize: '13px'}}>
+                <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
+                New total: ${editInvoiceModal.lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0).toFixed(2)}.
+                {editInvoiceModal.lines.length === 0 && ' Saving with no lines voids this invoice.'}
+              </p>
+            </div>
+            <div className="modal-actions" style={{marginTop: '24px'}}>
+              <button className="btn-cancel" onClick={() => setEditInvoiceModal(null)}>Cancel</button>
+              <button className="btn-send" onClick={handleSaveInvoiceEdit} disabled={savingInvoiceEdit}>
+                {savingInvoiceEdit ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
         </div>

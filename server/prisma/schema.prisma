@@ -488,6 +488,7 @@ model Transaction {
   payment     Payment?        @relation(fields: [paymentId], references: [id])
   student     User?           @relation(fields: [studentId], references: [id])
   recurringCharge RecurringCharge? @relation(fields: [recurringChargeId], references: [id], onDelete: SetNull)
+  invoiceLine InvoiceLine?
 
   @@unique([studentId, termId, quarter])
   @@unique([recurringChargeId, periodKey])
@@ -525,12 +526,18 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id          String  @id @default(uuid()) @db.Uuid
-  invoiceId   String  @map("invoice_id") @db.Uuid
+  id          String       @id @default(uuid()) @db.Uuid
+  invoiceId   String       @map("invoice_id") @db.Uuid
   description String
-  amount      Decimal @db.Decimal(10, 2)
-  quantity    Int     @default(1)
-  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount      Decimal      @db.Decimal(10, 2)
+  quantity    Int          @default(1)
+  // The Transaction this line was raised from — what makes an invoice line
+  // editable/removable without guessing which ledger row it corresponds to.
+  // Null on lines from before this link existed, or a line an admin added
+  // without a backing charge.
+  transactionId String?    @unique @map("transaction_id") @db.Uuid
+  invoice     Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
 
   @@map("invoice_lines")
 }

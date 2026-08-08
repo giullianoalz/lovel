@@ -3,6 +3,7 @@ import stripe from '../config/stripe.js';
 import { applyAvailableCredit } from '../services/billingCredit.service.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { notifyAdmins } from '../jobs/notification.helper.js';
+import { round2 } from '../services/registrationPricing.service.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -187,6 +188,140 @@ export const voidInvoice = async (req, res, next) => {
 };
 
 /**
+ * PATCH /api/billing/invoices/:id
+ * Body: { lines: [{ id?, description, amount }] }
+ * Rewrites an invoice's line items — a mistaken price or description on a
+ * charge that's already been billed. Each submitted line with an `id` updates
+ * that line (and the ledger Transaction underneath it, so the family's balance
+ * stays correct); an existing line left out of the array is removed along with
+ * its Transaction; a line with no `id` raises a brand new charge on the
+ * invoice. An empty `lines` array voids the whole invoice — same rule as
+ * DELETE, just reached from the edit screen instead of a separate button.
+ *
+ * Same money-already-moved guard as voidInvoice: refused once any Payment
+ * references the invoice. Editing a paid line would silently change what a
+ * completed card charge or a recorded Zelle/Venmo payment was "for" — the
+ * correct fix at that point is a credit or refund, not rewriting history.
+ */
+export const editInvoice = async (req, res, next) => {
+  try {
+    const { lines } = req.body;
+    if (!Array.isArray(lines)) {
+      return res.status(400).json({ error: 'Validation Error', message: 'lines must be an array.' });
+    }
+    for (const l of lines) {
+      const amt = Number(l.amount);
+      if (!l.description || !String(l.description).trim() || !isFinite(amt) || amt <= 0) {
+        return res.status(400).json({ error: 'Validation Error', message: 'Each line needs a description and a positive amount.' });
+      }
+    }
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      include: { lines: { select: { id: true, transactionId: true } } },
+    });
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+
+    const paymentCount = await prisma.payment.count({ where: { invoiceId: invoice.id } });
+    if (paymentCount > 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A payment already exists against this invoice. Refund it instead of editing the invoice.',
+      });
+    }
+
+    const existingLineIds = new Set(invoice.lines.map((l) => l.id));
+    for (const l of lines) {
+      if (l.id && !existingLineIds.has(l.id)) {
+        return res.status(400).json({ error: 'Validation Error', message: 'One of the submitted lines does not belong to this invoice.' });
+      }
+    }
+
+    // No lines left after the edit is the same outcome as voiding — reuse
+    // that path exactly rather than duplicating the "delete everything" logic.
+    if (lines.length === 0) {
+      await prisma.$transaction(async (tx) => {
+        await tx.transaction.deleteMany({ where: { invoiceId: invoice.id, paymentId: null } });
+        await tx.invoice.delete({ where: { id: invoice.id } });
+      });
+      console.log(`[Billing] ${req.user.email} emptied and voided invoice ${invoice.invoiceNumber} via edit (family ${invoice.familyId})`);
+      return res.json({ message: 'Invoice had no lines left and was voided.', voided: true });
+    }
+
+    const submittedIds = new Set(lines.filter((l) => l.id).map((l) => l.id));
+    const removedLines = invoice.lines.filter((l) => !submittedIds.has(l.id));
+
+    const updated = await prisma.$transaction(async (tx) => {
+      for (const removed of removedLines) {
+        // Transaction.invoiceLine has onDelete: SetNull, not Cascade — deleting
+        // the transaction only nulls the line's FK, it doesn't remove the line
+        // itself, so both rows need an explicit delete here.
+        if (removed.transactionId) {
+          await tx.transaction.delete({ where: { id: removed.transactionId } });
+        }
+        await tx.invoiceLine.delete({ where: { id: removed.id } });
+      }
+
+      for (const l of lines) {
+        const amount = Number(l.amount);
+        const description = String(l.description).trim();
+        if (l.id) {
+          const existingLine = invoice.lines.find((el) => el.id === l.id);
+          await tx.invoiceLine.update({ where: { id: l.id }, data: { description, amount } });
+          if (existingLine.transactionId) {
+            await tx.transaction.update({ where: { id: existingLine.transactionId }, data: { description, amount } });
+          }
+        } else {
+          const transaction = await tx.transaction.create({
+            data: {
+              familyId: invoice.familyId,
+              studentId: invoice.studentId,
+              invoiceId: invoice.id,
+              amount,
+              type: 'CHARGE',
+              description,
+            },
+          });
+          await tx.invoiceLine.create({
+            data: { invoiceId: invoice.id, description, amount, transactionId: transaction.id },
+          });
+        }
+      }
+
+      const newTotal = round2(lines.reduce((sum, l) => sum + Number(l.amount), 0));
+      const amountPaid = Number(invoice.amountPaid);
+      const status = amountPaid <= 0
+        ? (invoice.status === 'OVERDUE' ? 'OVERDUE' : 'SENT')
+        : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL');
+
+      return tx.invoice.update({
+        where: { id: invoice.id },
+        data: { subtotal: newTotal, totalAmount: newTotal, status },
+        include: { lines: true },
+      });
+    });
+
+    console.log(`[Billing] ${req.user.email} edited invoice ${invoice.invoiceNumber} (family ${invoice.familyId}) — new total $${updated.totalAmount}`);
+
+    res.json({
+      message: 'Invoice updated.',
+      invoice: {
+        id: updated.invoiceNumber,
+        dbId: updated.id,
+        amount: Number(updated.totalAmount),
+        amountPaid: Number(updated.amountPaid),
+        status: updated.status.charAt(0).toUpperCase() + updated.status.slice(1).toLowerCase(),
+        lines: updated.lines.map((l) => ({ id: l.id, description: l.description, amount: Number(l.amount) })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/billing/transactions
  * Create a new transaction (Charge, Payment, Refund, Discount)
  */
@@ -324,8 +459,12 @@ export const listInvoices = async (req, res, next) => {
       amountPaid: Number(inv.amountPaid),
       status: inv.status.charAt(0).toUpperCase() + inv.status.slice(1),
       payments: inv.payments.map(p => ({ id: p.id, amount: Number(p.amount), method: p.method, status: p.status })),
-      // Whether DELETE /invoices/:id would actually accept this — see voidInvoice.
+      lines: inv.lines.map(l => ({ id: l.id, description: l.description, amount: Number(l.amount) })),
+      // Whether DELETE (void) or PATCH (edit) /invoices/:id would actually
+      // accept this — see voidInvoice/editInvoice. Same condition either way:
+      // no real Payment has touched the invoice yet.
       voidable: inv._count.payments === 0,
+      editable: inv._count.payments === 0,
     }));
 
     res.json({ invoices: mapped });
@@ -380,10 +519,15 @@ export const createInvoice = async (req, res, next) => {
           status: 'SENT',
           dateRange: 'Current Unbilled',
           dueDate: new Date(Date.now() + 30 * 86400000), // 30 days from now
+          // One line per transaction, each linked back by transactionId — what
+          // lets an admin edit or remove a single line later without guessing
+          // which ledger row it came from (createMany can't take relations, so
+          // this is per-row rather than a single nested create).
           lines: {
             create: txs.map((t) => ({
               description: t.description || 'Charge',
               amount: t.amount,
+              transactionId: t.id,
             })),
           },
         },
@@ -519,7 +663,7 @@ export const generateEmaBatch = async (req, res, next) => {
             status: 'SENT',
             dateRange: 'EMA Step Up Batch',
             lines: lineDescriptions.length > 0
-              ? { create: lineDescriptions.map(l => ({ description: l.description, amount: l.amount })) }
+              ? { create: lineDescriptions.map(l => ({ description: l.description, amount: l.amount, transactionId: l.chargeId })) }
               : undefined,
           },
         });

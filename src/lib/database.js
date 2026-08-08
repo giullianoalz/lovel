@@ -360,6 +360,13 @@ export const database = {
     return response.data;
   },
 
+  // Rewrites an invoice's line items (description/amount, add/remove lines).
+  // Same "no payment has touched it yet" restriction as voidInvoice.
+  editInvoice: async (id, lines) => {
+    const response = await api.patch(`/billing/invoices/${id}`, { lines });
+    return response.data;
+  },
+
   // --- Standing monthly charges ---
   // The arrangement, not the money: creating one bills nobody today. The
   // nightly job raises one transaction per month from it.

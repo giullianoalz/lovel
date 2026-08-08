@@ -24,6 +24,23 @@ export const nextLcNumber = async (tx) => {
 export const raiseInvoicedCharge = async (tx, { familyId, studentId = null, termId = null, amount, description, dateRange }) => {
   const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
 
+  // Transaction created first (without invoiceId yet) so the invoice's line
+  // can link to it by id — that link is what makes the invoice editable
+  // afterward without guessing which ledger row a line corresponds to.
+  const transaction = await tx.transaction.create({
+    data: {
+      familyId,
+      studentId,
+      // termId without quarter identifies this as the registration deposit
+      // (as opposed to a quarterly tuition charge, which always sets quarter)
+      // — that's what lets cancelRegistrationRequest find and reverse it.
+      termId,
+      amount,
+      type: 'CHARGE',
+      description,
+    },
+  });
+
   const invoice = await tx.invoice.create({
     data: {
       invoiceNumber,
@@ -34,26 +51,13 @@ export const raiseInvoicedCharge = async (tx, { familyId, studentId = null, term
       status: 'SENT',
       dateRange: dateRange || 'Registration Deposit',
       dueDate: new Date(Date.now() + 30 * 86400000),
-      lines: { create: [{ description, amount }] },
+      lines: { create: [{ description, amount, transactionId: transaction.id }] },
     },
   });
 
-  const transaction = await tx.transaction.create({
-    data: {
-      familyId,
-      studentId,
-      // termId without quarter identifies this as the registration deposit
-      // (as opposed to a quarterly tuition charge, which always sets quarter)
-      // — that's what lets cancelRegistrationRequest find and reverse it.
-      termId,
-      invoiceId: invoice.id,
-      amount,
-      type: 'CHARGE',
-      description,
-    },
-  });
+  await tx.transaction.update({ where: { id: transaction.id }, data: { invoiceId: invoice.id } });
 
   const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: invoice.id, invoiceTotal: amount });
 
-  return { invoice, transaction, applied };
+  return { invoice, transaction: { ...transaction, invoiceId: invoice.id }, applied };
 };
