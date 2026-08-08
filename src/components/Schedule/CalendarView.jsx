@@ -2285,10 +2285,13 @@ const CalendarView = () => {
                          {isOutToday && <span className="instructor-pto-badge">Out</span>}
                       </div>
 
-                      <div className="timeline-container" style={{ height: `${10 * 60 * PIXELS_PER_MINUTE}px` }}>
+                      <div className="timeline-container" style={{ height: `${24 * 60 * PIXELS_PER_MINUTE}px` }}>
                          {/* Background Hour Lines */}
-                         {Array.from({ length: 10 }).map((_, i) => (
-                           <div key={i} className="hourLine" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }}></div>
+                         {Array.from({ length: 24 }).map((_, i) => (
+                           <React.Fragment key={i}>
+                             <div className="hourLine" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }}></div>
+                             <div className="grid-halfhour-line" style={{ top: `${(i * 60 + 30) * PIXELS_PER_MINUTE}px` }}></div>
+                           </React.Fragment>
                          ))}
                          
                          {/* Events */}
