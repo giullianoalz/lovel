@@ -3,6 +3,8 @@ import { setDefaultResultOrder } from 'dns';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
+import MailComposer from 'nodemailer/lib/mail-composer/index.js';
+import { google } from 'googleapis';
 import { formatCurrency } from '../utils/helpers.js';
 
 // Node 17+ changed the default DNS resolution order to use the OS resolver,
@@ -147,35 +149,159 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || (GMAIL_USER ? `Love Learning Explorers <${GMAIL_USER}>` : 'Love Learning Explorers <noreply@lovelearning.app>');
 
 /**
- * Sends one email via Resend's HTTP API. Preferred on cloud platforms like
- * Render that block outbound SMTP.
+ * Where the logo lives for transports that can't carry it inline.
+ *
+ * The SMTP and Gmail-API paths attach it and reference `cid:`, which renders
+ * offline and leaks nothing. HTTP providers can't do that reliably, and the
+ * obvious substitute — a `data:` URI — is silently dropped by Gmail and
+ * Outlook, so the header would simply come out blank. A hosted https image is
+ * the only thing those two render, and it is what ordinary email does.
  */
-const sendViaResend = async ({ to, subject, html, attachments }) => {
-  // Resend doesn't support CID inline images — swap for data URIs so the
-  // logo still renders. The same transform the preview modal uses.
-  const finalHtml = html.replaceAll(`cid:${LOGO_CID}`, logoDataUri);
+const EMAIL_LOGO_URL = process.env.EMAIL_LOGO_URL || 'https://lovelearning-three.vercel.app/logo.png';
 
-  // Build Resend-compatible attachments (skip the inline logo — it's now
-  // a data URI in the HTML).
-  const resendAttachments = [];
-  for (const att of (attachments || [])) {
+/** Swaps the inline reference for the hosted one. */
+const withHostedLogo = (html) => html.replaceAll(`cid:${LOGO_CID}`, EMAIL_LOGO_URL);
+
+/**
+ * Encodes attachments as base64 for the HTTP providers, fetching any that are
+ * given as a URL. Undownloadable ones are dropped rather than failing the
+ * send: a missing calendar PDF is not worth losing the invoice it rode with.
+ */
+const encodeAttachments = async (attachments) => {
+  const out = [];
+  for (const att of attachments || []) {
+    // The logo is in the HTML as a hosted URL now; attaching it too would show
+    // up as a stray paperclip on the message.
     if (att.cid) continue;
     if (att.content) {
-      resendAttachments.push({
-        filename: att.filename,
-        content: Buffer.from(att.content).toString('base64'),
-      });
+      out.push({ name: att.filename, content: Buffer.from(att.content).toString('base64') });
     } else if (att.path) {
-      // URL-based attachment (e.g. the calendar PDF). Fetch and encode.
       try {
         const resp = await fetch(att.path);
         if (resp.ok) {
-          const buf = Buffer.from(await resp.arrayBuffer());
-          resendAttachments.push({ filename: att.filename, content: buf.toString('base64') });
+          out.push({ name: att.filename, content: Buffer.from(await resp.arrayBuffer()).toString('base64') });
         }
       } catch { /* skip undownloadable attachments */ }
     }
   }
+  return out;
+};
+
+/**
+ * Sends one email through Brevo's HTTP API.
+ *
+ * Chosen because it needs no DNS: Brevo verifies the sending address itself by
+ * mailing it a confirmation link, so the academy's own Gmail address can be
+ * used while its domain stays locked inside Wix.
+ *
+ * The tradeoff is unavoidable and worth stating: the message leaves Brevo's
+ * servers claiming to be from a gmail.com address, so SPF and DKIM sign for
+ * Brevo's domain and can never align with gmail.com — nobody can publish DNS
+ * for a domain they don't own. Some of these will land in spam. Sending as a
+ * domain the academy owns, or via the Gmail API, is what fixes that for good.
+ */
+const BREVO_API_KEY = process.env.BREVO_API_KEY;
+
+const sendViaBrevo = async ({ to, subject, html, attachments }) => {
+  try {
+    const encoded = await encodeAttachments(attachments);
+
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: 'Love Learning Explorers', email: GMAIL_USER },
+        to: [{ email: to }],
+        subject,
+        htmlContent: withHostedLogo(html),
+        ...(encoded.length && { attachment: encoded }),
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      // Brevo puts the actionable part in `message` (e.g. sender not verified).
+      return { ok: false, error: `Brevo: ${err.message || res.status}` };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: `Brevo: ${error.message}` };
+  }
+};
+
+/**
+ * Gmail API over HTTPS — the only transport that satisfies every constraint at
+ * once, which is why it is preferred over the two below.
+ *
+ * Render blocks outbound SMTP on every port, so nodemailer cannot reach Gmail
+ * from production. Resend gets through (it is HTTPS) but refuses to send until
+ * a domain is verified, and this academy's DNS is locked inside Wix. The Gmail
+ * API is HTTPS like Resend, yet the mail leaves Google's own servers as the
+ * academy's own account — no domain to verify, and the deliverability of a
+ * message genuinely sent from that mailbox rather than on its behalf.
+ *
+ * Needs an OAuth refresh token rather than the service-account key Drive uses:
+ * a service account can only impersonate a user through domain-wide
+ * delegation, which is a Workspace feature a free @gmail.com account does not
+ * have. Mint the token with `npm run gmail:auth`.
+ */
+const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID;
+const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
+
+const gmailOAuthClient = (GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_REFRESH_TOKEN)
+  ? (() => {
+      const client = new google.auth.OAuth2(GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET);
+      // The library refreshes the short-lived access token off this on demand,
+      // so nothing here expires as long as the refresh token stays valid.
+      client.setCredentials({ refresh_token: GMAIL_REFRESH_TOKEN });
+      return client;
+    })()
+  : null;
+
+/**
+ * Sends one email through the Gmail API.
+ *
+ * The MIME is built by nodemailer's own composer rather than by hand, so the
+ * inline `cid:` logo, the multipart structure and any real attachments come out
+ * byte-identical to what the SMTP path produced — only the delivery changes.
+ */
+const sendViaGmailApi = async ({ to, subject, html, attachments }) => {
+  try {
+    const mime = await new MailComposer({
+      from: `"Love Learning Explorers" <${GMAIL_USER}>`,
+      to,
+      subject,
+      html,
+      attachments: [logoAttachment, ...(attachments || [])],
+    }).compile().build();
+
+    const gmail = google.gmail({ version: 'v1', auth: gmailOAuthClient });
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: { raw: mime.toString('base64url') },
+    });
+    return { ok: true };
+  } catch (error) {
+    // Google nests the useful part; the outer message is usually just the code.
+    const detail = error?.response?.data?.error?.message || error.message;
+    return { ok: false, error: `Gmail API: ${detail}` };
+  }
+};
+
+/**
+ * Sends one email via Resend's HTTP API. Preferred on cloud platforms like
+ * Render that block outbound SMTP.
+ */
+const sendViaResend = async ({ to, subject, html, attachments }) => {
+  // Same hosted-logo swap as Brevo, and for the same reason: this used to
+  // inline a data: URI, which Gmail and Outlook drop outright — the header
+  // would have arrived empty.
+  const encoded = await encodeAttachments(attachments);
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -184,8 +310,9 @@ const sendViaResend = async ({ to, subject, html, attachments }) => {
       from: EMAIL_FROM,
       to: [to],
       subject,
-      html: finalHtml,
-      ...(resendAttachments.length && { attachments: resendAttachments }),
+      html: withHostedLogo(html),
+      // Resend names the field `filename`, Brevo names it `name`.
+      ...(encoded.length && { attachments: encoded.map(a => ({ filename: a.name, content: a.content })) }),
     }),
   });
 
@@ -220,15 +347,21 @@ const sendViaSmtp = async ({ to, subject, html, attachments }) => {
  * Sends one email. Never throws — every caller here turns a failure into
  * { ok: false, error } instead of losing the record of what happened.
  *
- * Prefers Resend (HTTP) when available because cloud platforms like Render
- * block outbound SMTP. Falls back to Gmail SMTP for local dev.
+ * Transport order is by what actually reaches a family, not by preference:
+ *   1. Gmail API   — HTTPS, sends as the academy's own mailbox, DKIM aligned.
+ *   2. Brevo       — HTTPS, no DNS needed, but can never align a gmail.com From.
+ *   3. Resend      — HTTPS, silently useless until a sending domain is verified.
+ *   4. Gmail SMTP  — works locally, blocked outbound on Render.
+ * Each is skipped unless fully configured, so a half-set transport can never
+ * shadow a working one, and filling in a better one later takes over on its own.
  */
 const send = async ({ to, subject, html, attachments }) => {
   if (!to) return { ok: false, error: 'No recipient email' };
 
+  if (gmailOAuthClient) return sendViaGmailApi({ to, subject, html, attachments });
+  if (BREVO_API_KEY) return sendViaBrevo({ to, subject, html, attachments });
   if (RESEND_API_KEY) return sendViaResend({ to, subject, html, attachments });
   return sendViaSmtp({ to, subject, html, attachments });
-
 };
 
 const IXL_LABELS = {
@@ -311,7 +444,8 @@ export const sendRegistrationBillingEmail = async ({ to, studentName, className,
   });
 };
 
-export const isEmailConfigured = () => Boolean(RESEND_API_KEY) || transporter !== null;
+export const isEmailConfigured = () =>
+  gmailOAuthClient !== null || Boolean(BREVO_API_KEY) || Boolean(RESEND_API_KEY) || transporter !== null;
 
 export const buildNotificationEmailHtml = ({ title, message, actionUrl }) => layout({
   title,

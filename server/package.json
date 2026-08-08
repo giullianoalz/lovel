@@ -14,7 +14,8 @@
     "db:push": "npx prisma db push",
     "db:seed": "node prisma/seed.js",
     "db:studio": "npx prisma studio",
-    "db:backup": "node scripts/backup-db.js"
+    "db:backup": "node scripts/backup-db.js",
+    "gmail:auth": "node scripts/gmail-auth.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",
