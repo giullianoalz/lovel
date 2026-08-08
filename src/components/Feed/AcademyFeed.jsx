@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Megaphone, MapPin, Users, Home, Camera, ClipboardList, Pin, Trash2,
-  ImagePlus, X, Send, Plus, Bell, ChevronLeft, ChevronRight, Film,
+  ImagePlus, X, Send, Plus, Bell, ChevronLeft, ChevronRight, Film, Pencil,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -13,75 +13,209 @@ const CATEGORIES = [
   { value: 'location_change', label: 'Location Change', icon: MapPin, color: '#f97316' },
   { value: 'staff_change', label: 'Staff Update', icon: Users, color: '#7c3aed' },
   { value: 'open_house', label: 'Open House', icon: Home, color: '#16a34a' },
-  { value: 'marketing', label: 'Marketing', icon: Camera, color: '#db2777' },
-  { value: 'registration', label: 'Registration', icon: ClipboardList, color: '#0d9488' },
+  { value: 'photo_update', label: 'Photo Update', icon: Camera, color: '#ec4899' },
+  { value: 'curriculum', label: 'Curriculum', icon: ClipboardList, color: '#0891b2' },
 ];
-
-const categoryMeta = (value) => CATEGORIES.find(c => c.value === value) || CATEGORIES[0];
 
 const AUDIENCES = [
-  { value: 'all', label: 'Everyone' },
-  { value: 'parent', label: 'Parents Only' },
-  { value: 'teacher', label: 'Teachers Only' },
+  { value: 'all',     label: '👥 Everyone' },
+  { value: 'parent',  label: '👨‍👩‍👧 Parents only' },
+  { value: 'teacher', label: '🍎 Staff only' },
 ];
 
-const configuredApiUrl = import.meta.env.VITE_API_URL;
-const isLocalDevDefault = !configuredApiUrl || configuredApiUrl === 'http://localhost:4000/api';
-const BASE_API = isLocalDevDefault ? `http://${window.location.hostname}:4000/api` : configuredApiUrl;
-const MEDIA_BASE = BASE_API.replace(/\/api\/?$/, '');
+const MEDIA_BASE = import.meta.env.VITE_API_URL?.replace('/api', '') ?? '';
 
-const timeAgo = (dateStr) => {
-  const diffMs = new Date() - new Date(dateStr);
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const categoryMeta = (cat) => CATEGORIES.find(c => c.value === cat) || CATEGORIES[0];
+
+const timeAgo = (iso) => {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7)  return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
 };
 
-/** Carousel for a post's photos/videos. Falls back to a single static item when there's just one. */
+/* ── Media carousel ── */
 const MediaCarousel = ({ media, alt }) => {
-  const [index, setIndex] = useState(0);
-  if (!media || media.length === 0) return null;
-
-  const item = media[index];
-  const go = (delta) => setIndex((i) => (i + delta + media.length) % media.length);
-
+  const [idx, setIdx] = useState(0);
+  if (!media?.length) return null;
+  const item = media[idx];
   return (
     <div className="feed-carousel">
       {item.type === 'video' ? (
-        <video className="feed-carousel-media" src={MEDIA_BASE + item.url} controls />
+        <video src={MEDIA_BASE + item.url} controls className="feed-carousel-media" />
       ) : (
-        <img className="feed-carousel-media" src={MEDIA_BASE + item.url} alt={alt} />
+        <img src={MEDIA_BASE + item.url} alt={`${alt} ${idx + 1}`} className="feed-carousel-media" />
       )}
       {media.length > 1 && (
-        <>
-          <button className="feed-carousel-nav prev" onClick={() => go(-1)} aria-label="Previous">
-            <ChevronLeft size={18} />
-          </button>
-          <button className="feed-carousel-nav next" onClick={() => go(1)} aria-label="Next">
-            <ChevronRight size={18} />
-          </button>
-          <div className="feed-carousel-dots">
-            {media.map((_, i) => (
-              <button
-                key={i}
-                className={`feed-carousel-dot ${i === index ? 'active' : ''}`}
-                onClick={() => setIndex(i)}
-                aria-label={`Go to slide ${i + 1}`}
-              />
-            ))}
-          </div>
-          <span className="feed-carousel-count">{index + 1}/{media.length}</span>
-        </>
+        <div className="feed-carousel-controls">
+          <button onClick={() => setIdx(i => (i - 1 + media.length) % media.length)}><ChevronLeft size={16} /></button>
+          <span>{idx + 1} / {media.length}</span>
+          <button onClick={() => setIdx(i => (i + 1) % media.length)}><ChevronRight size={16} /></button>
+        </div>
       )}
     </div>
   );
 };
 
+/* ── Edit Composer (inline) ── */
+const EditComposer = ({ post, onSave, onCancel }) => {
+  const toast = useToast();
+  const fileInputRef = useRef(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    title: post.title,
+    body: post.body,
+    category: post.category || 'general',
+    targetAudience: post.targetAudience || 'all',
+    isPinned: post.isPinned || false,
+  });
+  // Track which existing media to remove
+  const [removeIds, setRemoveIds] = useState([]);
+  // New media to add
+  const [newMedia, setNewMedia] = useState([]);
+
+  const existingMedia = (post.media || []).filter(m => !removeIds.includes(m.id));
+
+  const handleSave = async () => {
+    if (!form.title.trim() || !form.body.trim()) return;
+    setSaving(true);
+    try {
+      const data = new FormData();
+      data.append('title', form.title);
+      data.append('body', form.body);
+      data.append('category', form.category);
+      data.append('targetAudience', form.targetAudience);
+      data.append('isPinned', form.isPinned);
+      removeIds.forEach(id => data.append('removeMediaIds', id));
+      newMedia.forEach(item => data.append('media', item.file));
+
+      const res = await api.patch(`/announcements/${post.id}`, data, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('Post updated!');
+      onSave(res.data.announcement);
+    } catch {
+      toast.error('Could not update the post.');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="feed-composer feed-edit-composer">
+      <div className="feed-edit-composer-header">
+        <Pencil size={15} /> <span>Editing post</span>
+        <button className="feed-edit-close-btn" onClick={onCancel}><X size={15} /></button>
+      </div>
+
+      <input
+        className="composer-title-input"
+        value={form.title}
+        onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+        placeholder="Headline"
+      />
+      <textarea
+        className="composer-body-input"
+        rows={4}
+        value={form.body}
+        onChange={e => setForm(f => ({ ...f, body: e.target.value }))}
+        placeholder="Details..."
+      />
+
+      {/* Existing media — with individual remove buttons */}
+      {existingMedia.length > 0 && (
+        <div className="composer-media-grid">
+          {existingMedia.map(m => (
+            <div key={m.id} className="composer-media-thumb">
+              {m.type === 'video'
+                ? <video src={MEDIA_BASE + m.url} muted />
+                : <img src={MEDIA_BASE + m.url} alt="media" />}
+              {m.type === 'video' && <span className="composer-media-video-tag"><Film size={12} /></span>}
+              <button onClick={() => setRemoveIds(prev => [...prev, m.id])} title="Remove"><X size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* New media to add */}
+      {newMedia.length > 0 && (
+        <div className="composer-media-grid">
+          {newMedia.map((item, idx) => (
+            <div key={idx} className="composer-media-thumb composer-media-new">
+              {item.type === 'video'
+                ? <video src={item.preview} muted />
+                : <img src={item.preview} alt={`New ${idx + 1}`} />}
+              {item.type === 'video' && <span className="composer-media-video-tag"><Film size={12} /></span>}
+              <span className="composer-media-new-tag">New</span>
+              <button onClick={() => setNewMedia(prev => prev.filter((_, i) => i !== idx))}><X size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="composer-footer-row">
+        <button
+          className="composer-image-btn"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={existingMedia.length + newMedia.length >= 10}
+        >
+          <ImagePlus size={16} /> Add Photos / Video
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,video/*"
+          multiple
+          hidden
+          onChange={e => {
+            const files = Array.from(e.target.files || []);
+            setNewMedia(prev => [
+              ...prev,
+              ...files.slice(0, 10 - existingMedia.length - prev.length).map(f => ({
+                file: f,
+                preview: URL.createObjectURL(f),
+                type: f.type.startsWith('video/') ? 'video' : 'image',
+              })),
+            ]);
+          }}
+        />
+        <select
+          className="composer-audience-select"
+          value={form.targetAudience}
+          onChange={e => setForm(f => ({ ...f, targetAudience: e.target.value }))}
+        >
+          {AUDIENCES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+        </select>
+        <label className="composer-pin-toggle">
+          <input
+            type="checkbox"
+            checked={form.isPinned}
+            onChange={e => setForm(f => ({ ...f, isPinned: e.target.checked }))}
+          />
+          <Pin size={13} /> Pin to top
+        </label>
+      </div>
+
+      <div className="composer-actions">
+        <button className="composer-cancel-btn" onClick={onCancel}>Cancel</button>
+        <button
+          className="composer-submit-btn"
+          onClick={handleSave}
+          disabled={saving || !form.title.trim() || !form.body.trim()}
+        >
+          <Send size={14} /> {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+/* ── Main Feed ── */
 const AcademyFeed = () => {
   const { user, hasRole } = useAuth();
   const toast = useToast();
@@ -91,12 +225,33 @@ const AcademyFeed = () => {
   const [loading, setLoading] = useState(true);
   const [composerOpen, setComposerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [editingPost, setEditingPost] = useState(null); // post object being edited
   const fileInputRef = useRef(null);
 
   const [form, setForm] = useState({
     title: '', body: '', category: 'general', targetAudience: 'all', isPinned: false,
   });
   const [mediaItems, setMediaItems] = useState([]); // [{ file, preview, type }]
+
+  const clearComposer = () => {
+    setForm({ title: '', body: '', category: 'general', targetAudience: 'all', isPinned: false });
+    setMediaItems([]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleMediaSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const next = files.slice(0, 10 - mediaItems.length).map(file => ({
+      file,
+      preview: URL.createObjectURL(file),
+      type: file.type.startsWith('video/') ? 'video' : 'image',
+    }));
+    setMediaItems(prev => [...prev, ...next]);
+    e.target.value = '';
+  };
+
+  const removeMediaItem = (idx) => setMediaItems(prev => prev.filter((_, i) => i !== idx));
 
   const loadPosts = async () => {
     setLoading(true);
@@ -117,27 +272,15 @@ const AcademyFeed = () => {
 
   useEffect(() => { loadPosts(); }, []);
 
-  const handleMediaSelect = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    const next = files.slice(0, 10 - mediaItems.length).map(file => ({
-      file,
-      preview: URL.createObjectURL(file),
-      type: file.type.startsWith('video/') ? 'video' : 'image',
-    }));
-    setMediaItems(prev => [...prev, ...next]);
-    e.target.value = '';
-  };
-
-  const removeMediaItem = (idx) => {
-    setMediaItems(prev => prev.filter((_, i) => i !== idx));
-  };
-
-  const clearComposer = () => {
-    setForm({ title: '', body: '', category: 'general', targetAudience: 'all', isPinned: false });
-    setMediaItems([]);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
+  useEffect(() => {
+    // Mark visible posts as read once loaded (lightweight — parents/teachers see it, admin doesn't need to)
+    posts.forEach(p => {
+      if (!p.isRead) {
+        api.post(`/announcements/${p.id}/read`).catch(() => {});
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts.length]);
 
   const handleSubmit = async () => {
     if (!form.title.trim() || !form.body.trim()) return;
@@ -163,6 +306,7 @@ const AcademyFeed = () => {
   };
 
   const handleDelete = async (id) => {
+    if (!confirm('Are you sure you want to delete this post?')) return;
     try {
       await api.delete(`/announcements/${id}`);
       setPosts(prev => prev.filter(p => p.id !== id));
@@ -172,15 +316,10 @@ const AcademyFeed = () => {
     }
   };
 
-  useEffect(() => {
-    // Mark visible posts as read once loaded (lightweight — parents/teachers see it, admin doesn't need to)
-    posts.forEach(p => {
-      if (!p.isRead) {
-        api.post(`/announcements/${p.id}/read`).catch(() => {});
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [posts.length]);
+  const handleEditSave = (updated) => {
+    setPosts(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p));
+    setEditingPost(null);
+  };
 
   return (
     <div className="feed-container">
@@ -189,7 +328,7 @@ const AcademyFeed = () => {
           <h1><Megaphone size={24} /> Announcements</h1>
           <p>Location changes, staff updates, open houses, and news from the whole team — in one place.</p>
         </div>
-        {canPost && !composerOpen && (
+        {canPost && !composerOpen && !editingPost && (
           <button className="feed-new-post-btn" onClick={() => setComposerOpen(true)}>
             <Plus size={16} /> New Post
           </button>
@@ -290,7 +429,9 @@ const AcademyFeed = () => {
           posts.map(post => {
             const cat = categoryMeta(post.category);
             const Icon = cat.icon;
-            const canDelete = hasRole('ADMIN') || post.authorId === user?.id;
+            const canEdit = hasRole('ADMIN') || post.authorId === user?.id;
+            const canDelete = canEdit;
+            const isEditing = editingPost?.id === post.id;
             return (
               <div key={post.id} className={`feed-card ${post.isPinned ? 'pinned' : ''}`}>
                 {post.isPinned && <div className="feed-pinned-tag"><Pin size={12} /> Pinned</div>}
@@ -307,20 +448,41 @@ const AcademyFeed = () => {
                       </div>
                     </div>
                   </div>
-                  {canDelete && (
-                    <button className="feed-delete-btn" onClick={() => handleDelete(post.id)} title="Remove post">
-                      <Trash2 size={15} />
-                    </button>
+                  {canEdit && (
+                    <div className="feed-card-actions">
+                      <button
+                        className="feed-edit-btn"
+                        onClick={() => setEditingPost(isEditing ? null : post)}
+                        title="Edit post"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      {canDelete && (
+                        <button className="feed-delete-btn" onClick={() => handleDelete(post.id)} title="Remove post">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
 
-                <h3 className="feed-card-title">{post.title}</h3>
-                <p className="feed-card-body">{post.body}</p>
+                {isEditing ? (
+                  <EditComposer
+                    post={post}
+                    onSave={handleEditSave}
+                    onCancel={() => setEditingPost(null)}
+                  />
+                ) : (
+                  <>
+                    <h3 className="feed-card-title">{post.title}</h3>
+                    <p className="feed-card-body">{post.body}</p>
 
-                {post.media && post.media.length > 0 ? (
-                  <MediaCarousel media={post.media} alt={post.title} />
-                ) : post.imageUrl && (
-                  <img className="feed-card-image" src={MEDIA_BASE + post.imageUrl} alt={post.title} />
+                    {post.media && post.media.length > 0 ? (
+                      <MediaCarousel media={post.media} alt={post.title} />
+                    ) : post.imageUrl && (
+                      <img className="feed-card-image" src={MEDIA_BASE + post.imageUrl} alt={post.title} />
+                    )}
+                  </>
                 )}
               </div>
             );

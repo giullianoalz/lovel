@@ -10,6 +10,7 @@ import {
   listAnnouncements,
   markAnnouncementRead,
   deleteAnnouncement,
+  updateAnnouncement,
 } from '../controllers/announcements.controller.js';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'announcements');
@@ -46,6 +47,9 @@ router.post('/', authenticate, requireRole('ADMIN'), upload.array('media', 10), 
 
 // POST /api/announcements/:id/read
 router.post('/:id/read', authenticate, markAnnouncementRead);
+
+// PATCH /api/announcements/:id — admin or author only (edit text + add/remove media)
+router.patch('/:id', authenticate, requireRole('ADMIN'), upload.array('media', 10), updateAnnouncement);
 
 // DELETE /api/announcements/:id — author or admin only
 router.delete('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), deleteAnnouncement);

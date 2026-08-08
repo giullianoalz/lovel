@@ -405,6 +405,73 @@
   border-radius: 10px;
 }
 
+/* ---- Edit Composer ---- */
+.feed-edit-composer {
+  border: 1px solid #6366f1;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.15);
+}
+
+.feed-edit-composer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6366f1;
+  margin-bottom: 12px;
+}
+
+.feed-edit-close-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.feed-edit-close-btn:hover {
+  background: #f1f5f9;
+  color: var(--text-main);
+}
+
+.composer-media-new-tag {
+  position: absolute;
+  top: 4px; left: 4px;
+  background: #10b981;
+  color: white;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.composer-media-new {
+  border: 2px dashed #10b981;
+}
+
+.feed-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.feed-edit-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.feed-edit-btn:hover { background: #eff6ff; color: #3b82f6; }
+
 @media (max-width: 640px) {
   .feed-container { padding: 16px; }
   .feed-header { flex-direction: column; }

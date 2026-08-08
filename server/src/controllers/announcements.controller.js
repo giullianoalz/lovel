@@ -96,6 +96,60 @@ export const deleteAnnouncement = async (req, res, next) => {
   }
 };
 
+export const updateAnnouncement = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const existing = await prisma.announcement.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Not Found' });
+
+    // Only admins or the original author may edit.
+    const isAuthor = existing.authorId === req.user.id;
+    if (!hasRole(req.user, 'ADMIN') && !isAuthor) {
+      return res.status(403).json({ error: 'Forbidden', message: 'You can only edit your own posts.' });
+    }
+
+    const { title, body, category, targetAudience, isPinned, removeMediaIds } = req.body;
+    const canPin = hasRole(req.user, 'ADMIN');
+    const newFiles = req.files || [];
+    const isVideo = (mimetype) => mimetype.startsWith('video/');
+
+    // Optionally remove specific existing media items.
+    if (removeMediaIds) {
+      const ids = Array.isArray(removeMediaIds) ? removeMediaIds : [removeMediaIds];
+      await prisma.announcementMedia.deleteMany({ where: { id: { in: ids }, announcementId: id } });
+    }
+
+    const updated = await prisma.announcement.update({
+      where: { id },
+      data: {
+        ...(title       !== undefined && { title }),
+        ...(body        !== undefined && { body }),
+        ...(category    !== undefined && { category }),
+        ...(targetAudience !== undefined && { targetAudience }),
+        ...(isPinned    !== undefined && canPin && { isPinned: isPinned === 'true' || isPinned === true }),
+        ...(newFiles.length > 0 && {
+          media: {
+            create: newFiles.map((file, i) => ({
+              url: `/uploads/announcements/${file.filename}`,
+              type: isVideo(file.mimetype) ? 'video' : 'image',
+              position: i + 1000, // append after existing
+            })),
+          },
+        }),
+      },
+      include: {
+        author: { select: { fullName: true, role: true } },
+        media: { orderBy: { position: 'asc' } },
+      },
+    });
+
+    invalidate('announcements:*');
+    res.json({ message: 'Announcement updated.', announcement: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const listAnnouncements = async (req, res, next) => {
   try {
     const userId = req.user.id;
