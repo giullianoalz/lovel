@@ -267,6 +267,7 @@ const CalendarView = () => {
   const canEditSeries = hasRole('ADMIN');
 
   // Advanced Search States
+  const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const [isStudentDropdownOpen, setIsStudentDropdownOpen] = useState(false);
@@ -351,9 +352,9 @@ const CalendarView = () => {
   const [attendeeSearchText, setAttendeeSearchText] = useState('');
   const attendeeSectionRef = useRef(null);
   const addEventRef = useRef(null);
+  const viewMenuRef = useRef(null);
   
-
-  const [newEventForm, setNewEventForm] = useState({
+  // Create refs for filter sectionsrm, setNewEventForm] = useState({
     // New Top-Level Fields
     title: '',
     topLevelType: 'Tutoring', // 'Tutoring' or 'Class'
@@ -708,6 +709,11 @@ const CalendarView = () => {
       if (addEventRef.current && !addEventRef.current.contains(event.target)) {
         setIsAddEventDropdownOpen(false);
       }
+
+      // Close View menu if click is outside
+      if (viewMenuRef.current && !viewMenuRef.current.contains(event.target)) {
+        setIsViewMenuOpen(false);
+      }
       
       if (searchRef.current && !searchRef.current.contains(event.target)) {
          return;
@@ -729,7 +735,7 @@ const CalendarView = () => {
       }
     };
 
-    if (isSearchOpen || isAddEventDropdownOpen || isAttendeeDropdownOpen) {
+    if (isSearchOpen || isAddEventDropdownOpen || isAttendeeDropdownOpen || isViewMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('touchstart', handleClickOutside);
     }
@@ -738,7 +744,7 @@ const CalendarView = () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
     };
-  }, [isSearchOpen, isStudentDropdownOpen, isTutorDropdownOpen, isCategoryDropdownOpen, isAddEventDropdownOpen, isAttendeeDropdownOpen]);
+  }, [isSearchOpen, isStudentDropdownOpen, isTutorDropdownOpen, isCategoryDropdownOpen, isAddEventDropdownOpen, isAttendeeDropdownOpen, isViewMenuOpen]);
 
   // The jump-to-date popover lives outside the search wrapper, so it closes on
   // its own click-away (and on Escape, like the rest of the overlays).
@@ -1626,14 +1632,44 @@ const CalendarView = () => {
           </div>
 
           <div className="calendar-actions-right">
-            <div className="view-toggle-new">
-              <span className="view-icon"><CalendarIcon size={14} /></span>
-              <select value={view} onChange={(e) => setView(e.target.value)} className="view-select">
-                <option value="month">Month</option>
-                <option value="list">Week (List)</option>
-                <option value="week">Week (Agenda)</option>
-                <option value="day">Day</option>
-              </select>
+            <div className="view-toggle-new" ref={viewMenuRef} style={{ position: 'relative' }}>
+              <button 
+                className="view-select-btn"
+                onClick={() => setIsViewMenuOpen(!isViewMenuOpen)}
+              >
+                <CalendarIcon size={14} className="view-icon-only" />
+                <span>
+                  {view === 'month' ? 'Month' : view === 'list' ? 'Week (List)' : view === 'week' ? 'Week (Agenda)' : 'Day'}
+                </span>
+                <span style={{ fontSize: '10px' }}>▼</span>
+              </button>
+              
+              {isViewMenuOpen && (
+                <div className="view-dropdown-menu">
+                  <div className={`view-dropdown-item ${view === 'month' ? 'active' : ''}`} onClick={() => { setView('month'); setIsViewMenuOpen(false); }}>
+                    <div className="check-space">{view === 'month' && <CheckCircle2 size={12} className="check-icon" />}</div> Month
+                  </div>
+                  
+                  <div className={`view-dropdown-group ${view.startsWith('week') ? 'active' : ''}`}>
+                    <div className="view-dropdown-group-title">
+                      <div className="check-space">{view.startsWith('week') && <CheckCircle2 size={12} className="check-icon" />}</div>
+                      Week <span className="arrow">▶</span>
+                    </div>
+                    <div className="view-dropdown-submenu">
+                       <div className={`view-dropdown-item ${view === 'week' ? 'active' : ''}`} onClick={() => { setView('week'); setIsViewMenuOpen(false); }}>
+                         <div className="check-space">{view === 'week' && <CheckCircle2 size={12} className="check-icon" />}</div> Agenda
+                       </div>
+                       <div className={`view-dropdown-item ${view === 'list' ? 'active' : ''}`} onClick={() => { setView('list'); setIsViewMenuOpen(false); }}>
+                         <div className="check-space">{view === 'list' && <CheckCircle2 size={12} className="check-icon" />}</div> List
+                       </div>
+                    </div>
+                  </div>
+
+                  <div className={`view-dropdown-item ${view === 'day' ? 'active' : ''}`} onClick={() => { setView('day'); setIsViewMenuOpen(false); }}>
+                    <div className="check-space">{view === 'day' && <CheckCircle2 size={12} className="check-icon" />}</div> Day
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="filter-wrapper" style={{ position: 'relative' }} ref={searchRef}>

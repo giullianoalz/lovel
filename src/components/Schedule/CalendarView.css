@@ -194,23 +194,99 @@
   overflow: hidden;
 }
 
-.view-icon {
-  padding: 6px 10px;
-  color: var(--text-muted);
-  border-right: 1px solid var(--border-light);
+/* Custom View Dropdown */
+.view-select-btn {
   display: flex;
   align-items: center;
-}
-
-.view-select {
+  gap: 8px;
+  background: transparent;
   border: none;
-  padding: 6px 30px 6px 12px;
+  padding: 6px 12px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-main);
-  outline: none;
   cursor: pointer;
-  background: transparent;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.view-select-btn:hover {
+  background: #f1f5f9;
+}
+
+.view-icon-only {
+  color: var(--text-muted);
+}
+
+.view-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: white;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 6px 0;
+  min-width: 170px;
+  z-index: 200;
+}
+
+.view-dropdown-item, .view-dropdown-group-title {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px 8px 12px;
+  font-size: 13px;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.view-dropdown-item:hover, .view-dropdown-group-title:hover {
+  background: #f8fafc;
+}
+
+.view-dropdown-item.active {
+  background: #f1f5f9;
+  font-weight: 600;
+}
+
+.check-space {
+  width: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-right: 6px;
+}
+
+.check-icon {
+  color: var(--primary);
+}
+
+.view-dropdown-group {
+  position: relative;
+}
+
+.view-dropdown-group-title .arrow {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.view-dropdown-submenu {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: calc(100% + 2px); /* Pop out to the left side since the dropdown is right-aligned */
+  background: white;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 6px 0;
+  min-width: 140px;
+}
+
+.view-dropdown-group:hover .view-dropdown-submenu {
+  display: block;
 }
 
 .options-btn {
