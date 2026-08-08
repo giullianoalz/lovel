@@ -1439,8 +1439,8 @@ const CalendarView = () => {
   const { startOffset, daysInMonth } = getMonthDays();
   const monthCells = Array.from({ length: 42 });
 
-  // Time parsing for Day View Timeline (8 AM to 6 PM)
-  const START_HOUR = 8;
+  // Time parsing for Day View Timeline (12 AM to 12 AM)
+  const START_HOUR = 0;
   const PIXELS_PER_MINUTE = 1.6; // Approximates ~96px per hour (clear distinction)
 
   const parseTimeToPix = (timeStr) => {
@@ -2079,68 +2079,105 @@ const CalendarView = () => {
 
         {view === 'week' && (
           <div className="calendar-scroll-wrapper">
-            <div className="agenda-week-grid">
-              {weekDates.map((date, idx) => {
-                const isToday = toISODate(date) === toISODate(new Date());
-                // Agenda layout: each day lists its events top-to-bottom, ordered
-                // by start time (no time-grid positioning), TutorBird-style.
-                // Vacation/sick chips have no real time, so they float to the top.
-                const dayEvents = [
-                  ...events.filter(e => e.dateStr === toISODate(date)),
-                  ...staffEvents.filter(e => e.dateStr === toISODate(date)),
-                ].sort((a, b) => {
-                  const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
-                  const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
-                  return pa - pb;
-                });
-
-                return (
-                  <div key={idx} className={`agenda-day-col ${isToday ? 'today' : ''}`}>
-                    <div className="agenda-day-header">
-                      <span className="agenda-day-name">{WEEK_DAYS[idx]}</span>
-                      <span className="agenda-day-num">{date.getDate()}</span>
-                    </div>
-
-                    <div
-                      className="agenda-day-body"
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={e => handleDropOnWeekDay(e, date)}
-                    >
-                      {dayEvents.length === 0 ? (
-                        <div className="agenda-empty">—</div>
-                      ) : (
-                        dayEvents.map(item => {
-                          const isStaff = !!item.kind;
-                          return (
-                            <div
-                              key={item.id}
-                              className={`agenda-event ${isStaff ? item.kind : item.subject}`}
-                              style={{ cursor: isStaff ? 'default' : (hasRole('ADMIN') ? 'grab' : 'pointer') }}
-                              title={isStaff ? `${item.title} · ${item.time}` : `${item.title} · ${item.time} · ${item.teacher}`}
-                              draggable={!isStaff && hasRole('ADMIN')}
-                              onDragStart={!isStaff ? (evt) => handleDragStart(evt, item) : undefined}
-                              onClick={!isStaff ? () => handleEventClick(item) : undefined}
-                            >
-                              <span className="agenda-ev-time">{item.time}</span>
-                              <div className="agenda-ev-title">
-                                {!isStaff && <CheckCircle2 size={13} className="agenda-ev-check" />}
-                                <strong>{item.title}</strong>
-                              </div>
-                              {!isStaff && (
-                                <span className="agenda-ev-desc">
-                                  {item.type === 'Virtual' ? <Video size={11} /> : <MapPin size={11} />}
-                                  <span>{item.teacher.replace('Prof. ', '')}{item.students > 0 ? ` · ${item.students} student${item.students > 1 ? 's' : ''}` : ''}</span>
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+             <div className="week-schedule-grid">
+                {/* Time Axis */}
+                <div className="time-axis">
+                  <div className="time-axis-header">GMT-5</div>
+                  {Array.from({ length: 24 }).map((_, i) => {
+                    const hour = START_HOUR + i;
+                    const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
+                    return (
+                      <div key={i} className="time-label" style={{ height: `${60 * PIXELS_PER_MINUTE}px` }}>
+                        <span>{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {/* 7 Days Columns */}
+                <div className="week-days-container">
+                  {weekDates.map((date, idx) => {
+                    const isToday = toISODate(date) === toISODate(new Date());
+                    const dayEvents = events.filter(e => e.dateStr === toISODate(date));
+                    const staffDayEvents = staffEvents.filter(e => e.dateStr === toISODate(date));
+                    
+                    // Staff events like PTO / Holidays / All Day go in the header
+                    const allDayEvents = staffDayEvents.filter(e => e.kind === 'pto' || e.kind === 'holiday' || (e.time && e.time.toLowerCase().includes('all-day')));
+                    
+                    // Regular events + meetings go in the grid
+                    const gridEvents = [
+                       ...dayEvents,
+                       ...staffDayEvents.filter(e => e.kind !== 'pto' && e.kind !== 'holiday' && !(e.time && e.time.toLowerCase().includes('all-day')))
+                    ];
+                    
+                    const layout = layoutOverlaps(gridEvents);
+                    
+                    return (
+                      <div key={idx} className={`week-day-col ${isToday ? 'today' : ''}`}>
+                         <div className="week-day-header">
+                           <div className="week-day-name">{WEEK_DAYS[idx]}</div>
+                           <div className="week-day-num">{date.getDate()}</div>
+                           <div className="week-day-allday">
+                             {allDayEvents.map(item => (
+                               <div key={item.id} className={`mini-event ${item.kind || item.subject}`} title={item.title}>
+                                 <span className="mini-event-title">{item.title}</span>
+                               </div>
+                             ))}
+                           </div>
+                         </div>
+                         <div 
+                           className="week-day-body"
+                           onDragOver={e => e.preventDefault()}
+                           onDrop={e => handleDropOnWeekDay(e, date)}
+                         >
+                           {/* Horizontal lines */}
+                           {Array.from({ length: 24 }).map((_, i) => (
+                              <div key={i} className="grid-hour-line" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }} />
+                           ))}
+                           
+                           {/* Events */}
+                           {gridEvents.map(item => {
+                              const isStaff = !!item.kind;
+                              const { top, height } = getPositionStyles(item.time);
+                              const { left, width } = layout.get(item);
+                              const pxHeight = parseFloat(height.replace('px',''));
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`agenda-event ${isStaff ? item.kind : item.subject}`}
+                                  style={{
+                                    position: 'absolute',
+                                    top,
+                                    height,
+                                    left,
+                                    width,
+                                    zIndex: 10,
+                                    cursor: isStaff ? 'default' : (hasRole('ADMIN') ? 'grab' : 'pointer')
+                                  }}
+                                  title={isStaff ? `${item.title} · ${item.time}` : `${item.title} · ${item.time} · ${item.teacher}`}
+                                  draggable={!isStaff && hasRole('ADMIN')}
+                                  onDragStart={!isStaff ? (evt) => handleDragStart(evt, item) : undefined}
+                                  onClick={!isStaff ? () => handleEventClick(item) : undefined}
+                                >
+                                  <span className="agenda-ev-time">{item.time}</span>
+                                  <div className="agenda-ev-title">
+                                    {!isStaff && <CheckCircle2 size={13} className="agenda-ev-check" />}
+                                    <strong>{item.title}</strong>
+                                  </div>
+                                  {!isStaff && pxHeight > 40 && ( // hide desc if very small block
+                                    <span className="agenda-ev-desc" style={{ marginTop: 2 }}>
+                                      <span>{item.teacher.replace('Prof. ', '')}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                           })}
+                         </div>
+                      </div>
+                    );
+                  })}
+                </div>
+             </div>
           </div>
         )}
 
@@ -2167,9 +2204,9 @@ const CalendarView = () => {
                 {/* Time Axis */}
                 <div className="time-axis">
                   <div className="time-axis-header">GMT-5</div>
-                  {Array.from({ length: 11 }).map((_, i) => {
+                  {Array.from({ length: 24 }).map((_, i) => {
                     const hour = START_HOUR + i;
-                    const label = hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
+                    const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
                     return (
                       <div key={i} className="time-label" style={{ height: `${60 * PIXELS_PER_MINUTE}px` }}>
                         <span>{label}</span>
