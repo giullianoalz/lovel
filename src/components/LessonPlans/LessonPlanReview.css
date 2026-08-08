@@ -199,15 +199,20 @@
 .lpr-supply-group-header.purchased { background: var(--primary-light); color: #166534; }
 
 .lpr-supply-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 2fr 3fr auto;
+  gap: 16px;
   align-items: center;
-  justify-content: space-between;
   padding: 12px 20px;
   border-bottom: 1px solid var(--bg-main);
 }
 
 .lpr-supply-row:last-child {
   border-bottom: none;
+}
+
+.lpr-supply-info {
+  min-width: 0;
 }
 
 .lpr-supply-name {
@@ -228,22 +233,34 @@
 .lpr-supply-meta {
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
+}
+
+.lpr-supply-activity {
+  min-width: 0;
 }
 
 .lpr-supply-context {
   font-size: 12px;
   color: var(--text-main);
   background: var(--bg-main);
-  padding: 6px 10px;
-  border-radius: 6px;
-  margin-top: 4px;
-  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lpr-supply-context strong {
   font-weight: 600;
   color: var(--text-muted);
+}
+
+.lpr-supply-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .lpr-buy-btn {

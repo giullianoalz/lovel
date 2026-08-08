@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, DollarSign } from 'lucide-react';
+import { startOfWeek } from 'date-fns';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
 import './LessonPlanReview.css';
@@ -86,11 +87,18 @@ const LessonPlanReview = () => {
   const pendingCount = plans.filter(p => p.status === 'SUBMITTED').length;
 
   const supplyItemsByWeek = supplyItems.reduce((acc, item) => {
-    const week = item.lessonPlan?.weekOf;
-    const weekLabel = week 
-      ? `Week of ${new Date(week).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}` 
-      : 'General / Unscheduled';
-    const weekKey = week ? new Date(week).getTime() : 0;
+    let weekLabel = 'General / Unscheduled';
+    let weekKey = 0;
+
+    if (item.lessonPlan?.weekOf) {
+      // Snap any date to the Monday of that week
+      const date = new Date(item.lessonPlan.weekOf);
+      // We pass the raw UTC date and get the local Monday, but wait
+      // `weekOf` is typically stored as a date string. Let's ensure it's a Monday:
+      const monday = startOfWeek(date, { weekStartsOn: 1 });
+      weekLabel = `Week of ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
+      weekKey = monday.getTime();
+    }
 
     if (!acc[weekKey]) {
       acc[weekKey] = { label: weekLabel, pending: [], purchased: [] };
@@ -214,19 +222,25 @@ const LessonPlanReview = () => {
                             <div className="lpr-supply-meta">
                               {item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName} {item.dayNeeded && `· Needed ${item.dayNeeded}`}
                             </div>
+                          </div>
+                          
+                          <div className="lpr-supply-activity" title={item.lessonPlan?.mainActivity || ''}>
                             {item.lessonPlan?.mainActivity && (
                               <div className="lpr-supply-context">
                                 <strong>Activity:</strong> {item.lessonPlan.mainActivity}
                               </div>
                             )}
                           </div>
-                          <button
-                            onClick={() => handleMarkPurchased(item)}
-                            disabled={purchasingId === item.id}
-                            className="lpr-buy-btn"
-                          >
-                            <CheckCircle size={13} /> {purchasingId === item.id ? 'Saving...' : 'Mark Purchased'}
-                          </button>
+
+                          <div className="lpr-supply-actions">
+                            <button
+                              onClick={() => handleMarkPurchased(item)}
+                              disabled={purchasingId === item.id}
+                              className="lpr-buy-btn"
+                            >
+                              <CheckCircle size={13} /> {purchasingId === item.id ? 'Saving...' : 'Mark Purchased'}
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -242,17 +256,23 @@ const LessonPlanReview = () => {
                           <div className="lpr-supply-info">
                             <div className="lpr-supply-name purchased">{item.itemName} × {item.quantity}</div>
                             <div className="lpr-supply-meta">{item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName}</div>
+                          </div>
+
+                          <div className="lpr-supply-activity" title={item.lessonPlan?.mainActivity || ''}>
                             {item.lessonPlan?.mainActivity && (
                               <div className="lpr-supply-context">
                                 <strong>Activity:</strong> {item.lessonPlan.mainActivity}
                               </div>
                             )}
                           </div>
-                          {item.cost != null && (
-                            <span className="lpr-cost">
-                              <DollarSign size={13} /> {Number(item.cost).toFixed(2)}
-                            </span>
-                          )}
+
+                          <div className="lpr-supply-actions">
+                            {item.cost != null && (
+                              <span className="lpr-cost">
+                                <DollarSign size={13} /> {Number(item.cost).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
