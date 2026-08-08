@@ -388,6 +388,7 @@
 .pp-invoice.overdue { border-left: 4px solid #ef4444; }
 .pp-invoice.paid    { border-left: 4px solid #22c55e; }
 .pp-invoice.sent    { border-left: 4px solid #f59e0b; }
+.pp-invoice.partial { border-left: 4px solid #3b82f6; }
 
 .pp-invoice-main {
   display: flex; align-items: center; justify-content: space-between;
@@ -403,6 +404,7 @@
 }
 .pp-inv-status.paid    { background: #dcfce7; color: #15803d; }
 .pp-inv-status.sent    { background: #fef9c3; color: #854d0e; }
+.pp-inv-status.partial { background: #dbeafe; color: #1d4ed8; }
 .pp-inv-status.overdue { background: #fee2e2; color: #dc2626; }
 .pp-inv-status.draft   { background: #f1f5f9; color: #64748b; }
 .pp-inv-status.void    { background: #f1f5f9; color: #94a3b8; }

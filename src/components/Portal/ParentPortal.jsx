@@ -340,6 +340,7 @@ const PickupModal = ({ children, onClose, onCreated }) => {
 const STATUS_META = {
   DRAFT:    { label: 'Draft',    cls: 'draft'    },
   SENT:     { label: 'Pending',  cls: 'sent'     },
+  PARTIAL:  { label: 'Partial',  cls: 'partial'  },
   PAID:     { label: 'Paid',     cls: 'paid'     },
   OVERDUE:  { label: 'Overdue',  cls: 'overdue'  },
   VOID:     { label: 'Voided',   cls: 'void'     },
@@ -348,7 +349,10 @@ const STATUS_META = {
 const InvoiceRow = ({ inv, onPay, paying }) => {
   const [open, setOpen] = useState(false);
   const meta = STATUS_META[inv.status] || { label: inv.status, cls: 'draft' };
-  const canPay = ['SENT', 'OVERDUE'].includes(inv.status) && inv.amountDue > 0;
+  // A PARTIAL invoice (e.g. a deposit charge that absorbed existing account
+  // credit) still owes a balance and must stay payable, same as SENT/OVERDUE —
+  // only PAID/VOID/DRAFT are not.
+  const canPay = ['SENT', 'PARTIAL', 'OVERDUE'].includes(inv.status) && inv.amountDue > 0;
 
   return (
     <div className={`pp-invoice ${meta.cls}`}>
