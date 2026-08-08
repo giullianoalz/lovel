@@ -1,8 +1,15 @@
 import { readFile } from 'fs/promises';
+import { setDefaultResultOrder } from 'dns';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import nodemailer from 'nodemailer';
 import { formatCurrency } from '../utils/helpers.js';
+
+// Node 17+ changed the default DNS resolution order to use the OS resolver,
+// which often tries IPv6 first. On cloud platforms like Render the IPv6 route
+// to smtp.gmail.com silently hangs, causing "Connection timeout". Forcing
+// IPv4-first makes the SMTP connection use the IPv4 address every time.
+setDefaultResultOrder('ipv4first');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
