@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DOMPurify from 'dompurify';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, MessageSquare, Calendar as CalendarIcon,
   Check, Users, FileText, Calendar, Shell, AlertTriangle, Stethoscope,
@@ -41,6 +41,12 @@ const fmtTime = formatTimeOfDay;
 const TeacherPortal = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Admins can jump straight into another teacher's day from the calendar —
+  // ?teacherId=<id>&sessionId=<id> lands on that teacher's roster with the
+  // matching session already expanded, ready to take attendance.
+  const viewTeacherId = searchParams.get('teacherId');
+  const jumpToSessionId = searchParams.get('sessionId');
   const [activeTab, setActiveTab] = useState('session');
 
   const [loading, setLoading] = useState(true);
@@ -48,11 +54,12 @@ const TeacherPortal = () => {
   const [toast, setToast] = useState(null);
 
   /* ── Portal data ── */
-  const [selectedDate, setSelectedDate] = useState(todayString());
+  const [selectedDate, setSelectedDate] = useState(searchParams.get('date') || todayString());
   const [dayLoading, setDayLoading] = useState(false); // switching days, not first paint
   const [schedule, setSchedule] = useState([]);
   const [selectedClassIdx, setSelectedClassIdx] = useState(null);
   const [myClasses, setMyClasses] = useState([]); // all of the teacher's classes, not just today's schedule
+  const [viewingTeacher, setViewingTeacher] = useState(null); // set when an admin is browsing another teacher's day
 
   /* ── Emergency ── */
   const [emergencyOpen, setEmergencyOpen] = useState(false);
@@ -136,9 +143,18 @@ const TeacherPortal = () => {
     if (firstLoad.current) setLoading(true); else setDayLoading(true);
     setScheduleError(null);
     try {
-      const portalRes = await api.get('/portal/teacher', { params: { date: selectedDate } });
-      setSchedule(portalRes.data.schedule || []);
-      setSelectedClassIdx(null);
+      const params = { date: selectedDate };
+      if (viewTeacherId) params.teacherId = viewTeacherId;
+      const portalRes = await api.get('/portal/teacher', { params });
+      const daySchedule = portalRes.data.schedule || [];
+      setSchedule(daySchedule);
+      setViewingTeacher(portalRes.data.viewingTeacher || null);
+      // Deep link from the calendar: land with the matching session already
+      // open instead of making the admin click through the day's list again.
+      const jumpIdx = jumpToSessionId
+        ? daySchedule.findIndex((cls) => cls.sessionId === jumpToSessionId)
+        : -1;
+      setSelectedClassIdx(jumpIdx >= 0 ? jumpIdx : null);
     } catch (err) {
       setScheduleError(err.userMessage || 'Could not load your schedule.');
     } finally {
@@ -148,14 +164,14 @@ const TeacherPortal = () => {
     }
     api.get('/announcements').then(r => setAnnouncements(r.data.announcements || [])).catch(() => {});
     api.get('/lesson-plans').then(r => setLessonPlans(r.data.lessonPlans || [])).catch(() => {});
-  }, [selectedDate]);
+  }, [selectedDate, viewTeacherId, jumpToSessionId]);
 
   useEffect(() => {
     if (!user?.id) return;
-    api.get('/classes', { params: { teacherId: user.id } })
+    api.get('/classes', { params: { teacherId: viewTeacherId || user.id } })
       .then(r => setMyClasses(r.data.classes || []))
       .catch(() => {});
-  }, [user?.id]);
+  }, [user?.id, viewTeacherId]);
 
   useEffect(() => { loadPortalData(); }, [loadPortalData]);
 
@@ -516,6 +532,17 @@ const TeacherPortal = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── ADMIN VIEWING BANNER ─────────────────────────────── */}
+      {viewingTeacher && (
+        <div className="admin-viewing-banner">
+          <ShieldCheck size={14} />
+          <span>Viewing {viewingTeacher.fullName}'s classes as admin</span>
+          <button className="admin-viewing-exit" onClick={() => navigate('/calendar')}>
+            <X size={14} /> Back to calendar
+          </button>
         </div>
       )}
 
@@ -916,8 +943,7 @@ const TeacherPortal = () => {
 
                 <div className="resources-footer">
                   <div className="upload-buttons">
-                    <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple onChange={handleFileChange}
-                      accept="image/*,.pdf,.doc,.docx,.xlsx,.mp4,.mov,.webm" />
+                    <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple onChange={handleFileChange} />
                     <button type="button" className="upload-recording-btn" style={{ background: '#f8fafc', color: '#64748b', borderColor: '#e2e8f0' }}
                       onClick={() => fileInputRef.current.click()}>
                       <Image size={16} /> Images

@@ -1,3 +1,6 @@
+import { readFile } from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import prisma from '../config/database.js';
 import { invalidate } from '../middleware/cache.js';
@@ -8,6 +11,13 @@ import {
   WAIVER_TITLE,
   WAIVER_VERSION,
 } from '../constants/waiverText.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LOGO_PATH = path.join(__dirname, '..', 'assets', 'waiver-logo.png');
+// Read once at module load and reused for every PDF — a signature is common
+// enough that re-reading a 34KB file from disk per request would add up, and
+// the logo never changes at runtime.
+const logoBytes = await readFile(LOGO_PATH);
 
 // A drawn signature arrives as a data URL from the canvas. Anything else is
 // either a mistake or someone poking at the endpoint, and it would land in the
@@ -72,7 +82,7 @@ export const getWaiverDocument = (req, res) => {
 export const signWaiver = async (req, res, next) => {
   try {
     const parentId = req.user.id;
-    const { studentId, minorName, parentName, signatureData } = req.body;
+    const { studentId, minorName, parentName, signatureData, photoOptOut } = req.body;
 
     if (!studentId || !minorName?.trim() || !parentName?.trim() || !signatureData) {
       return res.status(400).json({
@@ -132,6 +142,11 @@ export const signWaiver = async (req, res, next) => {
         parentName: parentName.trim(),
         signatureData,
         documentVersion: WAIVER_VERSION,
+        // Frozen at the moment of signing — see the model comment. Deep-cloned
+        // via JSON round-trip so nothing ever aliases the live WAIVER_SECTIONS
+        // array a future edit could mutate in place.
+        documentSnapshot: JSON.parse(JSON.stringify({ title: WAIVER_TITLE, sections: WAIVER_SECTIONS })),
+        photoOptOut: photoOptOut === true,
         ipAddress: req.ip || null,
       },
     });
@@ -178,7 +193,7 @@ export const listWaivers = async (req, res, next) => {
         fullName: true,
         status: true,
         liabilityWaiver: {
-          select: { id: true, signedAt: true, parentName: true, documentVersion: true },
+          select: { id: true, signedAt: true, parentName: true, documentVersion: true, photoOptOut: true },
         },
         familyMembers: {
           select: { family: { select: { name: true } } },
@@ -199,6 +214,7 @@ export const listWaivers = async (req, res, next) => {
         signedAt: s.liabilityWaiver?.signedAt || null,
         signedByName: s.liabilityWaiver?.parentName || null,
         documentVersion: s.liabilityWaiver?.documentVersion || null,
+        photoOptOut: s.liabilityWaiver?.photoOptOut || false,
       }))
     );
   } catch (error) {
@@ -268,6 +284,11 @@ const wrap = (text, font, size, maxWidth) => {
 };
 
 const buildWaiverPdf = async (waiver) => {
+  // The wording this waiver was actually signed under, not whatever the
+  // template says today — see the documentSnapshot column comment.
+  const title = waiver.documentSnapshot?.title || WAIVER_TITLE;
+  const sections = waiver.documentSnapshot?.sections || WAIVER_SECTIONS;
+
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -292,12 +313,29 @@ const buildWaiverPdf = async (waiver) => {
     }
   };
 
-  writeLines(WAIVER_TITLE, { size: 15, style: bold, gap: 20 });
-  y -= 4;
-  writeLines('Love Learning Center — The Love Camp Inc', { size: 9, gap: 14 });
-  y -= 10;
+  const writeCentered = (text, { size = BODY_SIZE, style = font, color = rgb(0.1, 0.1, 0.12) } = {}) => {
+    const width = style.widthOfTextAtSize(text, size);
+    page.drawText(text, { x: MARGIN + (maxWidth - width) / 2, y, size, font: style, color });
+  };
 
-  for (const section of WAIVER_SECTIONS) {
+  const logoImage = await doc.embedPng(logoBytes);
+  const logoDims = logoImage.scaleToFit(72, 72);
+  page.drawImage(logoImage, {
+    x: MARGIN + (maxWidth - logoDims.width) / 2,
+    y: y - logoDims.height,
+    width: logoDims.width,
+    height: logoDims.height,
+  });
+  y -= logoDims.height + 14;
+
+  writeCentered(title, { size: 15, style: bold });
+  y -= 20;
+  writeCentered('The Love Camp', { size: 9, color: rgb(0.4, 0.4, 0.46) });
+  y -= 16;
+  writeCentered(`Prepared for: ${waiver.minorName}`, { size: 9.5, style: bold });
+  y -= 22;
+
+  for (const section of sections) {
     ensureRoom(34);
     y -= 6;
     writeLines(section.heading, { size: 10.5, style: bold, gap: 15 });
@@ -308,6 +346,19 @@ const buildWaiverPdf = async (waiver) => {
     for (const bullet of section.bullets || []) {
       writeLines(`•  ${bullet}`, { indent: 10 });
       y -= 2;
+    }
+    // The paper form's opt-out is a blank line the parent hand-writes "No
+    // Photos" on; the checked box on the digital form is that same choice, so
+    // it belongs printed right where that line would be, not off in the audit
+    // stamp where nobody reviewing this page would think to look.
+    if (section.heading === 'PHOTO & VIDEO RELEASE') {
+      y -= 4;
+      writeLines(
+        waiver.photoOptOut
+          ? '[X] No Photos — this parent has opted their child OUT of photo/video use.'
+          : '[ ] No Photos (not checked — photo/video use as described above is permitted).',
+        { style: waiver.photoOptOut ? bold : font }
+      );
     }
   }
 
@@ -324,20 +375,21 @@ const buildWaiverPdf = async (waiver) => {
   y -= 26;
 
   const col2 = MARGIN + maxWidth / 2;
-  const field = (label, value, x, baseline) => {
+  const field = (label, value, x, baseline, width = maxWidth / 2 - 20) => {
     page.drawText(value, { x, y: baseline, size: 11, font, color: rgb(0.1, 0.1, 0.12) });
     page.drawLine({
       start: { x, y: baseline - 5 },
-      end: { x: x + maxWidth / 2 - 20, y: baseline - 5 },
+      end: { x: x + width, y: baseline - 5 },
       thickness: 0.7,
       color: rgb(0.6, 0.6, 0.66),
     });
     page.drawText(label, { x, y: baseline - 17, size: 8, font, color: rgb(0.42, 0.42, 0.5) });
   };
 
-  field('Print Minor Name', waiver.minorName, MARGIN, y);
-  field('Print Parent/Guardian Name', waiver.parentName, col2, y);
-  y -= 70;
+  // The current form only asks for the parent/guardian's printed name here —
+  // which child it covers is stated once, up top ("Prepared for: ...").
+  field('Print Parent/Guardian Name', waiver.parentName, MARGIN, y, maxWidth - 40);
+  y -= 60;
 
   const signaturePng = await doc.embedPng(waiver.signatureData);
   const sigWidth = Math.min(maxWidth / 2 - 20, 200);

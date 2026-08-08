@@ -101,6 +101,14 @@ const Login = () => {
       icon: <ShieldCheck size={20} />,
       color: '#dc2626',
       bg: '#fef2f2'
+    },
+    {
+      name: 'Teacher',
+      role: 'TEACHER',
+      email: 'danieldiazhenao@gmail.com',
+      icon: <ShieldCheck size={20} />,
+      color: '#2563eb',
+      bg: '#eff6ff'
     }
   ];
 

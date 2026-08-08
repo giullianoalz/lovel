@@ -4,6 +4,7 @@ import stripe from '../config/stripe.js';
 import { invalidate } from '../middleware/cache.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 import { getAdminUserIds } from '../services/notificationConfig.service.js';
+import { isOnly } from '../utils/roles.js';
 
 // Shape a behavior log for the student/parent portals — exposes the reason
 // ("why") behind each positive note or warning, not just the count.
@@ -63,9 +64,17 @@ const localDayString = () => {
 // tomorrow's roster and back at a day they still owe notes for.
 export const getTeacherPortal = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const { date, teacherId } = req.query;
 
-    const { date } = req.query;
+    // A teacher only ever sees their own roster. An admin may pass ?teacherId=
+    // to look at a specific teacher's day (e.g. jumping in from the calendar to
+    // take attendance on their behalf); with no teacherId an admin sees their
+    // own (usually empty) roster, same as before.
+    let userId = req.user.id;
+    if (teacherId && !isOnly(req.user, 'TEACHER')) {
+      userId = teacherId;
+    }
+
     const day = date === undefined ? localDayString() : parseDayString(String(date));
     if (!day) {
       return res.status(400).json({
@@ -136,6 +145,17 @@ export const getTeacherPortal = async (req, res, next) => {
     
     const unreadAnnouncements = announcements.filter(a => a.reads.length === 0);
 
+    // When an admin is browsing another teacher's day, name whose roster this
+    // is so the portal can show "Viewing: <name>" instead of looking like the
+    // admin's own (usually empty) schedule.
+    let viewingTeacher = null;
+    if (userId !== req.user.id) {
+      viewingTeacher = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, fullName: true },
+      });
+    }
+
     // Format schedule
     const schedule = todaySessions.map(session => ({
       sessionId: session.id,
@@ -162,7 +182,8 @@ export const getTeacherPortal = async (req, res, next) => {
     res.json({
       date: day,
       schedule,
-      announcements: unreadAnnouncements
+      announcements: unreadAnnouncements,
+      viewingTeacher
     });
   } catch (error) {
     next(error);

@@ -2521,8 +2521,8 @@ const RegistrationAdmin = () => {
               <ul className="cancel-reg-effects">
                 <li>Their seat is freed for the next student on the waitlist.</li>
                 <li>
-                  The {`$${cancelModal.totalQuarterly.toFixed(2)}`} tuition charge is removed from the family's
-                  ledger — unless it has already been invoiced or paid, which is reported back instead.
+                  The {`$${cancelModal.depositAmount.toFixed(2)}`} deposit charge (15% of the ${cancelModal.totalQuarterly.toFixed(2)} tuition)
+                  is removed from the family's ledger — unless it has already been invoiced or paid, which is reported back instead.
                 </li>
                 <li>This cannot be undone. To re-enrol them you'd register them again.</li>
               </ul>

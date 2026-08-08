@@ -17,10 +17,10 @@ const WaiverForm = ({ child, parentName = '', onClose, onSigned }) => {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const [minor, setMinor] = useState(child?.fullName || '');
   const [guardian, setGuardian] = useState(parentName);
   const [signature, setSignature] = useState(null);
   const [agreed, setAgreed] = useState(false);
+  const [photoOptOut, setPhotoOptOut] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +32,6 @@ const WaiverForm = ({ child, parentName = '', onClose, onSigned }) => {
   }, []);
 
   const problem = () => {
-    if (minor.trim().length < 2) return "Please enter the child's full name.";
     if (guardian.trim().length < 2) return 'Please enter your full name.';
     if (!signature) return 'Please draw your signature.';
     if (!agreed) return 'Please confirm that you have read and agree to the waiver.';
@@ -49,9 +48,10 @@ const WaiverForm = ({ child, parentName = '', onClose, onSigned }) => {
     try {
       const res = await api.post('/waivers', {
         studentId: child.id,
-        minorName: minor.trim(),
+        minorName: child.fullName,
         parentName: guardian.trim(),
         signatureData: signature,
+        photoOptOut,
       });
       onSigned?.(res.data);
     } catch (err) {
@@ -90,15 +90,25 @@ const WaiverForm = ({ child, parentName = '', onClose, onSigned }) => {
                   {section.bullets && (
                     <ul>{section.bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>
                   )}
+                  {/* The paper form's opt-out is a blank line under this exact
+                      section for the parent to hand-write "No Photos" on — the
+                      checkbox belongs right there, not bundled with the other
+                      fields below where it would read as just another input. */}
+                  {section.heading === 'PHOTO & VIDEO RELEASE' && (
+                    <label className="waiver-photo-optout">
+                      <input
+                        type="checkbox"
+                        checked={photoOptOut}
+                        onChange={e => setPhotoOptOut(e.target.checked)}
+                      />
+                      <span>No Photos — do not use {child?.fullName?.split(' ')[0]}'s photo or video.</span>
+                    </label>
+                  )}
                 </section>
               ))}
             </div>
 
             <div className="waiver-fields">
-              <div className="form-group">
-                <label>Print Minor Name *</label>
-                <input type="text" value={minor} onChange={e => setMinor(e.target.value)} />
-              </div>
               <div className="form-group">
                 <label>Print Parent/Guardian Name *</label>
                 <input type="text" value={guardian} onChange={e => setGuardian(e.target.value)} />

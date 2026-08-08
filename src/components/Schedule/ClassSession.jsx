@@ -764,7 +764,6 @@ const ClassSession = () => {
                 style={{ display: 'none' }} 
                 multiple 
                 onChange={handleFileChange}
-                accept="image/*,.pdf,.doc,.docx,.xlsx,.mp4,.mov,.webm"
               />
               <button type="button" className="upload-recording-btn" style={{ background: '#f8fafc', color: '#64748b', borderColor: '#e2e8f0' }} title="Add Images" onClick={() => fileInputRef.current.click()}>
                 <Image size={16} /> Images
