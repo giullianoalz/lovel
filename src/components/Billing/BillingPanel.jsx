@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2, Pencil
+  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
 import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
@@ -19,6 +20,7 @@ const formatDateUS = (dateStr) => {
 
 const BillingPanel = () => {
   const toast = useToast();
+  const navigate = useNavigate();
   const [families, setFamilies] = useState([]);
   const [students, setStudents] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -1053,6 +1055,19 @@ const BillingPanel = () => {
                             </button>
                             {openRowMenuId === tx.id && (
                               <div className="tx-row-dropdown">
+                                {/* A charge raised by machinery says so, and offers the
+                                    source first — editing the row alone leaves whatever
+                                    generated it still holding the old number. */}
+                                {tx.origin && tx.origin.kind !== 'MANUAL' && (
+                                  <>
+                                    <div className="tx-row-origin">From: {tx.origin.label}</div>
+                                    {tx.origin.href && (
+                                      <button onClick={() => navigate(tx.origin.href)}>
+                                        <ExternalLink size={14} /> Go to {tx.origin.label}
+                                      </button>
+                                    )}
+                                  </>
+                                )}
                                 <button onClick={() => openEditTx(tx)}>
                                   <Pencil size={14} /> Edit Transaction
                                 </button>
@@ -1403,6 +1418,13 @@ const BillingPanel = () => {
                 />
               </div>
 
+              {editTxPanel.tx.origin && editTxPanel.tx.origin.kind !== 'MANUAL' && (
+                <p className="text-muted" style={{fontSize: '13px'}}>
+                  <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
+                  Raised by: <strong>{editTxPanel.tx.origin.label}</strong>. Editing here changes
+                  this ledger line only — correct it at the source if it should stay changed.
+                </p>
+              )}
               {editTxPanel.tx.invoiceId && (
                 <p className="text-muted" style={{fontSize: '13px'}}>
                   <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>

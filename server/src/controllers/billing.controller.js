@@ -9,6 +9,41 @@ import { nextLcNumber } from '../services/invoicing.service.js';
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
 /**
+ * What produced a ledger row, worked out from the links it carries.
+ *
+ * A charge raised by machinery — a term's tuition run, a standing monthly
+ * arrangement, a cancellation review — is a *consequence*, not the decision
+ * itself. Correcting the row alone leaves the thing that generated it still
+ * saying the old number, and the next run puts it back. So the billing screen
+ * needs to know where a row came from in order to send an admin there instead.
+ *
+ * `href` is where that source lives in the app. Null means there is nowhere to
+ * go: a manual entry is its own source, and a fulfilled snack reload has no
+ * screen of its own to correct.
+ */
+const originOf = (t) => {
+  if (t.recurringChargeId) {
+    return { kind: 'RECURRING', label: 'Monthly arrangement', href: null, recurringChargeId: t.recurringChargeId };
+  }
+  if (t.termId && t.quarter) {
+    return { kind: 'QUARTERLY', label: `Quarter ${t.quarter} tuition`, href: '/registration' };
+  }
+  if (t.termId) {
+    return { kind: 'DEPOSIT', label: 'Registration deposit', href: '/registration' };
+  }
+  if (t.sessionCancellationId) {
+    // /alerts, not /supervision: staff *record* a cancellation in Supervision,
+    // but the admin decides its charge in the Front Desk queue, which is the
+    // screen that can actually change this fee.
+    return { kind: 'CANCELLATION_FEE', label: 'Cancellation review', href: '/alerts' };
+  }
+  if (t.snackReload) {
+    return { kind: 'REWARD', label: 'Snack punch reload', href: null };
+  }
+  return { kind: 'MANUAL', label: 'Manual entry', href: null };
+};
+
+/**
  * GET /api/billing/transactions
  * List all transactions, optionally filtered by familyId
  */
@@ -24,6 +59,7 @@ export const listTransactions = async (req, res, next) => {
       include: {
         student: { select: { id: true, fullName: true } },
         invoice: { select: { id: true, invoiceNumber: true, _count: { select: { payments: true } } } },
+        snackReload: { select: { id: true } },
       },
     });
 
@@ -48,6 +84,7 @@ export const listTransactions = async (req, res, next) => {
         invoiceId: t.invoice?.invoiceNumber || null,
         deletable: !locked,
         editable: !locked,
+        origin: originOf(t),
       };
     });
 

@@ -894,6 +894,10 @@ export const resolveCancellation = async (req, res, next) => {
             amount: parseFloat(chargeAmount),
             type: 'CHARGE',
             description: `${feeLabel} — ${cancellation.session.class.name} (${cancellation.finalChargePercent ?? finalChargePercent}%)`,
+            // Ties the ledger line to the review it came out of, so the
+            // billing screen can send an admin back to that cancellation
+            // instead of leaving the fee looking like a manual entry.
+            sessionCancellationId: cancellation.id,
           },
         });
       }

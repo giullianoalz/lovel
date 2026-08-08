@@ -300,10 +300,11 @@ model SessionCancellation {
   resolvedAt             DateTime? @map("resolved_at") @db.Timestamptz(6)
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  session     Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  student     User    @relation("StudentCancellations", fields: [studentId], references: [id], onDelete: Cascade)
-  cancelledBy User    @relation("CancelledByStaff", fields: [cancelledById], references: [id])
-  resolvedBy  User?   @relation("ResolvedByStaff", fields: [resolvedById], references: [id])
+  session      Session       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student      User          @relation("StudentCancellations", fields: [studentId], references: [id], onDelete: Cascade)
+  cancelledBy  User          @relation("CancelledByStaff", fields: [cancelledById], references: [id])
+  resolvedBy   User?         @relation("ResolvedByStaff", fields: [resolvedById], references: [id])
+  transactions Transaction[]
 
   @@unique([sessionId, studentId])
   @@index([status])
@@ -430,9 +431,10 @@ model SnackReloadRequest {
   decidedAt     DateTime? @map("decided_at") @db.Timestamptz(6)
   fulfilledById String?   @map("fulfilled_by") @db.Uuid
   fulfilledAt   DateTime? @map("fulfilled_at") @db.Timestamptz(6)
-  transactionId String?   @map("transaction_id") @db.Uuid
+  transactionId String?   @unique @map("transaction_id") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
   student     User    @relation("SnackReloadStudent", fields: [studentId], references: [id], onDelete: Cascade)
   family      Family? @relation(fields: [familyId], references: [id])
   decidedBy   User?   @relation("SnackReloadDecidedBy", fields: [decidedById], references: [id])
@@ -480,6 +482,10 @@ model Transaction {
   // of charging the family twice. Same trick as termId/quarter above.
   recurringChargeId String?   @map("recurring_charge_id") @db.Uuid
   periodKey         String?   @map("period_key") @db.VarChar(7)
+  // Set only on a late-cancellation/no-show fee. Together with the two links
+  // above and termId/quarter, this is how the ledger knows what produced a
+  // charge and can send an admin to that source to correct it.
+  sessionCancellationId String? @map("session_cancellation_id") @db.Uuid
   invoiceId   String?         @map("invoice_id") @db.Uuid
   paymentId   String?         @map("payment_id") @db.Uuid
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -488,12 +494,15 @@ model Transaction {
   payment     Payment?        @relation(fields: [paymentId], references: [id])
   student     User?           @relation(fields: [studentId], references: [id])
   recurringCharge RecurringCharge? @relation(fields: [recurringChargeId], references: [id], onDelete: SetNull)
+  sessionCancellation SessionCancellation? @relation(fields: [sessionCancellationId], references: [id], onDelete: SetNull)
+  snackReload SnackReloadRequest?
   invoiceLine InvoiceLine?
 
   @@unique([studentId, termId, quarter])
   @@unique([recurringChargeId, periodKey])
   @@index([familyId])
   @@index([date])
+  @@index([sessionCancellationId])
   @@map("transactions")
 }
 
