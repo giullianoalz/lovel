@@ -137,7 +137,10 @@ export const listSessions = async (req, res, next) => {
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
       include: {
         class: {
-          select: { name: true, subject: true, type: true, meetingUrl: true },
+          // teacherId travels with the session so the calendar can offer the
+          // admin's "Take Attendance" jump without depending on the separate
+          // (paginated, staff-only) /classes fetch having the class in hand.
+          select: { name: true, subject: true, type: true, meetingUrl: true, teacherId: true },
         },
         notes: { orderBy: { createdAt: 'desc' } },
         materials: true,

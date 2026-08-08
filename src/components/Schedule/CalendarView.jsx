@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { resolveMeetingUrl } from '../../lib/meetingLink';
@@ -227,6 +228,7 @@ const JumpToDatePicker = ({ currentDate, view, onPick, onClose }) => {
 
 const CalendarView = () => {
   const { role, hasRole } = useAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const canAddEvents = hasRole('ADMIN');
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
@@ -653,7 +655,7 @@ const CalendarView = () => {
           type: cls.type === 'VIRTUAL' || s.meetingUrl ? 'Virtual' : 'In-Person',
           classType: cls.type || 'IN_PERSON',
           teacher: teacherName || 'Unassigned',
-          teacherId: classInfo.teacherId || classInfo.teacher?.id || null,
+          teacherId: s.class?.teacherId || classInfo.teacherId || classInfo.teacher?.id || null,
           students: classInfo._count?.enrollments ?? 0,
           studentList: null, // lazily loaded when the event is opened
           studentIds: [],
@@ -2266,10 +2268,20 @@ const CalendarView = () => {
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {hasRole('ADMIN') && !isEditingEvent && selectedEvent.teacherId && (
+                  <button
+                    className="icon-btn-text"
+                    onClick={() => navigate(`/portal/teacher?teacherId=${selectedEvent.teacherId}&sessionId=${selectedEvent.id}&date=${selectedEvent.dateStr}`)}
+                    title="Take Attendance"
+                    style={{ color: 'var(--primary)' }}
+                  >
+                    <ClipboardCheck size={18} />
+                  </button>
+                )}
                 {isAdmin && !isEditingEvent && (
                   <>
-                    <button 
-                      className="icon-btn-text" 
+                    <button
+                      className="icon-btn-text"
                       onClick={handleStartEditEvent}
                       title="Edit Class"
                       style={{ color: 'var(--primary)' }}
