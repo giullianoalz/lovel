@@ -2055,67 +2055,64 @@ const CalendarView = () => {
       <div className="calendar-glass-box">
         {view === 'list' && (
           <div className="calendar-scroll-wrapper">
-             <div className="list-week-container">
-               {weekDates.map((date, idx) => {
-                 const dayEvents = [
-                   ...events.filter(e => e.dateStr === toISODate(date)),
-                   ...staffEvents.filter(e => e.dateStr === toISODate(date)),
-                 ].sort((a, b) => {
-                   const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
-                   const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
-                   return pa - pb;
-                 });
-
-                 // The user explicitly stated "no" to showing empty days with "No classes" message.
-                 // So we just hide days with zero events completely.
-                 if (dayEvents.length === 0) return null;
-                 
-                 const dateLabel = date.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-
-                 return (
-                   <div key={idx} className="list-day-group">
-                     <h3 className="list-day-header">{dateLabel}</h3>
-                     <div className="list-day-events">
-                       {dayEvents.map(item => {
-                          const isStaff = !!item.kind;
-                          return (
-                            <div
-                              key={item.id}
-                              className={`list-event-row ${isStaff ? item.kind : item.subject}`}
-                              onClick={!isStaff ? () => handleEventClick(item) : undefined}
-                              style={{ cursor: isStaff ? 'default' : 'pointer' }}
-                            >
-                              <div className="list-ev-time">{item.time}</div>
-                              <div className="list-ev-details">
-                                <div className="list-ev-title">
-                                  {!isStaff && <CheckCircle2 size={16} className="list-ev-check" />}
-                                  <strong>{item.title}</strong>
-                                </div>
-                                {!isStaff && (
-                                  <div className="list-ev-meta">
-                                    {item.type === 'Virtual' ? <Video size={13} /> : <MapPin size={13} />}
-                                    <span>{item.teacher.replace('Prof. ', '')}{item.students > 0 ? ` · ${item.students} student${item.students > 1 ? 's' : ''}` : ''}</span>
+             <div className="week-schedule-grid">
+                {/* 7 Days Columns */}
+                <div className="week-days-container" style={{ borderLeft: 'none' }}>
+                  {weekDates.map((date, idx) => {
+                    const isToday = toISODate(date) === toISODate(new Date());
+                    const dayEvents = [
+                      ...events.filter(e => e.dateStr === toISODate(date)),
+                      ...staffEvents.filter(e => e.dateStr === toISODate(date)),
+                    ].sort((a, b) => {
+                      const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
+                      const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
+                      return pa - pb;
+                    });
+                    
+                    const allDayEvents = dayEvents.filter(e => e.kind === 'pto' || e.kind === 'holiday' || (e.time && e.time.toLowerCase().includes('all-day')));
+                    const normalEvents = dayEvents.filter(e => e.kind !== 'pto' && e.kind !== 'holiday' && !(e.time && e.time.toLowerCase().includes('all-day')));
+                    
+                    return (
+                      <div key={idx} className={`week-day-col ${isToday ? 'today' : ''}`}>
+                         <div className="week-day-header">
+                           <div className="week-day-name">{WEEK_DAYS[idx]}</div>
+                           <div className="week-day-num">{date.getDate()}</div>
+                           <div className="week-day-allday">
+                             {allDayEvents.map(item => (
+                               <div key={item.id} className={`mini-event ${item.kind || item.subject}`} title={item.title}>
+                                 <span className="mini-event-title">{item.title}</span>
+                               </div>
+                             ))}
+                           </div>
+                         </div>
+                         <div className="week-day-body" style={{ minHeight: 'auto', padding: '10px 4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                           {normalEvents.map(item => {
+                              const isStaff = !!item.kind;
+                              return (
+                                <div
+                                  key={item.id}
+                                  className={`agenda-event ${isStaff ? item.kind : item.subject}`}
+                                  style={{ position: 'relative' }}
+                                  onClick={!isStaff ? () => handleEventClick(item) : undefined}
+                                >
+                                  <span className="agenda-ev-time" style={{ color: item.kind ? 'inherit' : '#e11d48' }}>{item.time}</span>
+                                  <div className="agenda-ev-title">
+                                    {!isStaff && <CheckCircle2 size={13} className="agenda-ev-check" />}
+                                    <strong>{item.title}</strong>
                                   </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                       })}
-                     </div>
-                   </div>
-                 );
-               })}
-               
-               {weekDates.every(date => {
-                   return events.filter(e => e.dateStr === toISODate(date)).length === 0 && 
-                          staffEvents.filter(e => e.dateStr === toISODate(date)).length === 0;
-               }) && (
-                 <div className="calendar-empty-day">
-                   <CalendarIcon size={40} />
-                   <h3>No events this week</h3>
-                   <p>There are no classes or events scheduled for this week.</p>
-                 </div>
-               )}
+                                  {!isStaff && (
+                                    <span className="agenda-ev-desc" style={{ marginTop: 2 }}>
+                                      <span>{item.teacher.replace('Prof. ', '')}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                           })}
+                         </div>
+                      </div>
+                    );
+                  })}
+                </div>
              </div>
           </div>
         )}
