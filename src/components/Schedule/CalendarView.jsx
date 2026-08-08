@@ -1552,24 +1552,11 @@ const CalendarView = () => {
   return (
     <div className="calendar-container">
       <div className="calendar-header">
-        <div className="calendar-title">
-          <div className="nav-arrows">
-            <button onClick={goToPrevPeriod} aria-label="Previous"><ChevronLeft size={20} /></button>
-            <button onClick={goToNextPeriod} aria-label="Next"><ChevronRight size={20} /></button>
-          </div>
+        <div className="calendar-header-top">
           <div className="cal-jump-wrapper" ref={jumpRef}>
-            <h1>{headerLabel}</h1>
-            <button
-              type="button"
-              className="cal-jump-btn"
-              onClick={() => setIsJumpOpen(o => !o)}
-              aria-expanded={isJumpOpen}
-              aria-label="Jump to a date"
-              title="Jump to a date"
-            >
-              <CalendarIcon size={16} />
-              <span style={{ fontSize: 10 }}>▼</span>
-            </button>
+            <h1 className="calendar-title-text" onClick={() => setIsJumpOpen(o => !o)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)' }}>
+              {headerLabel} <span style={{ fontSize: '14px' }}>▼</span>
+            </h1>
             {isJumpOpen && (
               <JumpToDatePicker
                 currentDate={currentDate}
@@ -1579,45 +1566,78 @@ const CalendarView = () => {
               />
             )}
           </div>
-          {sessionsLoading && <span className="app-inline-loader" style={{ fontSize: 12, marginLeft: 8 }}><span className="app-spinner-sm" style={{ width: 13, height: 13 }} />Loading…</span>}
+
+          <div className="nav-arrows-group">
+            <button className="nav-arrow-btn" onClick={goToPrevPeriod} aria-label="Previous"><ChevronLeft size={16} /></button>
+            <button className="nav-today-btn" onClick={() => setCurrentDate(new Date())}>Today</button>
+            <button className="nav-arrow-btn" onClick={goToNextPeriod} aria-label="Next"><ChevronRight size={16} /></button>
+            {sessionsLoading && <span className="app-inline-loader" style={{ fontSize: 12, marginLeft: 12 }}><span className="app-spinner-sm" style={{ width: 13, height: 13 }} /></span>}
+          </div>
         </div>
 
-        <div className="calendar-actions">
-          {canAddEvents && (
-            <div className="add-event-wrapper" style={{ position: 'relative' }} ref={addEventRef}>
-              <button
-                className="add-event-btn"
-                onClick={() => setIsAddEventDropdownOpen(!isAddEventDropdownOpen)}
+        <div className="calendar-header-bottom">
+          <div className="calendar-actions-left">
+            {canAddEvents && (
+              <div className="add-event-wrapper" style={{ position: 'relative' }} ref={addEventRef}>
+                <button
+                  className="add-event-btn"
+                  onClick={() => setIsAddEventDropdownOpen(!isAddEventDropdownOpen)}
+                >
+                  <Plus size={16} />
+                  <span>Add Event</span>
+                  <span style={{ fontSize: '10px', marginLeft: '4px' }}>▼</span>
+                </button>
+  
+                {isAddEventDropdownOpen && (
+                  <div className="add-event-dropdown">
+                    <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
+                      <CalendarPlus size={16} />
+                      <span>Add New Event</span>
+                    </div>
+                    <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
+                      <CalendarIcon size={16} />
+                      <span>Add Non-Tutoring Event</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {hasRole('TEACHER') && (
+              <div className="options-wrapper" style={{ display: 'flex', gap: '8px' }}>
+                <button className={`options-btn ${calPanel === 'pto' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'pto' ? null : 'pto')}>
+                  <Settings size={14} /> PTO
+                </button>
+                <button className={`options-btn ${calPanel === 'spaces' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'spaces' ? null : 'spaces')}>
+                  <Settings size={14} /> Spaces
+                </button>
+              </div>
+            )}
+            
+            <button className="print-btn" onClick={() => window.print()}>
+               <FileText size={14} /> Print
+            </button>
+          </div>
+
+          <div className="calendar-actions-right">
+            <div className="view-toggle-new">
+              <span className="view-icon"><CalendarIcon size={14} /></span>
+              <select value={view} onChange={(e) => setView(e.target.value)} className="view-select">
+                <option value="month">Month</option>
+                <option value="week">Week</option>
+                <option value="day">Day</option>
+              </select>
+            </div>
+
+            <div className="filter-wrapper" style={{ position: 'relative' }} ref={searchRef}>
+              <button 
+                 className="advanced-search-btn-new" 
+                 onClick={() => setIsSearchOpen(!isSearchOpen)}
               >
-                <Plus size={16} />
-                <span>Add Event</span>
+                <Filter size={14} />
+                <span>Search</span>
                 <span style={{ fontSize: '10px', marginLeft: '4px' }}>▼</span>
               </button>
-
-              {isAddEventDropdownOpen && (
-                <div className="add-event-dropdown">
-                  <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
-                    <CalendarPlus size={16} />
-                    <span>Add New Event</span>
-                  </div>
-                  <div className="dropdown-item" onClick={() => { setActiveModal('full'); setIsAddEventDropdownOpen(false); }}>
-                    <CalendarIcon size={16} />
-                    <span>Add Non-Tutoring Event</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="filter-wrapper" style={{ position: 'relative' }} ref={searchRef}>
-            <button 
-               className="advanced-search-btn" 
-               onClick={() => setIsSearchOpen(!isSearchOpen)}
-            >
-              <Filter size={16} />
-              <span>Search</span>
-              <span style={{ fontSize: '10px', marginLeft: '4px' }}>▼</span>
-            </button>
 
             {isSearchOpen && (
               <div className="advanced-search-popover">
@@ -1897,18 +1917,6 @@ const CalendarView = () => {
               </div>
             )}
           </div>
-
-          <div className="view-toggle">
-            <button className={`view-btn ${view === 'day' ? 'active' : ''}`} onClick={() => setView('day')}>Day</button>
-            <button className={`view-btn ${view === 'week' ? 'active' : ''}`} onClick={() => setView('week')}>Week</button>
-            <button className={`view-btn ${view === 'month' ? 'active' : ''}`} onClick={() => setView('month')}>Month</button>
-          </div>
-          {hasRole('TEACHER') && (
-            <div className="view-toggle" style={{marginLeft: 8}}>
-              <button className={`view-btn ${calPanel === 'pto' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'pto' ? null : 'pto')}>PTO</button>
-              <button className={`view-btn ${calPanel === 'spaces' ? 'active' : ''}`} onClick={() => setCalPanel(calPanel === 'spaces' ? null : 'spaces')}>Spaces</button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -2218,7 +2226,15 @@ const CalendarView = () => {
                                 style={{ cursor: isStaff ? 'default' : (hasRole('ADMIN') ? 'grab' : 'pointer') }}
                               >
                                 <span className="mini-event-time">{item.time}</span>
-                                <span className="mini-event-title">{item.title}</span>
+                                <span className="mini-event-title">
+                                  {!isStaff && <CheckCircle2 size={11} style={{ flexShrink: 0, opacity: 0.8 }} />}
+                                  {item.title}
+                                </span>
+                                {!isStaff && item.teacher && (
+                                  <span className="mini-event-subtitle">
+                                    {item.type} with {item.teacher.replace('Prof. ', '')}
+                                  </span>
+                                )}
                               </div>
                             );
                           })}
