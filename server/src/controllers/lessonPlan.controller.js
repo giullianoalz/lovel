@@ -158,11 +158,15 @@ export const getSupplyList = async (req, res, next) => {
 export const markSupplyPurchased = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { cost, receiptUrl } = req.body;
+    const { cost, receiptUrl, status = 'PURCHASED' } = req.body;
 
     const item = await prisma.supplyItem.update({
       where: { id },
-      data: { status: 'PURCHASED', cost: cost ?? null, receiptUrl: receiptUrl || null },
+      data: { 
+        status, 
+        cost: status === 'PENDING' ? null : (cost ?? null), 
+        receiptUrl: status === 'PENDING' ? null : (receiptUrl || null) 
+      },
     });
 
     res.json({ item });

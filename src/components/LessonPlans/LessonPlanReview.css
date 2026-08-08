@@ -255,8 +255,8 @@
   opacity: 0.7;
 }
 
-.lpr-supply-row.purchased .lpr-custom-check {
-  cursor: default;
+.lpr-supply-row.purchased:hover {
+  opacity: 1;
 }
 
 .lpr-supply-info {

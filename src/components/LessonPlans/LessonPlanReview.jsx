@@ -75,9 +75,14 @@ const LessonPlanReview = () => {
   const handleMarkPurchased = async (item) => {
     setPurchasingId(item.id);
     try {
-      const cost = window.prompt(`Cost for "${item.itemName}" (optional):`, '');
-      await api.patch(`/lesson-plans/supply-list/${item.id}/purchased`, { cost: cost ? parseFloat(cost) : null });
-      toast.success('Marked as purchased.');
+      if (item.status === 'PURCHASED') {
+        await api.patch(`/lesson-plans/supply-list/${item.id}/purchased`, { status: 'PENDING' });
+        toast.success('Marked as pending.');
+      } else {
+        const cost = window.prompt(`Cost for "${item.itemName}" (optional):`, '');
+        await api.patch(`/lesson-plans/supply-list/${item.id}/purchased`, { status: 'PURCHASED', cost: cost ? parseFloat(cost) : null });
+        toast.success('Marked as purchased.');
+      }
       await loadSupplyList();
     } catch {
       toast.error('Could not update the item.');
@@ -258,7 +263,12 @@ const LessonPlanReview = () => {
                       {weekGroup.purchased.map(item => (
                         <div key={item.id} className="lpr-supply-row purchased">
                           <label className="lpr-supply-checkbox">
-                            <input type="checkbox" checked readOnly disabled />
+                            <input 
+                              type="checkbox" 
+                              checked 
+                              onChange={() => handleMarkPurchased(item)}
+                              disabled={purchasingId === item.id}
+                            />
                             <span className="lpr-custom-check checked"><CheckCircle size={12} /></span>
                           </label>
 
@@ -367,7 +377,7 @@ const LessonPlanReview = () => {
               </button>
             </div>
             <div className="lpr-modal-body">
-              <p>{activityModal}</p>
+              <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>{activityModal}</p>
             </div>
           </div>
         </div>
