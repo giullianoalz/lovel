@@ -1162,3 +1162,51 @@ select.form-control {
 }
 .tx-delete-btn:hover { background: #fef2f2; border-color: #fecaca; color: #dc2626; }
 .tx-delete-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Invoice detail ────────────────────────────────────────────────────── */
+
+.invoice-detail-modal { max-width: 620px; width: 100%; }
+
+.inv-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 14px;
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  margin-bottom: 18px;
+}
+.inv-detail-meta div { display: flex; flex-direction: column; gap: 3px; }
+.inv-detail-meta span {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted, #94a3b8);
+}
+.inv-detail-meta strong { font-size: 14px; color: var(--text-main); }
+
+.inv-detail-lines { width: 100%; border-collapse: collapse; }
+.inv-detail-lines th {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted, #94a3b8); padding: 0 0 8px;
+  border-bottom: 1px solid var(--border-light); text-align: left;
+}
+.inv-detail-lines td {
+  padding: 11px 0; font-size: 14px; color: var(--text-main);
+  border-bottom: 1px solid var(--border-light);
+}
+.inv-detail-lines tfoot td {
+  color: var(--text-muted, #64748b); border-bottom: none; padding: 7px 0;
+}
+.inv-detail-lines tfoot tr:first-child td { padding-top: 14px; }
+.inv-detail-lines tfoot .inv-detail-total td {
+  font-size: 16px; font-weight: 700; color: var(--text-main);
+  border-top: 1px solid var(--border-light); padding-top: 12px;
+}
+
+.inv-detail-payments { list-style: none; margin: 8px 0 0; padding: 0; }
+.inv-detail-payments li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 12px; font-size: 13px;
+  background: #f0fdf4; border: 1px solid #dcfce7; border-radius: 8px;
+  margin-bottom: 6px; color: #166534;
+}

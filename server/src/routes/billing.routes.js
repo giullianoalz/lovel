@@ -11,6 +11,9 @@ import {
   createInvoice,
   voidInvoice,
   editInvoice,
+  getInvoice,
+  downloadInvoicePdf,
+  sendInvoice,
   generateEmaBatch,
   reconcileEmaRemittance,
   refundPayment,
@@ -54,6 +57,13 @@ router.get('/invoices', authenticate, requireRole('ADMIN'), listInvoices);
 
 // POST /api/billing/invoices — Generate an invoice (Admin)
 router.post('/invoices', authenticate, requireRole('ADMIN'), validate(createInvoiceSchema), createInvoice);
+
+// The invoice document: its full specification, its PDF, and emailing it
+// (Admin). Declared before "/invoices/:id" itself so neither suffix is ever
+// read as part of an id.
+router.get('/invoices/:id/pdf', authenticate, requireRole('ADMIN'), downloadInvoicePdf);
+router.post('/invoices/:id/send', authenticate, requireRole('ADMIN'), sendInvoice);
+router.get('/invoices/:id', authenticate, requireRole('ADMIN'), getInvoice);
 
 // PATCH /api/billing/invoices/:id — Rewrite an invoice's line items (Admin).
 // Refused once a payment has touched it — see the controller.

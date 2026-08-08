@@ -444,6 +444,63 @@ export const sendRegistrationBillingEmail = async ({ to, studentName, className,
   });
 };
 
+/* ─────────────────────────── Invoice ─────────────────────────── */
+
+// As with the invite and the registration confirmation, an admin rewords the
+// subject and the opening paragraph; everything below them is what the family
+// owes and is built from the invoice itself.
+export const defaultInvoiceSubject = (invoice) =>
+  `Invoice ${invoice.invoiceNumber} from Love Learning Explorers`;
+
+export const defaultInvoiceMessage = (invoice) =>
+  `Here is invoice ${invoice.invoiceNumber}. A PDF copy is attached for your records.`;
+
+export const buildInvoiceEmailHtml = ({ invoice, message }) => {
+  const balance = Number(invoice.totalAmount) - Number(invoice.amountPaid);
+  const paid = Number(invoice.amountPaid);
+
+  return layout({
+    title: `Invoice ${invoice.invoiceNumber}`,
+    content: `
+      ${textToHtmlParagraphs(message || defaultInvoiceMessage(invoice))}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0;">
+        <tbody>
+          ${invoice.lines.map((l) => billingRow(escapeHtml(l.description || 'Charge'), formatCurrency(l.amount))).join('')}
+          ${paid > 0 ? billingRow('Paid', `−${formatCurrency(paid)}`) : ''}
+          ${billingRow(balance > 0 ? 'Balance due' : 'Paid in full', formatCurrency(Math.max(0, balance)), true)}
+        </tbody>
+      </table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.greenTint};border:1px solid ${BRAND.border};border-radius:12px;margin:0 0 18px;">
+        <tr>
+          <td style="padding:16px 18px;font-family:${FONT};">
+            <div style="font-size:13px;color:${BRAND.muted};margin-bottom:3px;">${balance > 0 ? 'Amount due' : 'Total'}</div>
+            <div style="font-size:24px;font-weight:700;color:${BRAND.green};">${formatCurrency(Math.max(0, balance))}</div>
+            ${invoice.dueDate ? `<div style="font-size:13px;color:${BRAND.muted};margin-top:6px;">Due by <strong style="color:${BRAND.text};">${formatDate(invoice.dueDate)}</strong></div>` : ''}
+          </td>
+        </tr>
+      </table>
+      ${p('You can pay from your parent portal, or reply to this email if you would rather arrange it with the front desk.')}
+    `,
+  });
+};
+
+/**
+ * Emails an invoice with its PDF attached.
+ *
+ * The PDF is passed in already rendered rather than built here: the same bytes
+ * the family receives are what the admin downloaded and checked, and this
+ * module has no business knowing how an invoice is drawn.
+ *
+ * Never throws — returns { ok, error } so the caller can record the outcome.
+ */
+export const sendInvoiceEmail = async ({ to, invoice, subject, message, pdf, pdfFilename }) =>
+  send({
+    to,
+    subject: subject || defaultInvoiceSubject(invoice),
+    html: buildInvoiceEmailHtml({ invoice, message }),
+    attachments: pdf ? [{ filename: pdfFilename || `${invoice.invoiceNumber}.pdf`, content: pdf }] : [],
+  });
+
 export const isEmailConfigured = () =>
   gmailOAuthClient !== null || Boolean(BREVO_API_KEY) || Boolean(RESEND_API_KEY) || transporter !== null;
 

@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink
+  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
 import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
+import EmailPreviewModal from '../Layout/EmailPreviewModal';
+import { defaultInvoiceSubject, defaultInvoiceMessage, INVOICE_FIXED_NOTE } from '../../lib/emailDefaults';
 import './BillingPanel.css';
 
 const formatDateUS = (dateStr) => {
@@ -271,6 +273,66 @@ const BillingPanel = () => {
       toast.error(err.response?.data?.message || err.userMessage || 'Could not void the invoice.');
     } finally {
       setVoidingInvoiceId(null);
+    }
+  };
+
+  // The invoice document: its full specification, its PDF, and emailing it.
+  // `detail` is fetched rather than taken from the list row — the list carries
+  // only what the table shows, and this panel states what a family owes.
+  const [invoiceDetail, setInvoiceDetail] = useState(null); // { loading, invoice, recipient }
+  const [sendInvoiceModal, setSendInvoiceModal] = useState(null); // { invoice, recipient }
+  const [sendingInvoice, setSendingInvoice] = useState(false);
+
+  const openInvoiceDetail = async (inv) => {
+    setInvoiceDetail({ loading: true, invoice: null, recipient: null });
+    try {
+      const data = await database.fetchInvoice(inv.dbId);
+      setInvoiceDetail({ loading: false, ...data });
+    } catch (err) {
+      setInvoiceDetail(null);
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not load the invoice.');
+    }
+  };
+
+  const handleDownloadPdf = async (invoice) => {
+    try {
+      const blob = await database.fetchInvoicePdf(invoice.dbId);
+      // Object URL rather than pointing an <a> at the endpoint directly: the
+      // route needs the auth header, which a plain browser navigation drops.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${invoice.invoiceNumber || invoice.id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not build the PDF.');
+    }
+  };
+
+  const openSendInvoice = async (inv) => {
+    try {
+      const { invoice, recipient } = await database.fetchInvoice(inv.dbId);
+      if (!recipient) {
+        toast.error('This family has no email address on file, so there is nobody to send this to.');
+        return;
+      }
+      setSendInvoiceModal({ invoice, recipient });
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not prepare the email.');
+    }
+  };
+
+  const handleSendInvoice = async ({ subject, message }) => {
+    setSendingInvoice(true);
+    try {
+      const res = await database.sendInvoice(sendInvoiceModal.invoice.dbId, { subject, message });
+      toast.success(res.message || 'Invoice sent.');
+      setSendInvoiceModal(null);
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not send the invoice.');
+    } finally {
+      setSendingInvoice(false);
     }
   };
 
@@ -1117,6 +1179,20 @@ const BillingPanel = () => {
                       <td style={{fontWeight: 700}}>${inv.amount.toFixed(2)}</td>
                       <td><span className={`status-badge ${inv.status.toLowerCase()}`}>{inv.status}</span></td>
                       <td style={{ display: 'flex', gap: '6px' }}>
+                        <button
+                          className="tx-delete-btn"
+                          title="View the full invoice"
+                          onClick={() => openInvoiceDetail(inv)}
+                        >
+                          <Eye size={14} />
+                        </button>
+                        <button
+                          className="tx-delete-btn"
+                          title="Email this invoice with its PDF attached"
+                          onClick={() => openSendInvoice(inv)}
+                        >
+                          <Mail size={14} />
+                        </button>
                         {inv.payments?.filter(p => p.status !== 'REFUNDED').length > 0 && (
                           <button
                             className="action-btn"
@@ -1351,6 +1427,127 @@ const BillingPanel = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Invoice detail — the full specification of what the family owes */}
+      {invoiceDetail && (
+        <div className="modal-overlay" onClick={() => setInvoiceDetail(null)}>
+          <div className="tx-modal invoice-detail-modal" onClick={e => e.stopPropagation()}>
+            {invoiceDetail.loading ? (
+              <div className="tx-form"><p className="text-muted">Loading invoice…</p></div>
+            ) : (
+              <>
+                <div className="modal-head">
+                  <div>
+                    <h3>{invoiceDetail.invoice.invoiceNumber}</h3>
+                    <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '13px' }}>
+                      {invoiceDetail.invoice.familyName}
+                      {invoiceDetail.invoice.student && ` · ${invoiceDetail.invoice.student.fullName}`}
+                    </p>
+                  </div>
+                  <button onClick={() => setInvoiceDetail(null)}><X size={20}/></button>
+                </div>
+
+                <div className="tx-form">
+                  <div className="inv-detail-meta">
+                    <div><span>Issued</span><strong>{formatDateUS(invoiceDetail.invoice.date)}</strong></div>
+                    <div><span>Due</span><strong>{invoiceDetail.invoice.dueDate ? formatDateUS(invoiceDetail.invoice.dueDate) : '—'}</strong></div>
+                    <div><span>Status</span><strong>{invoiceDetail.invoice.status}</strong></div>
+                    {invoiceDetail.invoice.poNumbers.length > 0 && (
+                      <div><span>PO #</span><strong>{invoiceDetail.invoice.poNumbers.join(', ')}</strong></div>
+                    )}
+                  </div>
+
+                  <table className="inv-detail-lines">
+                    <thead>
+                      <tr><th>Description</th><th style={{ textAlign: 'right' }}>Amount</th></tr>
+                    </thead>
+                    <tbody>
+                      {invoiceDetail.invoice.lines.map(l => (
+                        <tr key={l.id}>
+                          <td>{l.description}</td>
+                          <td style={{ textAlign: 'right' }}>${l.amount.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>Subtotal</td>
+                        <td style={{ textAlign: 'right' }}>${invoiceDetail.invoice.subtotal.toFixed(2)}</td>
+                      </tr>
+                      {invoiceDetail.invoice.amountPaid > 0 && (
+                        <tr>
+                          <td>Paid</td>
+                          <td style={{ textAlign: 'right' }}>−${invoiceDetail.invoice.amountPaid.toFixed(2)}</td>
+                        </tr>
+                      )}
+                      <tr className="inv-detail-total">
+                        <td>{invoiceDetail.invoice.balance > 0 ? 'Balance due' : 'Paid in full'}</td>
+                        <td style={{ textAlign: 'right' }}>${Math.max(0, invoiceDetail.invoice.balance).toFixed(2)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+
+                  {invoiceDetail.invoice.payments.length > 0 && (
+                    <div style={{ marginTop: '18px' }}>
+                      <label>Payments received</label>
+                      <ul className="inv-detail-payments">
+                        {invoiceDetail.invoice.payments.map(pmt => (
+                          <li key={pmt.id}>
+                            <span>{formatDateUS(pmt.date)} · {pmt.method}</span>
+                            <strong>${pmt.amount.toFixed(2)}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <p className="text-muted" style={{ fontSize: '13px', marginTop: '16px' }}>
+                    <Mail size={14} style={{ display: 'inline', marginRight: '4px' }} />
+                    {invoiceDetail.recipient
+                      ? <>Would be emailed to <strong>{invoiceDetail.recipient.fullName}</strong> ({invoiceDetail.recipient.email}).</>
+                      : 'No email address on file for this family — this invoice cannot be sent.'}
+                  </p>
+                </div>
+
+                <div className="modal-actions" style={{ marginTop: '20px' }}>
+                  <button className="btn-cancel" onClick={() => handleDownloadPdf(invoiceDetail.invoice)}>
+                    <Download size={15} /> Download PDF
+                  </button>
+                  <button
+                    className="btn-send"
+                    disabled={!invoiceDetail.recipient}
+                    onClick={() => {
+                      setSendInvoiceModal({ invoice: invoiceDetail.invoice, recipient: invoiceDetail.recipient });
+                      setInvoiceDetail(null);
+                    }}
+                  >
+                    <Mail size={15} /> Email invoice
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Review-before-sending, same modal every family email passes through */}
+      {sendInvoiceModal && (
+        <EmailPreviewModal
+          recipients={[{
+            id: sendInvoiceModal.recipient.id,
+            fullName: sendInvoiceModal.recipient.fullName,
+            email: sendInvoiceModal.recipient.email,
+          }]}
+          defaultSubject={defaultInvoiceSubject(sendInvoiceModal.invoice.invoiceNumber)}
+          defaultMessage={defaultInvoiceMessage(sendInvoiceModal.invoice.invoiceNumber)}
+          note={INVOICE_FIXED_NOTE}
+          previewType="invoice"
+          previewContext={{ invoiceId: sendInvoiceModal.invoice.dbId }}
+          onClose={() => setSendInvoiceModal(null)}
+          onConfirm={handleSendInvoice}
+          sending={sendingInvoice}
+        />
       )}
 
       {/* Edit Transaction slide-over */}

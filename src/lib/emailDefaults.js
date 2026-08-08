@@ -22,6 +22,15 @@ export const defaultBillingSubject = (termName) =>
 export const defaultBillingMessage = (studentName, className) =>
   `Here is the billing breakdown for ${studentName}${className ? ` (${className})` : ''}.`;
 
+export const defaultInvoiceSubject = (invoiceNumber) =>
+  `Invoice ${invoiceNumber} from Love Learning Explorers`;
+
+export const defaultInvoiceMessage = (invoiceNumber) =>
+  `Here is invoice ${invoiceNumber}. A PDF copy is attached for your records.`;
+
+export const INVOICE_FIXED_NOTE =
+  "The academy logo, the line items, the balance due and the attached PDF are built from the invoice itself and can't be edited here — only the subject and this message.";
+
 export const INVITE_FIXED_NOTE =
   "The academy logo, the “Set my password” button, the link-expiry note and the footer are added automatically and can't be edited here.";
 

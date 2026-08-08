@@ -3,7 +3,11 @@ import { X, Send } from 'lucide-react';
 import api from '../../lib/api';
 import './EmailPreviewModal.css';
 
-const PREVIEW_ENDPOINT = { invite: '/email/preview/invite', billing: '/email/preview/billing' };
+const PREVIEW_ENDPOINT = {
+  invite: '/email/preview/invite',
+  billing: '/email/preview/billing',
+  invoice: '/email/preview/invoice',
+};
 const PREVIEW_DEBOUNCE_MS = 400;
 
 /**
@@ -23,7 +27,7 @@ const PREVIEW_DEBOUNCE_MS = 400;
  * @param {string} defaultSubject  Prefilled subject line.
  * @param {string} defaultMessage  Prefilled body paragraph.
  * @param {string} [note]          Extra line explaining what stays fixed.
- * @param {'invite'|'billing'} previewType    Which template to render.
+ * @param {'invite'|'billing'|'invoice'} previewType    Which template to render.
  * @param {object} previewContext  Fields the template needs besides subject/message
  *                                 (e.g. { fullName, isReminder } or { studentName, className, request, term }).
  */

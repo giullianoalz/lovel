@@ -368,6 +368,26 @@ export const database = {
     return response.data;
   },
 
+  // The full specification of one invoice, plus who it would be emailed to.
+  fetchInvoice: async (id) => {
+    const response = await api.get(`/billing/invoices/${id}`);
+    return response.data;
+  },
+
+  // The same PDF the family gets attached to their emailed invoice. Returned
+  // as a blob so the caller can open or download it without a second request.
+  fetchInvoicePdf: async (id) => {
+    const response = await api.get(`/billing/invoices/${id}/pdf`, { responseType: 'blob' });
+    return response.data;
+  },
+
+  // Emails the invoice with its PDF attached. `to` overrides the family's
+  // invoice recipient — that is how a test copy goes to the admin instead.
+  sendInvoice: async (id, { subject, message, to } = {}) => {
+    const response = await api.post(`/billing/invoices/${id}/send`, { subject, message, to });
+    return response.data;
+  },
+
   // --- Standing monthly charges ---
   // The arrangement, not the money: creating one bills nobody today. The
   // nightly job raises one transaction per month from it.

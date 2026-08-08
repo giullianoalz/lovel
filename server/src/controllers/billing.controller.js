@@ -5,6 +5,8 @@ import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { notifyAdmins } from '../jobs/notification.helper.js';
 import { round2 } from '../services/registrationPricing.service.js';
 import { nextLcNumber } from '../services/invoicing.service.js';
+import { buildInvoicePdf, invoicePdfFilename } from '../services/invoicePdf.service.js';
+import { sendInvoiceEmail } from '../services/email.service.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -473,6 +475,185 @@ export const editInvoice = async (req, res, next) => {
         lines: updated.lines.map((l) => ({ id: l.id, description: l.description, amount: Number(l.amount) })),
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Everything an invoice document needs, in one shape, used by the detail view,
+ * the PDF and the email alike so the three can never disagree about what a
+ * family owes.
+ */
+const loadInvoiceForDocument = (id) =>
+  prisma.invoice.findUnique({
+    where: { id },
+    include: {
+      lines: { orderBy: { description: 'asc' } },
+      family: { select: { id: true, name: true } },
+      payments: {
+        where: { status: { in: ['COMPLETED', 'PARTIAL_REFUND'] } },
+        select: { id: true, amount: true, method: true, status: true, createdAt: true },
+      },
+    },
+  });
+
+// The invoice's own student if it has one, otherwise nothing — an invoice
+// bundling several children's charges is not "for" any one of them.
+const invoiceStudent = async (invoice) =>
+  invoice.studentId
+    ? prisma.user.findUnique({ where: { id: invoice.studentId }, select: { id: true, fullName: true } })
+    : null;
+
+const serializeInvoice = (invoice, student) => ({
+  id: invoice.invoiceNumber,
+  dbId: invoice.id,
+  invoiceNumber: invoice.invoiceNumber,
+  familyId: invoice.familyId,
+  familyName: invoice.family?.name || null,
+  student: student ? { id: student.id, fullName: student.fullName } : null,
+  date: invoice.date.toISOString().split('T')[0],
+  dueDate: invoice.dueDate ? invoice.dueDate.toISOString().split('T')[0] : null,
+  dateRange: invoice.dateRange || null,
+  source: invoice.source || null,
+  poNumbers: invoice.poNumbers || [],
+  subtotal: Number(invoice.subtotal),
+  totalAmount: Number(invoice.totalAmount),
+  amountPaid: Number(invoice.amountPaid),
+  balance: Number(invoice.totalAmount) - Number(invoice.amountPaid),
+  status: invoice.status,
+  lines: invoice.lines.map((l) => ({ id: l.id, description: l.description, amount: Number(l.amount), quantity: l.quantity })),
+  payments: invoice.payments.map((p) => ({
+    id: p.id,
+    amount: Number(p.amount),
+    method: p.method,
+    status: p.status,
+    date: p.createdAt.toISOString().split('T')[0],
+  })),
+});
+
+/**
+ * Who an invoice is emailed to: the parent flagged as the invoice recipient,
+ * falling back to any other adult on the family, and finally to the student's
+ * own address. Returns null when there is nobody — the caller must refuse to
+ * "send" rather than quietly succeed at mailing no one.
+ */
+const invoiceRecipient = async (invoice) => {
+  if (invoice.familyId) {
+    const members = await prisma.familyMember.findMany({
+      where: { familyId: invoice.familyId },
+      select: { isInvoiceRecipient: true, user: { select: { id: true, fullName: true, email: true, role: true } } },
+    });
+    const withEmail = members.filter((m) => m.user?.email && !m.user.email.endsWith('@selfreg.local'));
+    const flagged = withEmail.find((m) => m.isInvoiceRecipient);
+    const adult = withEmail.find((m) => m.user.role !== 'STUDENT');
+    const chosen = flagged || adult || withEmail[0];
+    if (chosen) return chosen.user;
+  }
+  if (invoice.studentId) {
+    const student = await prisma.user.findUnique({
+      where: { id: invoice.studentId },
+      select: { id: true, fullName: true, email: true },
+    });
+    if (student?.email && !student.email.endsWith('@selfreg.local')) return student;
+  }
+  return null;
+};
+
+/**
+ * GET /api/billing/invoices/:id
+ * The full specification of one invoice — its lines, totals, payments and who
+ * it would be emailed to. Read-only; this is what the "View invoice" panel and
+ * the send flow both read.
+ */
+export const getInvoice = async (req, res, next) => {
+  try {
+    const invoice = await loadInvoiceForDocument(req.params.id);
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+    const [student, recipient] = await Promise.all([invoiceStudent(invoice), invoiceRecipient(invoice)]);
+
+    res.json({
+      invoice: serializeInvoice(invoice, student),
+      recipient: recipient ? { id: recipient.id, fullName: recipient.fullName, email: recipient.email } : null,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/billing/invoices/:id/pdf
+ * The same PDF that gets attached to the emailed invoice, so an admin can read
+ * exactly what a family will receive before approving the send.
+ */
+export const downloadInvoicePdf = async (req, res, next) => {
+  try {
+    const invoice = await loadInvoiceForDocument(req.params.id);
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+    const student = await invoiceStudent(invoice);
+    const pdf = await buildInvoicePdf({ ...invoice, student });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${invoicePdfFilename(invoice)}"`);
+    res.send(pdf);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/billing/invoices/:id/send
+ * Body: { subject?, message?, to? }
+ * Emails the invoice with its PDF attached.
+ *
+ * `to` is honoured when given so an admin can send a test copy to themselves
+ * rather than to a real family. Left out, it goes to the family's invoice
+ * recipient. Nothing is guessed: with no address at all this refuses instead of
+ * reporting a send that never happened.
+ */
+export const sendInvoice = async (req, res, next) => {
+  try {
+    const { subject, message, to } = req.body || {};
+
+    const invoice = await loadInvoiceForDocument(req.params.id);
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+
+    const recipient = to ? { email: to, fullName: to } : await invoiceRecipient(invoice);
+    if (!recipient?.email) {
+      return res.status(422).json({
+        error: 'No Recipient',
+        message: 'This family has no email address on file, so there is nobody to send the invoice to.',
+      });
+    }
+
+    const student = await invoiceStudent(invoice);
+    const withStudent = { ...invoice, student };
+    const pdf = await buildInvoicePdf(withStudent);
+
+    const result = await sendInvoiceEmail({
+      to: recipient.email,
+      invoice: withStudent,
+      subject,
+      message,
+      pdf,
+      pdfFilename: invoicePdfFilename(invoice),
+    });
+
+    if (!result.ok) {
+      return res.status(502).json({
+        error: 'Send Failed',
+        message: result.error || 'The email could not be sent.',
+      });
+    }
+
+    console.log(`[Billing] ${req.user.email} emailed invoice ${invoice.invoiceNumber} to ${recipient.email}`);
+    res.json({ message: `Invoice ${invoice.invoiceNumber} sent to ${recipient.email}.`, to: recipient.email });
   } catch (error) {
     next(error);
   }

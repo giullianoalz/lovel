@@ -1,4 +1,5 @@
-import { buildInviteEmailHtml, buildBillingEmailHtml, toPreviewHtml } from '../services/email.service.js';
+import { buildInviteEmailHtml, buildBillingEmailHtml, buildInvoiceEmailHtml, toPreviewHtml } from '../services/email.service.js';
+import prisma from '../config/database.js';
 
 /**
  * POST /api/email/preview/invite
@@ -35,4 +36,35 @@ export const previewBillingEmail = (req, res) => {
     message,
   }));
   res.json({ subject, html });
+};
+
+/**
+ * POST /api/email/preview/invoice
+ * Body: { invoiceId, subject, message }
+ * Renders the invoice email exactly as it would be sent (Admin only).
+ *
+ * Unlike the other two previews, the figures are read from the database rather
+ * than taken from the request: this email states what a family owes, and a
+ * preview built from numbers the browser supplied could show an admin one
+ * total while the send delivers another.
+ */
+export const previewInvoiceEmail = async (req, res, next) => {
+  try {
+    const { invoiceId, subject = '', message } = req.body || {};
+    if (!invoiceId) {
+      return res.status(400).json({ error: 'Validation Error', message: 'invoiceId is required.' });
+    }
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: { lines: true },
+    });
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+
+    res.json({ subject, html: toPreviewHtml(buildInvoiceEmailHtml({ invoice, message })) });
+  } catch (error) {
+    next(error);
+  }
 };
