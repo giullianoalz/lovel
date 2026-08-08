@@ -100,6 +100,93 @@ export const deleteTransaction = async (req, res, next) => {
 };
 
 /**
+ * PATCH /api/billing/transactions/:id
+ * Corrects the date on a mistaken entry — e.g. a test charge posted with
+ * today's date, or a manually-recorded payment backdated to when it actually
+ * arrived. Deliberately narrow to just `date`: amount/type are what the
+ * balance math depends on, so changing those needs a reversing entry, not an
+ * edit. If the charge is on an invoice, the invoice's own date moves with it
+ * — that's the date the family portal actually shows them.
+ */
+export const updateTransactionDate = async (req, res, next) => {
+  try {
+    const { date } = req.body;
+    if (!date || isNaN(new Date(date).getTime())) {
+      return res.status(400).json({ error: 'Validation Error', message: 'A valid date is required.' });
+    }
+
+    const existing = await prisma.transaction.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, invoiceId: true },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: 'Not Found', message: 'That transaction does not exist.' });
+    }
+
+    const newDate = new Date(`${date}T00:00:00.000Z`);
+    const [transaction] = await prisma.$transaction([
+      prisma.transaction.update({ where: { id: existing.id }, data: { date: newDate } }),
+      ...(existing.invoiceId
+        ? [prisma.invoice.update({ where: { id: existing.invoiceId }, data: { date: newDate } })]
+        : []),
+    ]);
+
+    res.json({ message: 'Date updated.', transaction });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/billing/invoices/:id
+ * Voids a mistaken invoice — e.g. a registration deposit raised against a
+ * class whose price was wrong — along with the charge underneath it.
+ *
+ * Refused once any Payment row references the invoice, same spirit as
+ * deleteTransaction: once real money has touched it (even a PENDING Stripe
+ * session), the correct fix is a refund/credit, not erasing the record. An
+ * invoice can still show amountPaid > 0 with zero Payment rows — that's
+ * family credit auto-applied at creation (see applyAvailableCredit) rather
+ * than a real payment, and voiding just releases that credit for reuse, so
+ * it does not block this.
+ */
+export const voidInvoice = async (req, res, next) => {
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, invoiceNumber: true, familyId: true, totalAmount: true },
+    });
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+
+    const paymentCount = await prisma.payment.count({ where: { invoiceId: invoice.id } });
+    if (paymentCount > 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A payment already exists against this invoice. Refund it instead of voiding the invoice.',
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Only charges this invoice itself raised, and only ones with no
+      // payment attached (paymentCount === 0 above already guarantees that
+      // for the family, but scoping the delete this way keeps the rule
+      // self-evident rather than relying on the earlier check alone).
+      await tx.transaction.deleteMany({ where: { invoiceId: invoice.id, paymentId: null } });
+      // InvoiceLine cascades on delete (see schema.prisma).
+      await tx.invoice.delete({ where: { id: invoice.id } });
+    });
+
+    console.log(`[Billing] ${req.user.email} voided invoice ${invoice.invoiceNumber} ($${invoice.totalAmount}, family ${invoice.familyId})`);
+
+    res.json({ message: 'Invoice voided.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/billing/transactions
  * Create a new transaction (Charge, Payment, Refund, Discount)
  */
@@ -220,6 +307,10 @@ export const listInvoices = async (req, res, next) => {
           where: { status: { in: ['COMPLETED', 'PARTIAL_REFUND'] } },
           select: { id: true, amount: true, method: true, status: true },
         },
+        // Unfiltered count — a PENDING payment (say, a Stripe session the
+        // family hasn't finished) still means real money may be in flight
+        // against this invoice, so it blocks voiding same as a completed one.
+        _count: { select: { payments: true } },
       },
     });
 
@@ -233,6 +324,8 @@ export const listInvoices = async (req, res, next) => {
       amountPaid: Number(inv.amountPaid),
       status: inv.status.charAt(0).toUpperCase() + inv.status.slice(1),
       payments: inv.payments.map(p => ({ id: p.id, amount: Number(p.amount), method: p.method, status: p.status })),
+      // Whether DELETE /invoices/:id would actually accept this — see voidInvoice.
+      voidable: inv._count.payments === 0,
     }));
 
     res.json({ invoices: mapped });

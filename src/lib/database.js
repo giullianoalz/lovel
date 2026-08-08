@@ -346,6 +346,20 @@ export const database = {
     return response.data;
   },
 
+  // Corrects a mistaken date — e.g. a test charge posted with today's date.
+  // Amount/type aren't editable this way; see the controller for why.
+  updateTransactionDate: async (id, date) => {
+    const response = await api.patch(`/billing/transactions/${id}`, { date });
+    return response.data;
+  },
+
+  // Only succeeds for an invoice no Payment row has ever touched — the
+  // server refuses anything else with a 409 explaining why.
+  voidInvoice: async (id) => {
+    const response = await api.delete(`/billing/invoices/${id}`);
+    return response.data;
+  },
+
   // --- Standing monthly charges ---
   // The arrangement, not the money: creating one bills nobody today. The
   // nightly job raises one transaction per month from it.

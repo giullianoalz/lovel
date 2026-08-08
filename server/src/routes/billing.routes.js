@@ -5,9 +5,11 @@ import { validate, createTransactionSchema, createInvoiceSchema } from '../utils
 import {
   listTransactions,
   createTransaction,
+  updateTransactionDate,
   deleteTransaction,
   listInvoices,
   createInvoice,
+  voidInvoice,
   generateEmaBatch,
   reconcileEmaRemittance,
   refundPayment,
@@ -29,6 +31,9 @@ router.get('/transactions', authenticate, requireRole('ADMIN'), listTransactions
 // POST /api/billing/transactions — Create a transaction (Admin)
 router.post('/transactions', authenticate, requireRole('ADMIN'), validate(createTransactionSchema), createTransaction);
 
+// PATCH /api/billing/transactions/:id — Correct a mistaken entry's date (Admin).
+router.patch('/transactions/:id', authenticate, requireRole('ADMIN'), updateTransactionDate);
+
 // DELETE /api/billing/transactions/:id — Remove a mistaken/test entry (Admin).
 // Refused once an invoice or payment depends on it — see the controller.
 router.delete('/transactions/:id', authenticate, requireRole('ADMIN'), deleteTransaction);
@@ -47,6 +52,10 @@ router.get('/invoices', authenticate, requireRole('ADMIN'), listInvoices);
 
 // POST /api/billing/invoices — Generate an invoice (Admin)
 router.post('/invoices', authenticate, requireRole('ADMIN'), validate(createInvoiceSchema), createInvoice);
+
+// DELETE /api/billing/invoices/:id — Void a mistaken invoice (Admin).
+// Refused once a payment has touched it — see the controller.
+router.delete('/invoices/:id', authenticate, requireRole('ADMIN'), voidInvoice);
 
 // EMA Step Up — generate invoices from the Step Up CSV (Admin)
 router.post('/ema/generate', authenticate, requireRole('ADMIN'), generateEmaBatch);

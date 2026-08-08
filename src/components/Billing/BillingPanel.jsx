@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2
+  UploadCloud, FileText, Check, User, Trash2, Pencil
 } from 'lucide-react';
 import { database } from '../../lib/database';
 import { useToast } from '../Layout/ToastProvider';
@@ -178,6 +178,49 @@ const BillingPanel = () => {
       toast.error(err.response?.data?.message || err.userMessage || 'Could not remove the transaction.');
     } finally {
       setDeletingTxId(null);
+    }
+  };
+
+  // Click-to-edit on a ledger row's date — the one field a mistaken entry
+  // (wrong test date, a payment recorded before its actual arrival date got
+  // fixed) can be corrected in place, rather than deleting and re-entering it.
+  const [editingDateTxId, setEditingDateTxId] = useState(null);
+  const [editingDateValue, setEditingDateValue] = useState('');
+  const [savingDateTxId, setSavingDateTxId] = useState(null);
+
+  const startEditDate = (tx) => {
+    setEditingDateTxId(tx.id);
+    setEditingDateValue(tx.date.split('T')[0]);
+  };
+
+  const handleSaveDate = async (tx) => {
+    if (!editingDateValue) return;
+    setSavingDateTxId(tx.id);
+    try {
+      await database.updateTransactionDate(tx.id, editingDateValue);
+      setTransactions(prev => prev.map(t => t.id === tx.id ? { ...t, date: editingDateValue } : t));
+      setEditingDateTxId(null);
+      toast.success('Date updated.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not update the date.');
+    } finally {
+      setSavingDateTxId(null);
+    }
+  };
+
+  const [voidingInvoiceId, setVoidingInvoiceId] = useState(null);
+
+  const handleVoidInvoice = async (inv) => {
+    if (!window.confirm(`Void invoice ${inv.id} ($${inv.amount.toFixed(2)})? This removes it and its charge from the family's ledger. This cannot be undone.`)) return;
+    setVoidingInvoiceId(inv.dbId);
+    try {
+      await database.voidInvoice(inv.dbId);
+      toast.success('Invoice voided.');
+      await loadBilling();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not void the invoice.');
+    } finally {
+      setVoidingInvoiceId(null);
     }
   };
 
@@ -879,10 +922,45 @@ const BillingPanel = () => {
                     return (
                       <tr key={tx.id}>
                         <td>
-                          <div className="tx-date">
-                            <span className="date-str">{formatDateUS(tx.date)}</span>
-                            {tx.invoiceId && <span className="inv-pill">Invoiced</span>}
-                          </div>
+                          {editingDateTxId === tx.id ? (
+                            <div className="tx-date">
+                              <input
+                                type="date"
+                                className="form-control"
+                                style={{ padding: '2px 6px', fontSize: '13px' }}
+                                value={editingDateValue}
+                                onChange={e => setEditingDateValue(e.target.value)}
+                                autoFocus
+                              />
+                              <button
+                                className="tx-delete-btn"
+                                title="Save date"
+                                onClick={() => handleSaveDate(tx)}
+                                disabled={savingDateTxId === tx.id}
+                              >
+                                <Check size={14} />
+                              </button>
+                              <button
+                                className="tx-delete-btn"
+                                title="Cancel"
+                                onClick={() => setEditingDateTxId(null)}
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="tx-date">
+                              <span className="date-str">{formatDateUS(tx.date)}</span>
+                              {tx.invoiceId && <span className="inv-pill">Invoiced</span>}
+                              <button
+                                className="tx-delete-btn"
+                                title="Edit date"
+                                onClick={() => startEditDate(tx)}
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td>{tx.studentId ? (students.find(s => s.id === tx.studentId)?.name || 'Student') : '—'}</td>
                         <td>{tx.description}</td>
@@ -944,7 +1022,7 @@ const BillingPanel = () => {
                       <td>{inv.dateRange}</td>
                       <td style={{fontWeight: 700}}>${inv.amount.toFixed(2)}</td>
                       <td><span className={`status-badge ${inv.status.toLowerCase()}`}>{inv.status}</span></td>
-                      <td>
+                      <td style={{ display: 'flex', gap: '6px' }}>
                         {inv.payments?.filter(p => p.status !== 'REFUNDED').length > 0 && (
                           <button
                             className="action-btn"
@@ -955,6 +1033,16 @@ const BillingPanel = () => {
                             }}
                           >
                             Refund
+                          </button>
+                        )}
+                        {inv.voidable && (
+                          <button
+                            className="tx-delete-btn"
+                            title="Void this invoice — removes it and its charge from the ledger"
+                            onClick={() => handleVoidInvoice(inv)}
+                            disabled={voidingInvoiceId === inv.dbId}
+                          >
+                            <Trash2 size={14} />
                           </button>
                         )}
                       </td>
