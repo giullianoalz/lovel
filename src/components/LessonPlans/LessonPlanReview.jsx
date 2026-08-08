@@ -185,11 +185,16 @@ const LessonPlanReview = () => {
                   </div>
                   {pendingSupplies.map(item => (
                     <div key={item.id} className="lpr-supply-row">
-                      <div>
+                      <div className="lpr-supply-info">
                         <div className="lpr-supply-name">{item.itemName} <span>× {item.quantity}</span></div>
                         <div className="lpr-supply-meta">
                           {item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName} {item.dayNeeded && `· Needed ${item.dayNeeded}`}
                         </div>
+                        {item.lessonPlan?.mainActivity && (
+                          <div className="lpr-supply-context">
+                            <strong>Activity:</strong> {item.lessonPlan.mainActivity}
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={() => handleMarkPurchased(item)}
@@ -210,9 +215,14 @@ const LessonPlanReview = () => {
                   </div>
                   {purchasedSupplies.map(item => (
                     <div key={item.id} className="lpr-supply-row">
-                      <div>
+                      <div className="lpr-supply-info">
                         <div className="lpr-supply-name purchased">{item.itemName} × {item.quantity}</div>
                         <div className="lpr-supply-meta">{item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName}</div>
+                        {item.lessonPlan?.mainActivity && (
+                          <div className="lpr-supply-context">
+                            <strong>Activity:</strong> {item.lessonPlan.mainActivity}
+                          </div>
+                        )}
                       </div>
                       {item.cost != null && (
                         <span className="lpr-cost">

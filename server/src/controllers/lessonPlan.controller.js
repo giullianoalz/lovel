@@ -144,7 +144,7 @@ export const getSupplyList = async (req, res, next) => {
       where,
       include: {
         teacher: { select: { id: true, fullName: true } },
-        lessonPlan: { select: { weekOf: true, class: { select: { name: true } } } },
+        lessonPlan: { select: { id: true, weekOf: true, type: true, mainActivity: true, class: { select: { name: true } } } },
       },
       orderBy: [{ dayNeeded: 'asc' }, { itemName: 'asc' }],
     });
