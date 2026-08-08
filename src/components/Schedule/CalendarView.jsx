@@ -2148,8 +2148,9 @@ const CalendarView = () => {
                            {gridEvents.map(item => {
                               const isStaff = !!item.kind;
                               const { top, height } = getPositionStyles(item.time);
-                              const { left, width } = layout.get(item);
                               const pxHeight = parseFloat(height.replace('px',''));
+                              const overlapStyles = getOverlapStyles(item, layout);
+                              
                               return (
                                 <div
                                   key={item.id}
@@ -2158,10 +2159,9 @@ const CalendarView = () => {
                                     position: 'absolute',
                                     top,
                                     height,
-                                    left,
-                                    width,
                                     zIndex: 10,
-                                    cursor: isStaff ? 'default' : (hasRole('ADMIN') ? 'grab' : 'pointer')
+                                    cursor: isStaff ? 'default' : (hasRole('ADMIN') ? 'grab' : 'pointer'),
+                                    ...overlapStyles
                                   }}
                                   title={isStaff ? `${item.title} · ${item.time}` : `${item.title} · ${item.time} · ${item.teacher}`}
                                   draggable={!isStaff && hasRole('ADMIN')}
