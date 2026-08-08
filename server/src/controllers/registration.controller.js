@@ -2,8 +2,9 @@ import { Prisma } from '@prisma/client';
 import prisma from '../config/database.js';
 import { hasRole } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
-import { calculateRegistrationBilling } from '../services/registrationPricing.service.js';
+import { calculateRegistrationBilling, DEPOSIT_RATE, round2 } from '../services/registrationPricing.service.js';
 import { buildQuarterCharges } from '../services/quarterlyBilling.service.js';
+import { raiseInvoicedCharge } from '../services/invoicing.service.js';
 import { sendRegistrationBillingEmail } from '../services/email.service.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 
@@ -321,22 +322,20 @@ export const submitRegistrationRequest = async (req, res, next) => {
       });
       const familyId = familyMember?.familyId;
 
+      // Only the 15% deposit is charged (and invoiced immediately) at
+      // registration — the remaining 85% is raised later by the quarterly
+      // billing run, which credits this deposit against Q1 (see
+      // buildQuarterCharges's `creditDeposit`). That's also why this charge
+      // does NOT carry termId/quarter: doing so would make the quarterly run
+      // think Q1 was already fully billed and skip raising the remainder.
       const postCharge = async (className) => {
-        if (familyId && billing.totalQuarterly > 0) {
-          await tx.transaction.create({
-            data: {
-              familyId,
-              studentId,
-              amount: billing.totalQuarterly,
-              type: 'CHARGE',
-              description: `Registration - ${term.name} - ${className}`,
-              // Tags this as the student's Q1 charge for this term. Without it,
-              // the quarterly billing run has no way to see that registration
-              // already charged the full first quarter, and would charge it
-              // again — this is what makes it recognize the student as billed.
-              termId,
-              quarter: 1,
-            }
+        if (familyId && billing.depositAmount > 0) {
+          await raiseInvoicedCharge(tx, {
+            familyId,
+            studentId,
+            termId,
+            amount: billing.depositAmount,
+            description: `Registration Deposit (15%) - ${term.name} - ${className}`,
           });
         }
       };
@@ -1026,11 +1025,13 @@ export const cancelRegistrationRequest = async (req, res, next) => {
       return res.status(404).json({ error: 'Not Found', message: 'That registration no longer exists.' });
     }
 
-    // Only the charge this registration raised: matched on the Q1 marker it
-    // writes, so a recurring charge or a manually added fee for the same
-    // student is never swept up by cancelling a registration.
+    // Only the deposit charge this registration raised: it carries this term's
+    // id but no quarter (quarter is only ever set by the quarterly billing
+    // run), so a recurring charge, a manually added fee, or an already-raised
+    // Q1/Q2 tuition charge for the same student is never swept up by
+    // cancelling a registration.
     const charges = await prisma.transaction.findMany({
-      where: { studentId: request.studentId, termId: request.termId, quarter: 1, type: 'CHARGE' },
+      where: { studentId: request.studentId, termId: request.termId, quarter: null, type: 'CHARGE' },
       select: { id: true, amount: true, invoiceId: true, paymentId: true },
     });
     const removable = charges.filter((c) => !c.invoiceId && !c.paymentId);
@@ -1093,7 +1094,7 @@ export const previewQuarterCharges = async (req, res, next) => {
     const q = Number(quarter);
     if (![1, 2].includes(q)) return res.status(400).json({ message: 'quarter must be 1 or 2.' });
 
-    const preview = await buildQuarterCharges(termId, q, { creditDeposit: creditDeposit === 'true' });
+    const preview = await buildQuarterCharges(termId, q, { creditDeposit: creditDeposit !== 'false' });
     res.json(preview);
   } catch (error) {
     next(error);
@@ -1113,7 +1114,7 @@ export const previewQuarterCharges = async (req, res, next) => {
  */
 export const generateQuarterCharges = async (req, res, next) => {
   try {
-    const { termId, quarter, creditDeposit = false } = req.body;
+    const { termId, quarter, creditDeposit = true } = req.body;
     if (!termId) return res.status(400).json({ message: 'termId is required.' });
 
     const q = Number(quarter);
@@ -1554,22 +1555,21 @@ export const adminRegisterStudent = async (req, res, next) => {
       });
 
       // `markQuarter` tags the row as the student's Q1 charge for this term, so
-      // the quarterly billing run recognizes them as already billed instead of
-      // charging the full quarter a second time. Only one row per
-      // (student, term, quarter) is allowed at the database level — a
-      // registration that charges several classes as separate line items
-      // must tag exactly one of them, never all.
-      const postCharge = async (amount, className, { markQuarter = true } = {}) => {
-        if (familyId && amount > 0) {
-          await tx.transaction.create({
-            data: {
-              familyId,
-              studentId,
-              amount,
-              type: 'CHARGE',
-              description: `Admin Registration - ${term.name} - ${className}`,
-              ...(markQuarter ? { termId, quarter: 1 } : {}),
-            }
+      // Only the 15% deposit is charged (and invoiced immediately) here — the
+      // remaining 85% is raised later by the quarterly billing run, which
+      // credits this deposit against Q1 (see buildQuarterCharges's
+      // `creditDeposit`). So this charge deliberately does NOT carry
+      // termId/quarter: doing so would make the quarterly run think Q1 was
+      // already fully billed and skip raising the remainder.
+      const postCharge = async (amount, className) => {
+        const depositAmount = round2(amount * DEPOSIT_RATE);
+        if (familyId && depositAmount > 0) {
+          await raiseInvoicedCharge(tx, {
+            familyId,
+            studentId,
+            termId,
+            amount: depositAmount,
+            description: `Registration Deposit (15%) - ${term.name} - ${className}`,
           });
         }
       };
@@ -1603,17 +1603,12 @@ export const adminRegisterStudent = async (req, res, next) => {
         // first seat that clears, so waitlisting everything charges nothing
         // at all, matching how a single fully-waitlisted request already works.
         let extrasCharged = false;
-        let quarterMarked = false;
         for (const o of outcomes) {
           if (!o.enrolled) continue;
           const classRate = calculateRegistrationBilling({ term, groupType: o.class.groupType, priceOverride: o.class.priceOverride }).baseRate;
           const extras = extrasCharged ? 0 : billing.electivesTotal + billing.ixlTotal;
           extrasCharged = true;
-          // Every enrolled class bills, but only the first charge in this
-          // registration carries the Q1 marker — the unique index allows just
-          // one such row per student per term per quarter.
-          await postCharge(classRate + extras, o.class.name, { markQuarter: !quarterMarked });
-          quarterMarked = true;
+          await postCharge(classRate + extras, o.class.name);
         }
 
         return { status, requestId: request.id, className: outcomes.map((o) => o.class.name).join(', '), electives };

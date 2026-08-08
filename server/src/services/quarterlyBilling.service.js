@@ -23,11 +23,13 @@ const round2 = (n) => Math.round(n * 100) / 100;
  * @param {string} termId
  * @param {number} quarter — 1 or 2
  * @param {boolean} creditDeposit — subtract the deposit already paid at
- *        registration from the first quarter. Off by default: whether that
- *        deposit is a prepayment or a separate reservation fee is a policy
- *        call, so it's the operator's to make at run time, not ours to assume.
+ *        registration from the first quarter. Defaults on: registration now
+ *        only charges the 15% deposit (invoiced immediately), so Q1 must
+ *        credit it back or the family would be billed for it twice. Still an
+ *        override, not hardcoded, so an operator can turn it off for a term
+ *        billed the old way (deposit rolled into a single 100% charge).
  */
-export const buildQuarterCharges = async (termId, quarter, { creditDeposit = false } = {}) => {
+export const buildQuarterCharges = async (termId, quarter, { creditDeposit = true } = {}) => {
   const term = await prisma.registrationTerm.findUniqueOrThrow({ where: { id: termId } });
 
   // Every active enrolment in a class belonging to this term. A student sitting

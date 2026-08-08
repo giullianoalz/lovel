@@ -463,10 +463,14 @@ model Transaction {
   type        TransactionType
   description String?
   date        DateTime        @default(now()) @db.Date
-  // Set only on tuition raised by the quarterly billing run. The unique index
-  // below is what makes that run safe to repeat: a second attempt for the same
-  // student and quarter is refused by the database rather than double-charged.
-  // Postgres treats NULLs as distinct, so every other transaction is untouched.
+  // termId + quarter together are set only on tuition raised by the quarterly
+  // billing run — the unique index below is what makes that run safe to
+  // repeat: a second attempt for the same student and quarter is refused by
+  // the database rather than double-charged. Postgres treats NULLs as
+  // distinct, so every other transaction is untouched.
+  // termId ALONE (quarter left null) marks the registration deposit charge
+  // instead — that's what lets cancelling a registration find and reverse it
+  // without also sweeping up a quarterly tuition charge for the same term.
   termId      String?         @map("term_id") @db.Uuid
   quarter     Int?
   // Set only on charges raised by a standing monthly arrangement. `periodKey`
@@ -1382,6 +1386,18 @@ model LiabilityWaiver {
   parentName      String   @map("parent_name") @db.VarChar(255)
   signatureData   String   @map("signature_data")
   documentVersion String   @default("2026-08") @map("document_version") @db.VarChar(20)
+  // The exact title + section text the parent had on screen when they signed
+  // — { title, sections }, the same shape GET /waivers/document returns.
+  // documentVersion alone is a label, not a document: without the actual
+  // wording captured here, regenerating this waiver's PDF after the template
+  // is later edited would silently attach today's wording to a signature that
+  // was given for yesterday's. Null only for rows signed before this column
+  // existed, where the PDF falls back to the current template.
+  documentSnapshot Json?   @map("document_snapshot")
+  // The waiver's own opt-out: checked, the parent wrote "No Photos" on the
+  // line the paper form offers instead of a blanket refusal of the whole
+  // release. Marketing needs this surfaced, not just recorded.
+  photoOptOut     Boolean  @default(false) @map("photo_opt_out")
   ipAddress       String?  @map("ip_address") @db.VarChar(64)
   // Set once the signed PDF has been archived to Drive. Null just means the
   // archive step hasn't run yet (or Drive wasn't configured at signing time) —

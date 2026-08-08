@@ -415,9 +415,9 @@ export const buildBillingEmailHtml = ({ studentName, className, electiveNames, r
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.greenTint};border:1px solid ${BRAND.border};border-radius:12px;margin:0 0 18px;">
       <tr>
         <td style="padding:16px 18px;font-family:${FONT};">
-          <div style="font-size:13px;color:${BRAND.muted};margin-bottom:3px;">Deposit required (15%)</div>
+          <div style="font-size:13px;color:${BRAND.muted};margin-bottom:3px;">Deposit charged (15%)</div>
           <div style="font-size:24px;font-weight:700;color:${BRAND.green};">${formatCurrency(request.depositAmount)}</div>
-          <div style="font-size:13px;color:${BRAND.muted};margin-top:6px;">Due by <strong style="color:${BRAND.text};">${formatDate(request.depositDueDate)}</strong></div>
+          <div style="font-size:13px;color:${BRAND.muted};margin-top:6px;">An invoice for this deposit has been issued. The remaining balance is billed each quarter.</div>
         </td>
       </tr>
     </table>

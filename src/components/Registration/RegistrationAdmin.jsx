@@ -79,7 +79,7 @@ const RegistrationAdmin = () => {
 
   /* Quarterly tuition — preview first, then commit. */
   const [quarterToBill, setQuarterToBill] = useState(1);
-  const [creditDeposit, setCreditDeposit] = useState(false);
+  const [creditDeposit, setCreditDeposit] = useState(true);
   const [quarterPreview, setQuarterPreview] = useState(null);
   const [quarterLoading, setQuarterLoading] = useState(false);
 
@@ -1336,6 +1336,11 @@ const RegistrationAdmin = () => {
                       <span className={`badge ${w.signed ? 'active' : 'danger'}`}>
                         {w.signed ? 'Signed' : 'Not signed'}
                       </span>
+                      {w.signed && w.photoOptOut && (
+                        <span className="badge pending" title="Parent opted out of photo/video use">
+                          No Photos
+                        </span>
+                      )}
                     </h4>
                     <p className="text-muted text-sm">
                       {w.familyName || 'No family'}

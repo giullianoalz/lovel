@@ -4,9 +4,9 @@ const IXL_PRICES = {
   CORE: 5,
   CORE_SPANISH: 10,
 };
-const DEPOSIT_RATE = 0.15;
+export const DEPOSIT_RATE = 0.15;
 
-const round2 = (n) => Math.round(n * 100) / 100;
+export const round2 = (n) => Math.round(n * 100) / 100;
 
 /**
  * Pure pricing calculation — mirrors the Google Apps Script trigger.
