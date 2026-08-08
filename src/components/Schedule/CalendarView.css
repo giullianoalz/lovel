@@ -850,6 +850,70 @@
   color: var(--text-muted);
 }
 
+/* --------------------------------------
+   TutorBird-style list events
+   (No left border, text colored to match)
+--------------------------------------- */
+.tb-list-event {
+  border-radius: 2px;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.tb-list-ev-time {
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tb-list-ev-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.tb-list-ev-title strong {
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.tb-list-ev-desc {
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.tb-list-ev-check {
+  flex-shrink: 0;
+}
+
+/* Math = Blue */
+.tb-list-event.math { background: #e0f2fe; color: #0369a1; }
+.tb-list-event.math .tb-list-ev-check { color: #0ea5e9; }
+
+/* Science = Green */
+.tb-list-event.science { background: #dcfce7; color: #15803d; }
+.tb-list-event.science .tb-list-ev-check { color: #22c55e; }
+
+/* Languages = Red */
+.tb-list-event.languages { background: #fee2e2; color: #b91c1c; }
+.tb-list-event.languages .tb-list-ev-check { color: #ef4444; }
+
+/* Arts = Purple (or orange if they prefer, let's stick to purple as in original) */
+.tb-list-event.arts { background: #f3e8ff; color: #7e22ce; }
+.tb-list-event.arts .tb-list-ev-check { color: #a855f7; }
+
+/* PTO / Meeting */
+.tb-list-event.pto { background: #fecdd3; color: #be123c; cursor: default; }
+.tb-list-event.meeting { background: #ede9fe; color: #6d28d9; cursor: default; }
+
+
 /* Week List View */
 .list-week-container {
   display: flex;

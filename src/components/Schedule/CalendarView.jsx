@@ -2085,25 +2085,28 @@ const CalendarView = () => {
                              ))}
                            </div>
                          </div>
-                         <div className="week-day-body" style={{ minHeight: 'auto', padding: '10px 4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                         <div className="week-day-body" style={{ minHeight: 'auto', padding: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                            {normalEvents.map(item => {
                               const isStaff = !!item.kind;
+                              // Match the TutorBird color themes based on subject
+                              let themeClass = isStaff ? item.kind : item.subject;
                               return (
                                 <div
                                   key={item.id}
-                                  className={`agenda-event ${isStaff ? item.kind : item.subject}`}
-                                  style={{ position: 'relative' }}
+                                  className={`tb-list-event ${themeClass}`}
                                   onClick={!isStaff ? () => handleEventClick(item) : undefined}
                                 >
-                                  <span className="agenda-ev-time" style={{ color: item.kind ? 'inherit' : '#e11d48' }}>{item.time}</span>
-                                  <div className="agenda-ev-title">
-                                    {!isStaff && <CheckCircle2 size={13} className="agenda-ev-check" />}
+                                  <div className="tb-list-ev-time">
+                                    {item.time}
+                                  </div>
+                                  <div className="tb-list-ev-title">
+                                    {!isStaff && <CheckCircle2 size={11} className="tb-list-ev-check" />}
                                     <strong>{item.title}</strong>
                                   </div>
                                   {!isStaff && (
-                                    <span className="agenda-ev-desc" style={{ marginTop: 2 }}>
-                                      <span>{item.teacher.replace('Prof. ', '')}</span>
-                                    </span>
+                                    <div className="tb-list-ev-desc">
+                                      Zoom Lesson with {item.teacher.replace('Prof. ', '')}
+                                    </div>
                                   )}
                                 </div>
                               );
