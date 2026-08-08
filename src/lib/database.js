@@ -346,10 +346,11 @@ export const database = {
     return response.data;
   },
 
-  // Corrects a mistaken date — e.g. a test charge posted with today's date.
-  // Amount/type aren't editable this way; see the controller for why.
-  updateTransactionDate: async (id, date) => {
-    const response = await api.patch(`/billing/transactions/${id}`, { date });
+  // Corrects a mistaken entry: date, amount, description and/or student. If
+  // the row is on an invoice, the server moves that invoice with it. `type`
+  // isn't editable — see the controller for why.
+  updateTransaction: async (id, fields) => {
+    const response = await api.patch(`/billing/transactions/${id}`, fields);
     return response.data;
   },
 

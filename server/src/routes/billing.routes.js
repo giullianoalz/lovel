@@ -5,7 +5,7 @@ import { validate, createTransactionSchema, createInvoiceSchema } from '../utils
 import {
   listTransactions,
   createTransaction,
-  updateTransactionDate,
+  updateTransaction,
   deleteTransaction,
   listInvoices,
   createInvoice,
@@ -32,8 +32,9 @@ router.get('/transactions', authenticate, requireRole('ADMIN'), listTransactions
 // POST /api/billing/transactions — Create a transaction (Admin)
 router.post('/transactions', authenticate, requireRole('ADMIN'), validate(createTransactionSchema), createTransaction);
 
-// PATCH /api/billing/transactions/:id — Correct a mistaken entry's date (Admin).
-router.patch('/transactions/:id', authenticate, requireRole('ADMIN'), updateTransactionDate);
+// PATCH /api/billing/transactions/:id — Correct a mistaken entry (Admin).
+// Date/amount/description/student; `type` is not editable — see the controller.
+router.patch('/transactions/:id', authenticate, requireRole('ADMIN'), updateTransaction);
 
 // DELETE /api/billing/transactions/:id — Remove a mistaken/test entry (Admin).
 // Refused once an invoice or payment depends on it — see the controller.

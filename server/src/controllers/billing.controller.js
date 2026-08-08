@@ -4,6 +4,7 @@ import { applyAvailableCredit } from '../services/billingCredit.service.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { notifyAdmins } from '../jobs/notification.helper.js';
 import { round2 } from '../services/registrationPricing.service.js';
+import { nextLcNumber } from '../services/invoicing.service.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -22,26 +23,33 @@ export const listTransactions = async (req, res, next) => {
       orderBy: { date: 'asc' },
       include: {
         student: { select: { id: true, fullName: true } },
-        invoice: { select: { id: true, invoiceNumber: true } },
+        invoice: { select: { id: true, invoiceNumber: true, _count: { select: { payments: true } } } },
       },
     });
 
     // Map to frontend format
-    const mapped = transactions.map((t) => ({
-      id: t.id,
-      studentId: t.studentId,
-      studentName: t.student?.fullName || null,
-      familyId: t.familyId,
-      amount: Number(t.amount),
-      type: t.type.charAt(0).toUpperCase() + t.type.slice(1), // charge -> Charge
-      description: t.description || '',
-      date: t.date.toISOString().split('T')[0],
-      invoiceId: t.invoice?.invoiceNumber || null,
-      // Whether this row can be deleted outright — see DELETE /transactions/:id.
-      // Exposed as a plain boolean rather than making the UI infer it from
-      // invoiceId/paymentId, so the one rule lives in one place.
-      deletable: !t.invoiceId && !t.paymentId,
-    }));
+    const mapped = transactions.map((t) => {
+      // Money having actually moved is what locks a row — see
+      // DELETE/PATCH /transactions/:id. Exposed as plain booleans rather than
+      // making the UI infer them, so the one rule lives in one place.
+      const locked = Boolean(t.paymentId) || (t.invoice?._count.payments ?? 0) > 0;
+      return {
+        id: t.id,
+        studentId: t.studentId,
+        studentName: t.student?.fullName || null,
+        familyId: t.familyId,
+        amount: Number(t.amount),
+        // CHARGE -> Charge. The enum comes out of Prisma fully upper-cased, so
+        // the tail has to be lowered too — without that this produced "CHARGE"
+        // and the client's `type === 'Charge'` comparisons silently never matched.
+        type: t.type.charAt(0) + t.type.slice(1).toLowerCase(),
+        description: t.description || '',
+        date: t.date.toISOString().split('T')[0],
+        invoiceId: t.invoice?.invoiceNumber || null,
+        deletable: !locked,
+        editable: !locked,
+      };
+    });
 
     res.json({ transactions: mapped });
   } catch (error) {
@@ -53,15 +61,15 @@ export const listTransactions = async (req, res, next) => {
  * DELETE /api/billing/transactions/:id
  * Removes a mistaken or test entry from a family's ledger (Admin only).
  *
- * Deliberately narrow: only a row that has never touched an invoice or a
- * payment can go this way. Once either exists, deleting the transaction would
- * leave the invoice's total or the payment's allocation pointing at money that
- * no longer has a reason on the books — the correct fix at that point is a
- * reversing entry (a refund, a credit), not erasing the original one. A row
- * raised by a recurring charge or the quarterly billing run is real, billed
- * money too, so the same rule applies to it — nothing here is special-cased
- * for how a transaction was created, only for what, if anything, already
- * depends on it.
+ * A charge now gets an invoice the moment it's raised, so "is it invoiced?"
+ * can no longer be the thing that blocks deletion — that would make almost
+ * every charge undeletable. What blocks it is money having actually moved: a
+ * Payment applied to this row, or any Payment against the invoice it sits on.
+ * At that point the fix is a refund or a credit, not erasing the original.
+ *
+ * Otherwise the invoice comes with it: the line is removed and the invoice
+ * either shrinks to what's left or, if this was its only line, goes away
+ * entirely — an invoice for nothing is not a document anyone should keep.
  */
 export const deleteTransaction = async (req, res, next) => {
   try {
@@ -75,20 +83,51 @@ export const deleteTransaction = async (req, res, next) => {
     if (!existing) {
       return res.status(404).json({ error: 'Not Found', message: 'That transaction does not exist.' });
     }
-    if (existing.invoiceId) {
-      return res.status(409).json({
-        error: 'Conflict',
-        message: 'This charge is already on an invoice. Void or credit the invoice instead of deleting the charge underneath it.',
-      });
-    }
     if (existing.paymentId) {
       return res.status(409).json({
         error: 'Conflict',
         message: 'A payment is already applied to this. Refund the payment instead of deleting the transaction underneath it.',
       });
     }
+    if (existing.invoiceId) {
+      const paymentCount = await prisma.payment.count({ where: { invoiceId: existing.invoiceId } });
+      if (paymentCount > 0) {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: 'A payment has already been made against this entry\'s invoice. Refund it instead of deleting the charge underneath it.',
+        });
+      }
+    }
 
-    await prisma.transaction.delete({ where: { id: req.params.id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.invoiceLine.deleteMany({ where: { transactionId: existing.id } });
+      await tx.transaction.delete({ where: { id: existing.id } });
+
+      if (!existing.invoiceId) return;
+
+      const remaining = await tx.invoiceLine.findMany({
+        where: { invoiceId: existing.invoiceId },
+        select: { amount: true },
+      });
+      if (remaining.length === 0) {
+        await tx.invoice.delete({ where: { id: existing.invoiceId } });
+        return;
+      }
+
+      const newTotal = round2(remaining.reduce((sum, l) => sum + Number(l.amount), 0));
+      const invoice = await tx.invoice.findUnique({ where: { id: existing.invoiceId } });
+      const amountPaid = Number(invoice.amountPaid);
+      await tx.invoice.update({
+        where: { id: existing.invoiceId },
+        data: {
+          subtotal: newTotal,
+          totalAmount: newTotal,
+          status: amountPaid <= 0
+            ? (invoice.status === 'OVERDUE' ? 'OVERDUE' : 'SENT')
+            : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
+        },
+      });
+    });
 
     // No audit table for the ledger exists yet, so the server log is the only
     // trace of who removed what — worth a real record if this is ever disputed.
@@ -102,37 +141,118 @@ export const deleteTransaction = async (req, res, next) => {
 
 /**
  * PATCH /api/billing/transactions/:id
- * Corrects the date on a mistaken entry — e.g. a test charge posted with
- * today's date, or a manually-recorded payment backdated to when it actually
- * arrived. Deliberately narrow to just `date`: amount/type are what the
- * balance math depends on, so changing those needs a reversing entry, not an
- * edit. If the charge is on an invoice, the invoice's own date moves with it
- * — that's the date the family portal actually shows them.
+ * Body: { date?, amount?, description?, studentId? }
+ * Corrects a mistaken ledger entry in place — the "Edit Transaction" panel.
+ *
+ * `type` is deliberately NOT editable: flipping a charge into a payment (or
+ * back) reverses which way the row moves the balance, and any invoice built
+ * on it would silently mean the opposite of what it did before. That is a
+ * reversing entry, not an edit.
+ *
+ * When the row is already on an invoice, the invoice moves with it — its date,
+ * its matching line, and its recomputed total — so the ledger and what the
+ * family sees in the portal can never drift apart. Editing is refused once a
+ * real Payment references that invoice, same rule as voiding: money that has
+ * already moved gets corrected with a refund or a credit, not by rewriting
+ * what it was for.
  */
-export const updateTransactionDate = async (req, res, next) => {
+export const updateTransaction = async (req, res, next) => {
   try {
-    const { date } = req.body;
-    if (!date || isNaN(new Date(date).getTime())) {
+    const { date, amount, description, studentId } = req.body;
+
+    if (date !== undefined && (!date || isNaN(new Date(date).getTime()))) {
       return res.status(400).json({ error: 'Validation Error', message: 'A valid date is required.' });
+    }
+    let parsedAmount;
+    if (amount !== undefined) {
+      parsedAmount = Number(amount);
+      if (!isFinite(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({ error: 'Validation Error', message: 'Amount must be a positive number.' });
+      }
     }
 
     const existing = await prisma.transaction.findUnique({
       where: { id: req.params.id },
-      select: { id: true, invoiceId: true },
+      select: { id: true, invoiceId: true, amount: true },
     });
     if (!existing) {
       return res.status(404).json({ error: 'Not Found', message: 'That transaction does not exist.' });
     }
 
-    const newDate = new Date(`${date}T00:00:00.000Z`);
-    const [transaction] = await prisma.$transaction([
-      prisma.transaction.update({ where: { id: existing.id }, data: { date: newDate } }),
-      ...(existing.invoiceId
-        ? [prisma.invoice.update({ where: { id: existing.invoiceId }, data: { date: newDate } })]
-        : []),
-    ]);
+    if (existing.invoiceId) {
+      const paymentCount = await prisma.payment.count({ where: { invoiceId: existing.invoiceId } });
+      if (paymentCount > 0) {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: 'This entry is on an invoice a payment has already been made against. Refund the payment instead of editing it.',
+        });
+      }
+    }
 
-    res.json({ message: 'Date updated.', transaction });
+    const newDate = date !== undefined ? new Date(`${date}T00:00:00.000Z`) : undefined;
+
+    const transaction = await prisma.$transaction(async (tx) => {
+      const updated = await tx.transaction.update({
+        where: { id: existing.id },
+        data: {
+          ...(newDate !== undefined && { date: newDate }),
+          ...(parsedAmount !== undefined && { amount: parsedAmount }),
+          ...(description !== undefined && { description: String(description).trim() || null }),
+          ...(studentId !== undefined && { studentId: studentId || null }),
+        },
+      });
+
+      if (existing.invoiceId) {
+        // Keep the invoice line this row backs in step with it. Matched by
+        // transactionId, so an invoice bundling several charges only has the
+        // edited one rewritten rather than all of them.
+        await tx.invoiceLine.updateMany({
+          where: { transactionId: existing.id },
+          data: {
+            ...(parsedAmount !== undefined && { amount: parsedAmount }),
+            ...(description !== undefined && { description: String(description).trim() || 'Charge' }),
+          },
+        });
+
+        // Recomputed from the lines rather than by adjusting the old total by
+        // the difference — an invoice whose total had already drifted would
+        // otherwise stay wrong forever.
+        const lines = await tx.invoiceLine.findMany({
+          where: { invoiceId: existing.invoiceId },
+          select: { amount: true },
+        });
+        const newTotal = round2(lines.reduce((sum, l) => sum + Number(l.amount), 0));
+        const invoice = await tx.invoice.findUnique({ where: { id: existing.invoiceId } });
+        const amountPaid = Number(invoice.amountPaid);
+
+        await tx.invoice.update({
+          where: { id: existing.invoiceId },
+          data: {
+            ...(newDate !== undefined && { date: newDate }),
+            subtotal: newTotal,
+            totalAmount: newTotal,
+            status: amountPaid <= 0
+              ? (invoice.status === 'OVERDUE' ? 'OVERDUE' : 'SENT')
+              : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
+          },
+        });
+      }
+
+      return updated;
+    });
+
+    res.json({
+      message: 'Transaction updated.',
+      transaction: {
+        id: transaction.id,
+        studentId: transaction.studentId,
+        familyId: transaction.familyId,
+        amount: Number(transaction.amount),
+        type: transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1).toLowerCase(),
+        description: transaction.description || '',
+        date: transaction.date.toISOString().split('T')[0],
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -378,6 +498,7 @@ export const createTransaction = async (req, res, next) => {
         }
       }
 
+      const txDate = date ? new Date(date) : new Date();
       let created = await db.transaction.create({
         data: {
           familyId,
@@ -387,9 +508,37 @@ export const createTransaction = async (req, res, next) => {
           amount: txAmount,
           type: upperType,
           description: description || `Manual ${type}`,
-          date: date ? new Date(date) : new Date(),
+          date: txDate,
         },
       });
+
+      // A charge is money owed, so it gets its invoice — and therefore its
+      // LC-#### number — the moment it's raised, matching what registration
+      // deposits already do. Without this a charge sat unbilled until someone
+      // remembered to run "New Invoice", which is how a family ends up owing
+      // money no document ever told them about.
+      let invoiceNumber = null;
+      if (upperType === 'CHARGE' && !invoiceId) {
+        invoiceNumber = `LC-${await nextLcNumber(db)}`;
+        const invoice = await db.invoice.create({
+          data: {
+            invoiceNumber,
+            familyId,
+            studentId: studentId || null,
+            date: txDate,
+            subtotal: txAmount,
+            totalAmount: txAmount,
+            status: 'SENT',
+            dateRange: description || 'Charge',
+            dueDate: new Date(txDate.getTime() + 30 * 86400000),
+            lines: {
+              create: [{ description: description || 'Charge', amount: txAmount, transactionId: created.id }],
+            },
+          },
+        });
+        created = await db.transaction.update({ where: { id: created.id }, data: { invoiceId: invoice.id } });
+        await applyAvailableCredit(db, { familyId, invoiceId: invoice.id, invoiceTotal: txAmount });
+      }
 
       if (excess > 0) {
         await db.transaction.create({
@@ -403,19 +552,19 @@ export const createTransaction = async (req, res, next) => {
         });
       }
 
-      return created;
+      return { created, invoiceNumber };
     });
 
     res.status(201).json({
       transaction: {
-        id: tx.id,
-        studentId: tx.studentId,
-        familyId: tx.familyId,
-        amount: Number(tx.amount),
+        id: tx.created.id,
+        studentId: tx.created.studentId,
+        familyId: tx.created.familyId,
+        amount: Number(tx.created.amount),
         type: type.charAt(0).toUpperCase() + type.slice(1),
-        description: tx.description,
-        date: tx.date.toISOString().split('T')[0],
-        invoiceId: null,
+        description: tx.created.description,
+        date: tx.created.date.toISOString().split('T')[0],
+        invoiceId: tx.invoiceNumber,
       },
     });
   } catch (error) {
@@ -505,9 +654,6 @@ export const createInvoice = async (req, res, next) => {
     // atomic — a crash between the two steps would leave transactions free
     // to be picked up again by a second invoice (double-billing the family).
     const invoice = await prisma.$transaction(async (tx) => {
-      // Numeric max, not string sort — `invoiceNumber` is text, so a naive
-      // ORDER BY desc breaks once numbers hit 5 digits ("LC-4391" > "LC-10000"
-      // lexicographically). See nextLcNumber below for the same fix used by EMA.
       const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
 
       const created = await tx.invoice.create({
@@ -560,20 +706,6 @@ export const createInvoice = async (req, res, next) => {
 };
 
 /* ──────────────────────────── EMA STEP UP ──────────────────────────── */
-
-// Compute the next sequential LC-#### number (numeric, not lexicographic).
-const nextLcNumber = async (tx) => {
-  const invoices = await tx.invoice.findMany({
-    where: { invoiceNumber: { startsWith: 'LC-' } },
-    select: { invoiceNumber: true },
-  });
-  let max = 4390;
-  for (const inv of invoices) {
-    const n = parseInt(inv.invoiceNumber.replace('LC-', ''), 10);
-    if (!isNaN(n) && n > max) max = n;
-  }
-  return max + 1;
-};
 
 // POST /api/billing/ema/generate
 // Body: { groups: [{ studentName, emaStudentId, total, poNumbers: [], rows: [{poNumber, amount}] }] }

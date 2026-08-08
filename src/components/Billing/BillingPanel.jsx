@@ -181,30 +181,78 @@ const BillingPanel = () => {
     }
   };
 
-  // Click-to-edit on a ledger row's date — the one field a mistaken entry
-  // (wrong test date, a payment recorded before its actual arrival date got
-  // fixed) can be corrected in place, rather than deleting and re-entering it.
-  const [editingDateTxId, setEditingDateTxId] = useState(null);
-  const [editingDateValue, setEditingDateValue] = useState('');
-  const [savingDateTxId, setSavingDateTxId] = useState(null);
+  // The row-level "⋮" menu, and the edit panel it (or clicking the date)
+  // opens. Only one menu is ever open, so the open row's id is the whole
+  // state — no per-row component needed.
+  const [openRowMenuId, setOpenRowMenuId] = useState(null);
+  const [editTxPanel, setEditTxPanel] = useState(null); // { tx, date, amount, description, studentId }
+  const [savingTxEdit, setSavingTxEdit] = useState(false);
 
-  const startEditDate = (tx) => {
-    setEditingDateTxId(tx.id);
-    setEditingDateValue(tx.date.split('T')[0]);
+  // Any click outside a menu closes it — without this the menu stays open
+  // behind the panel it just launched.
+  useEffect(() => {
+    if (!openRowMenuId) return;
+    const close = () => setOpenRowMenuId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openRowMenuId]);
+
+  const openEditTx = (tx) => {
+    setOpenRowMenuId(null);
+    setEditTxPanel({
+      tx,
+      date: tx.date.split('T')[0],
+      amount: Math.abs(tx.amount).toFixed(2),
+      description: tx.description || '',
+      studentId: tx.studentId || '',
+    });
   };
 
-  const handleSaveDate = async (tx) => {
-    if (!editingDateValue) return;
-    setSavingDateTxId(tx.id);
+  const handleSaveTxEdit = async () => {
+    const amount = parseFloat(editTxPanel.amount);
+    if (!isFinite(amount) || amount <= 0) {
+      toast.error('Amount must be a positive number.');
+      return;
+    }
+    if (!editTxPanel.date) {
+      toast.error('A date is required.');
+      return;
+    }
+    setSavingTxEdit(true);
     try {
-      await database.updateTransactionDate(tx.id, editingDateValue);
-      setTransactions(prev => prev.map(t => t.id === tx.id ? { ...t, date: editingDateValue } : t));
-      setEditingDateTxId(null);
-      toast.success('Date updated.');
+      await database.updateTransaction(editTxPanel.tx.id, {
+        date: editTxPanel.date,
+        amount,
+        description: editTxPanel.description,
+        studentId: editTxPanel.studentId || null,
+      });
+      toast.success('Transaction updated.');
+      setEditTxPanel(null);
+      // Full reload rather than a local patch: editing an invoiced charge also
+      // moves its invoice's total and status, which this screen shows too.
+      await loadBilling();
     } catch (err) {
-      toast.error(err.response?.data?.message || err.userMessage || 'Could not update the date.');
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not update the transaction.');
     } finally {
-      setSavingDateTxId(null);
+      setSavingTxEdit(false);
+    }
+  };
+
+  // Delete from inside the edit panel (the trash icon in its header) — closes
+  // the panel on success so it isn't left showing a row that no longer exists.
+  const handleDeleteFromPanel = async () => {
+    const tx = editTxPanel.tx;
+    if (!window.confirm(`Remove this ${tx.type.toLowerCase()} of $${Math.abs(tx.amount).toFixed(2)}? This cannot be undone.`)) return;
+    setSavingTxEdit(true);
+    try {
+      await database.deleteTransaction(tx.id);
+      toast.success('Transaction removed.');
+      setEditTxPanel(null);
+      await loadBilling();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not remove the transaction.');
+    } finally {
+      setSavingTxEdit(false);
     }
   };
 
@@ -973,45 +1021,12 @@ const BillingPanel = () => {
                     return (
                       <tr key={tx.id}>
                         <td>
-                          {editingDateTxId === tx.id ? (
-                            <div className="tx-date">
-                              <input
-                                type="date"
-                                className="form-control"
-                                style={{ padding: '2px 6px', fontSize: '13px' }}
-                                value={editingDateValue}
-                                onChange={e => setEditingDateValue(e.target.value)}
-                                autoFocus
-                              />
-                              <button
-                                className="tx-delete-btn"
-                                title="Save date"
-                                onClick={() => handleSaveDate(tx)}
-                                disabled={savingDateTxId === tx.id}
-                              >
-                                <Check size={14} />
-                              </button>
-                              <button
-                                className="tx-delete-btn"
-                                title="Cancel"
-                                onClick={() => setEditingDateTxId(null)}
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="tx-date">
-                              <span className="date-str">{formatDateUS(tx.date)}</span>
-                              {tx.invoiceId && <span className="inv-pill">Invoiced</span>}
-                              <button
-                                className="tx-delete-btn"
-                                title="Edit date"
-                                onClick={() => startEditDate(tx)}
-                              >
-                                <Pencil size={12} />
-                              </button>
-                            </div>
-                          )}
+                          <div className="tx-date">
+                            <button className="tx-date-link" onClick={() => openEditTx(tx)}>
+                              {formatDateUS(tx.date)}
+                            </button>
+                            {tx.invoiceId && <span className="inv-pill">{tx.invoiceId}</span>}
+                          </div>
                         </td>
                         <td>{tx.studentId ? (students.find(s => s.id === tx.studentId)?.name || 'Student') : '—'}</td>
                         <td>{tx.description}</td>
@@ -1028,16 +1043,29 @@ const BillingPanel = () => {
                           {tx.runningBalance < 0 ? `($${Math.abs(tx.runningBalance).toFixed(2)} credit)` : `$${tx.runningBalance.toFixed(2)}`}
                         </td>
                         <td>
-                          {tx.deletable && (
+                          <div className="tx-row-menu" onClick={e => e.stopPropagation()}>
                             <button
                               className="tx-delete-btn"
-                              title="Remove this entry"
-                              onClick={() => handleDeleteTransaction(tx)}
-                              disabled={deletingTxId === tx.id}
+                              title="Actions"
+                              onClick={() => setOpenRowMenuId(openRowMenuId === tx.id ? null : tx.id)}
                             >
-                              <Trash2 size={14} />
+                              <MoreVertical size={16} />
                             </button>
-                          )}
+                            {openRowMenuId === tx.id && (
+                              <div className="tx-row-dropdown">
+                                <button onClick={() => openEditTx(tx)}>
+                                  <Pencil size={14} /> Edit Transaction
+                                </button>
+                                <button
+                                  className="danger"
+                                  onClick={() => { setOpenRowMenuId(null); handleDeleteTransaction(tx); }}
+                                  disabled={deletingTxId === tx.id}
+                                >
+                                  <Trash2 size={14} /> Delete Transaction
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1305,6 +1333,89 @@ const BillingPanel = () => {
             <div className="modal-actions" style={{marginTop: '24px'}}>
               <button className="btn-cancel" onClick={() => setRefundModal(null)}>Cancel</button>
               <button className="btn-send" onClick={handleRefund}>Confirm Refund</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction slide-over */}
+      {editTxPanel && (
+        <div className="slideover-overlay" onClick={() => setEditTxPanel(null)}>
+          <div className="slideover" onClick={e => e.stopPropagation()}>
+            <div className="slideover-head">
+              <h3>Edit {editTxPanel.tx.type}</h3>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button
+                  className="tx-delete-btn"
+                  title="Delete this transaction"
+                  onClick={handleDeleteFromPanel}
+                  disabled={savingTxEdit}
+                >
+                  <Trash2 size={18} />
+                </button>
+                <button className="tx-delete-btn" onClick={() => setEditTxPanel(null)}><X size={18}/></button>
+              </div>
+            </div>
+
+            <div className="slideover-body">
+              <div className="form-group">
+                <label>Student</label>
+                <select
+                  className="form-control"
+                  value={editTxPanel.studentId}
+                  onChange={e => setEditTxPanel({ ...editTxPanel, studentId: e.target.value })}
+                >
+                  <option value="">(Not Specified)</option>
+                  {familyStudents.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label>Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={editTxPanel.date}
+                    onChange={e => setEditTxPanel({ ...editTxPanel, date: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label>Amount</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    min="0"
+                    step="0.01"
+                    value={editTxPanel.amount}
+                    onChange={e => setEditTxPanel({ ...editTxPanel, amount: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Description</label>
+                <textarea
+                  className="form-control"
+                  rows="3"
+                  value={editTxPanel.description}
+                  onChange={e => setEditTxPanel({ ...editTxPanel, description: e.target.value })}
+                />
+              </div>
+
+              {editTxPanel.tx.invoiceId && (
+                <p className="text-muted" style={{fontSize: '13px'}}>
+                  <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
+                  On invoice {editTxPanel.tx.invoiceId} — saving updates that invoice's total too.
+                </p>
+              )}
+            </div>
+
+            <div className="slideover-actions">
+              <button className="btn-cancel" onClick={() => setEditTxPanel(null)}>Cancel</button>
+              <button className="btn-send" onClick={handleSaveTxEdit} disabled={savingTxEdit}>
+                {savingTxEdit ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
         </div>
