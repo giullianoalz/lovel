@@ -1535,7 +1535,7 @@ const CalendarView = () => {
     // Own-PTO rows carry no name (the server only names people on the org-wide
     // view), and a nameless column would render as a blank tutor lane.
     .filter(Boolean);
-  const uniqueTeachers = [...new Set([...events.map(e => e.teacher), ...todaysPtoTeachers])].sort();
+  const uniqueTeachers = [...new Set([...dayEventsList.map(e => e.teacher), ...todaysPtoTeachers].filter(Boolean))].sort();
 
   // Moves currentDate by one unit of whatever's currently in view — this is
   // what the header's ◀ ▶ arrows call; each change re-fetches sessions via
