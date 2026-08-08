@@ -2436,23 +2436,65 @@ const RegistrationAdmin = () => {
           defaultSubject={defaultBillingSubject(terms.find(t => t.id === selectedTermForRoster)?.name || 'this term')}
           defaultMessage={defaultBillingMessage(resendTarget.studentName, resendTarget.className)}
           note={BILLING_FIXED_NOTE}
+          previewType="billing"
+          previewContext={{
+            studentName: resendTarget.studentName,
+            className: resendTarget.className,
+            electiveNames: resendTarget.electiveNames,
+            request: {
+              baseRate: resendTarget.baseRate,
+              electivesTotal: resendTarget.electivesTotal,
+              ixlTotal: resendTarget.ixlTotal,
+              ixlPlan: resendTarget.ixlPlan,
+              totalQuarterly: resendTarget.totalQuarterly,
+              depositAmount: resendTarget.depositAmount,
+              depositDueDate: resendTarget.depositDueDate,
+            },
+            term: { name: terms.find(t => t.id === selectedTermForRoster)?.name || 'this term' },
+          }}
           onClose={() => setResendTarget(null)}
           onConfirm={confirmResendEmail}
           sending={resendingId === resendTarget.id}
         />
       )}
 
-      {manualEmailReview && (
-        <EmailPreviewModal
-          recipients={[{ id: manualForm.studentId, fullName: manualStudentName || 'the student', email: 'the family on file' }]}
-          defaultSubject={defaultBillingSubject(terms.find(t => String(t.id) === String(manualForm.termId))?.name || 'this term')}
-          defaultMessage={defaultBillingMessage(manualStudentName || 'your student', '')}
-          note={BILLING_FIXED_NOTE}
-          onClose={() => setManualEmailReview(false)}
-          onConfirm={submitManualRegistration}
-          sending={manualSubmitting}
-        />
-      )}
+      {manualEmailReview && manualPreview && (() => {
+        const manualTerm = terms.find(t => String(t.id) === String(manualForm.termId));
+        const manualClassNames = manualTermClasses
+          .filter(c => manualForm.classIds.includes(c.id))
+          .map(c => c.name)
+          .join(', ');
+        const manualElectiveNames = manualTermElectives
+          .filter(e => manualForm.electiveIds.includes(e.id))
+          .map(e => e.name);
+        return (
+          <EmailPreviewModal
+            recipients={[{ id: manualForm.studentId, fullName: manualStudentName || 'the student', email: 'the family on file' }]}
+            defaultSubject={defaultBillingSubject(manualTerm?.name || 'this term')}
+            defaultMessage={defaultBillingMessage(manualStudentName || 'your student', manualClassNames)}
+            note={BILLING_FIXED_NOTE}
+            previewType="billing"
+            previewContext={{
+              studentName: manualStudentName || 'the student',
+              className: manualClassNames,
+              electiveNames: manualElectiveNames,
+              request: {
+                baseRate: manualPreview.baseRate,
+                electivesTotal: manualPreview.electivesTotal,
+                ixlTotal: manualPreview.ixlTotal,
+                ixlPlan: manualForm.ixlPlan,
+                totalQuarterly: manualPreview.totalQuarterly,
+                depositAmount: manualPreview.depositAmount,
+                depositDueDate: manualTerm?.depositDueDate || null,
+              },
+              term: { name: manualTerm?.name || 'this term' },
+            }}
+            onClose={() => setManualEmailReview(false)}
+            onConfirm={submitManualRegistration}
+            sending={manualSubmitting}
+          />
+        );
+      })()}
 
       {/* Cancel Registration Modal — spells out the side effects, because this
           frees a seat someone may be waitlisted for and deletes real money off

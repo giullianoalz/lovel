@@ -20,6 +20,7 @@ import { hasRole } from './utils/roles.js';
 // Routes
 import authRoutes from './routes/auth.routes.js';
 import usersRoutes from './routes/users.routes.js';
+import emailRoutes from './routes/email.routes.js';
 import familiesRoutes from './routes/families.routes.js';
 import studentsRoutes from './routes/students.routes.js';
 import classesRoutes from './routes/classes.routes.js';
@@ -214,6 +215,7 @@ if (process.env.NODE_ENV !== 'production') {
 // Phase 1 routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/email', emailRoutes);
 app.use('/api/families', familiesRoutes);
 app.use('/api/students', studentsRoutes);
 app.use('/api/classes', classesRoutes);

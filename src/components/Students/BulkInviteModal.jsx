@@ -105,7 +105,9 @@ const BulkInviteModal = ({ onClose, onDone }) => {
     setSending(true);
     try {
       const res = await api.post('/users/invite-bulk', { userIds: selected, subject, message });
-      setResults(res.data);
+      // The server doesn't echo the wording back — keep what was actually
+      // typed so the results screen can show it, not just who it reached.
+      setResults({ ...res.data, sentSubject: subject, sentMessage: message });
       setShowPreview(false);
       onDone?.();
     } catch (err) {
@@ -149,6 +151,14 @@ const BulkInviteModal = ({ onClose, onDone }) => {
 
         {results ? (
           <>
+            {(results.sentSubject || results.sentMessage) && (
+              <div className="bulk-sent-content">
+                <div className="bulk-sent-label">What was sent</div>
+                <div className="bulk-sent-subject">{results.sentSubject}</div>
+                <p className="bulk-sent-message">{results.sentMessage}</p>
+              </div>
+            )}
+
             <div className="bulk-invite-summary">
               <div className="bulk-stat">
                 <Mail size={16} />
@@ -320,7 +330,9 @@ const BulkInviteModal = ({ onClose, onDone }) => {
           // with the first-invite wording rather than picking a side.
           defaultSubject={defaultInviteSubject(false)}
           defaultMessage={DEFAULT_INVITE_MESSAGE}
-          note={INVITE_FIXED_NOTE}
+          note={`${INVITE_FIXED_NOTE} The name below is just the first recipient's, as a stand-in — everyone gets their own.`}
+          previewType="invite"
+          previewContext={{ fullName: invitable.find(p => selected.includes(p.id))?.fullName, isReminder: false }}
           onClose={() => setShowPreview(false)}
           onConfirm={confirmSend}
           sending={sending}

@@ -18,6 +18,12 @@ const logoBytes = await readFile(path.join(__dirname, '..', 'assets', 'waiver-lo
 const LOGO_CID = 'lovelearning-logo';
 const logoAttachment = { filename: 'love-learning-explorers.png', content: logoBytes, cid: LOGO_CID };
 
+// A browser rendering a preview has no attachment to resolve `cid:` against —
+// swap it for a data URI so the admin's review modal shows the real logo
+// instead of a broken image. Never used for the actual send.
+const logoDataUri = `data:image/png;base64,${logoBytes.toString('base64')}`;
+export const toPreviewHtml = (html) => html.replaceAll(`cid:${LOGO_CID}`, logoDataUri);
+
 // The app's own tokens (src/index.css), so an email and the portal it links to
 // don't look like two different organisations.
 const BRAND = {

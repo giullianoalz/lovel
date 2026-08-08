@@ -689,6 +689,8 @@ const StudentsList = () => {
           defaultSubject={defaultInviteSubject(Boolean(inviteTarget.invitedAt))}
           defaultMessage={DEFAULT_INVITE_MESSAGE}
           note={INVITE_FIXED_NOTE}
+          previewType="invite"
+          previewContext={{ fullName: inviteTarget.fullName, isReminder: Boolean(inviteTarget.invitedAt) }}
           onClose={() => setInviteTarget(null)}
           onConfirm={confirmInvite}
           sending={invitingId === inviteTarget.id}
