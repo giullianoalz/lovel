@@ -269,6 +269,7 @@ const CalendarView = () => {
   // Advanced Search States
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [hoverTime, setHoverTime] = useState(null); // { top, label } for hover indicator
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const [isStudentDropdownOpen, setIsStudentDropdownOpen] = useState(false);
   const [isTutorDropdownOpen, setIsTutorDropdownOpen] = useState(false);
@@ -2171,7 +2172,25 @@ const CalendarView = () => {
                            className="week-day-body"
                            onDragOver={e => e.preventDefault()}
                            onDrop={e => handleDropOnWeekDay(e, date)}
+                           onMouseMove={e => {
+                             const rect = e.currentTarget.getBoundingClientRect();
+                             const y = e.clientY - rect.top;
+                             const totalMins = y / PIXELS_PER_MINUTE;
+                             const snapped = Math.round(totalMins / 5) * 5;
+                             const h = Math.floor(snapped / 60) + START_HOUR;
+                             const m = snapped % 60;
+                             const displayH = h % 12 === 0 ? 12 : h % 12;
+                             const period = h % 24 < 12 ? 'AM' : 'PM';
+                             const label = `${displayH}:${String(m).padStart(2, '0')} ${period}`;
+                             setHoverTime({ top: snapped * PIXELS_PER_MINUTE, label });
+                           }}
+                           onMouseLeave={() => setHoverTime(null)}
                          >
+                           {hoverTime && (
+                             <div className="hover-time-line" style={{ top: `${hoverTime.top}px` }}>
+                               <span className="hover-time-label">{hoverTime.label}</span>
+                             </div>
+                           )}
                            {/* Horizontal lines */}
                            {Array.from({ length: 24 }).map((_, i) => (
                              <React.Fragment key={i}>
