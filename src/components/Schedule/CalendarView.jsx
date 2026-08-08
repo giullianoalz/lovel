@@ -354,7 +354,7 @@ const CalendarView = () => {
   const addEventRef = useRef(null);
   const viewMenuRef = useRef(null);
   
-  // Create refs for filter sectionsrm, setNewEventForm] = useState({
+  const [newEventForm, setNewEventForm] = useState({
     // New Top-Level Fields
     title: '',
     topLevelType: 'Tutoring', // 'Tutoring' or 'Class'
