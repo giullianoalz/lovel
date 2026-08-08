@@ -2144,22 +2144,7 @@ const CalendarView = () => {
                 </div>
                 
                 {/* 7 Days Columns */}
-                <div 
-                   className="week-days-container"
-                   onMouseMove={e => {
-                     const rect = e.currentTarget.getBoundingClientRect();
-                     const y = e.clientY - rect.top;
-                     const totalMins = y / PIXELS_PER_MINUTE;
-                     const snapped = Math.round(totalMins / 5) * 5;
-                     const h = Math.floor(snapped / 60) + START_HOUR;
-                     const m = snapped % 60;
-                     const displayH = h % 12 === 0 ? 12 : h % 12;
-                     const period = (h % 24) < 12 ? 'AM' : 'PM';
-                     const label = `${displayH}:${String(m).padStart(2, '0')} ${period}`;
-                     setHoverTime({ top: snapped * PIXELS_PER_MINUTE, label });
-                   }}
-                   onMouseLeave={() => setHoverTime(null)}
-                >
+                <div className="week-days-container">
                   {weekDates.map((date, idx) => {
                     const isToday = toISODate(date) === toISODate(new Date());
                     const dayEvents = events.filter(e => e.dateStr === toISODate(date));
@@ -2193,6 +2178,20 @@ const CalendarView = () => {
                            className="week-day-body"
                            onDragOver={e => e.preventDefault()}
                            onDrop={e => handleDropOnWeekDay(e, date)}
+                           onMouseMove={e => {
+                             const rect = e.currentTarget.getBoundingClientRect();
+                             let y = e.clientY - rect.top;
+                             if (y < 0) y = 0;
+                             const totalMins = y / PIXELS_PER_MINUTE;
+                             const snapped = Math.round(totalMins / 5) * 5;
+                             const h = Math.floor(snapped / 60) + START_HOUR;
+                             const m = snapped % 60;
+                             const displayH = h % 12 === 0 ? 12 : h % 12;
+                             const period = (h % 24) < 12 ? 'AM' : 'PM';
+                             const label = `${displayH}:${String(m).padStart(2, '0')} ${period}`;
+                             setHoverTime({ top: snapped * PIXELS_PER_MINUTE, label });
+                           }}
+                           onMouseLeave={() => setHoverTime(null)}
                          >
 
                            {/* Horizontal lines */}
