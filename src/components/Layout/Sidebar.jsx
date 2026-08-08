@@ -221,7 +221,7 @@ const Sidebar = () => {
                 {classStartingSoon && <span className="nav-item-dot" title="A class is starting soon" />}
               </NavLink>
             )}
-            <NavLink to="/feed" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+            <NavLink to="/feed" onClick={() => { closeMenu(); notif.markReadBySource('announcement'); }} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <Megaphone size={20} />
               <span>Announcements</span>
               {announcementsUnread > 0 && <span className="nav-item-badge">{announcementsUnread > 9 ? '9+' : announcementsUnread}</span>}

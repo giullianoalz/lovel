@@ -505,6 +505,13 @@ const ParentPortal = () => {
   useEffect(() => {
     if (tab === 'billing') loadBilling();
     if (tab === 'register') loadRegistration();
+    // Mark all announcements as read when the user opens this tab, clearing
+    // the sidebar badge count.
+    if (tab === 'announcements' && data?.announcements?.length) {
+      data.announcements.forEach(a => {
+        if (!a.isRead) api.post(`/announcements/${a.id}/read`).catch(() => {});
+      });
+    }
   }, [tab]);
 
   const handleRegSubmit = async (studentId, firstChoiceClassId, secondChoiceClassId, electiveIds = [], ixlPlan = 'NONE') => {

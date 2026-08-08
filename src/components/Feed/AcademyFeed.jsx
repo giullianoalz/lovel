@@ -102,7 +102,13 @@ const AcademyFeed = () => {
     setLoading(true);
     try {
       const res = await api.get('/announcements');
-      setPosts(res.data.announcements || []);
+      const loaded = res.data.announcements || [];
+      setPosts(loaded);
+      // Mark all unread announcements as read server-side so the sidebar
+      // badge clears immediately when the user visits the feed.
+      loaded.forEach(a => {
+        if (!a.isRead) api.post(`/announcements/${a.id}/read`).catch(() => {});
+      });
     } catch {
       toast.error('Could not load Announcements.');
     }

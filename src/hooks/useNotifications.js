@@ -124,5 +124,18 @@ export const useNotifications = (role) => {
     try { await Promise.all(inboxItems.map(persistRead)); } catch { /* noop */ }
   };
 
-  return { inboxItems, laterItems, archiveItems, unreadCount, markRead, markLater, restoreToInbox, markAllRead };
+  // Mark all unread items from a specific source (e.g. 'announcement') as read.
+  // Used to clear the sidebar badge when the user visits the relevant page.
+  const markReadBySource = async (source) => {
+    const matching = inboxItems.filter(n => n.source === source);
+    if (matching.length === 0) return;
+    const nextRead  = new Set(readIds);
+    const nextLater = new Set(laterIds);
+    matching.forEach(n => { nextRead.add(n.id); nextLater.delete(n.id); });
+    setReadIds(nextRead);   saveSet(LS_READ, nextRead);
+    setLaterIds(nextLater); saveSet(LS_LATER, nextLater);
+    try { await Promise.all(matching.map(persistRead)); } catch { /* noop */ }
+  };
+
+  return { inboxItems, laterItems, archiveItems, unreadCount, markRead, markLater, restoreToInbox, markAllRead, markReadBySource };
 };
