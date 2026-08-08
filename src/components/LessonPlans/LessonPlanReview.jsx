@@ -84,8 +84,28 @@ const LessonPlanReview = () => {
   };
 
   const pendingCount = plans.filter(p => p.status === 'SUBMITTED').length;
-  const pendingSupplies = supplyItems.filter(i => i.status === 'PENDING');
-  const purchasedSupplies = supplyItems.filter(i => i.status === 'PURCHASED');
+
+  const supplyItemsByWeek = supplyItems.reduce((acc, item) => {
+    const week = item.lessonPlan?.weekOf;
+    const weekLabel = week 
+      ? `Week of ${new Date(week).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}` 
+      : 'General / Unscheduled';
+    const weekKey = week ? new Date(week).getTime() : 0;
+
+    if (!acc[weekKey]) {
+      acc[weekKey] = { label: weekLabel, pending: [], purchased: [] };
+    }
+    if (item.status === 'PENDING') {
+      acc[weekKey].pending.push(item);
+    } else {
+      acc[weekKey].purchased.push(item);
+    }
+    return acc;
+  }, {});
+
+  const sortedWeeks = Object.keys(supplyItemsByWeek)
+    .sort((a, b) => Number(a) - Number(b))
+    .map(key => supplyItemsByWeek[key]);
 
   return (
     <div className="lpr-page">
@@ -178,61 +198,67 @@ const LessonPlanReview = () => {
             </div>
           ) : (
             <div className="lpr-supply-grid">
-              {pendingSupplies.length > 0 && (
-                <div className="lpr-supply-group">
-                  <div className="lpr-supply-group-header pending">
-                    <Package size={16} /> To Buy ({pendingSupplies.length})
-                  </div>
-                  {pendingSupplies.map(item => (
-                    <div key={item.id} className="lpr-supply-row">
-                      <div className="lpr-supply-info">
-                        <div className="lpr-supply-name">{item.itemName} <span>× {item.quantity}</span></div>
-                        <div className="lpr-supply-meta">
-                          {item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName} {item.dayNeeded && `· Needed ${item.dayNeeded}`}
-                        </div>
-                        {item.lessonPlan?.mainActivity && (
-                          <div className="lpr-supply-context">
-                            <strong>Activity:</strong> {item.lessonPlan.mainActivity}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => handleMarkPurchased(item)}
-                        disabled={purchasingId === item.id}
-                        className="lpr-buy-btn"
-                      >
-                        <CheckCircle size={13} /> {purchasingId === item.id ? 'Saving...' : 'Mark Purchased'}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {sortedWeeks.map(weekGroup => (
+                <div key={weekGroup.label} className="lpr-week-section">
+                  <h3 className="lpr-week-header">{weekGroup.label}</h3>
 
-              {purchasedSupplies.length > 0 && (
-                <div className="lpr-supply-group">
-                  <div className="lpr-supply-group-header purchased">
-                    <CheckCircle size={16} /> Purchased ({purchasedSupplies.length})
-                  </div>
-                  {purchasedSupplies.map(item => (
-                    <div key={item.id} className="lpr-supply-row">
-                      <div className="lpr-supply-info">
-                        <div className="lpr-supply-name purchased">{item.itemName} × {item.quantity}</div>
-                        <div className="lpr-supply-meta">{item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName}</div>
-                        {item.lessonPlan?.mainActivity && (
-                          <div className="lpr-supply-context">
-                            <strong>Activity:</strong> {item.lessonPlan.mainActivity}
-                          </div>
-                        )}
+                  {weekGroup.pending.length > 0 && (
+                    <div className="lpr-supply-group">
+                      <div className="lpr-supply-group-header pending">
+                        <Package size={16} /> To Buy ({weekGroup.pending.length})
                       </div>
-                      {item.cost != null && (
-                        <span className="lpr-cost">
-                          <DollarSign size={13} /> {Number(item.cost).toFixed(2)}
-                        </span>
-                      )}
+                      {weekGroup.pending.map(item => (
+                        <div key={item.id} className="lpr-supply-row">
+                          <div className="lpr-supply-info">
+                            <div className="lpr-supply-name">{item.itemName} <span>× {item.quantity}</span></div>
+                            <div className="lpr-supply-meta">
+                              {item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName} {item.dayNeeded && `· Needed ${item.dayNeeded}`}
+                            </div>
+                            {item.lessonPlan?.mainActivity && (
+                              <div className="lpr-supply-context">
+                                <strong>Activity:</strong> {item.lessonPlan.mainActivity}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleMarkPurchased(item)}
+                            disabled={purchasingId === item.id}
+                            className="lpr-buy-btn"
+                          >
+                            <CheckCircle size={13} /> {purchasingId === item.id ? 'Saving...' : 'Mark Purchased'}
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+
+                  {weekGroup.purchased.length > 0 && (
+                    <div className="lpr-supply-group" style={{ marginTop: weekGroup.pending.length > 0 ? '16px' : '0' }}>
+                      <div className="lpr-supply-group-header purchased">
+                        <CheckCircle size={16} /> Purchased ({weekGroup.purchased.length})
+                      </div>
+                      {weekGroup.purchased.map(item => (
+                        <div key={item.id} className="lpr-supply-row">
+                          <div className="lpr-supply-info">
+                            <div className="lpr-supply-name purchased">{item.itemName} × {item.quantity}</div>
+                            <div className="lpr-supply-meta">{item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName}</div>
+                            {item.lessonPlan?.mainActivity && (
+                              <div className="lpr-supply-context">
+                                <strong>Activity:</strong> {item.lessonPlan.mainActivity}
+                              </div>
+                            )}
+                          </div>
+                          {item.cost != null && (
+                            <span className="lpr-cost">
+                              <DollarSign size={13} /> {Number(item.cost).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
+              ))}
             </div>
           )}
         </>

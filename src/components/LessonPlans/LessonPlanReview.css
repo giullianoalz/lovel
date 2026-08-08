@@ -161,8 +161,21 @@
 .lpr-status-pill.approved { background: #dcfce7; color: #166534; }
 
 .lpr-supply-grid {
-  display: grid;
-  gap: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.lpr-week-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.lpr-week-header {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0 0 12px 4px;
 }
 
 .lpr-supply-group {
