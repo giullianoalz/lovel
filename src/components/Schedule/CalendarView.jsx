@@ -1231,6 +1231,7 @@ const CalendarView = () => {
   };
 
   const getDurationMins = (timeStr) => {
+    if (!timeStr || typeof timeStr !== 'string') return 60;
     const parts = timeStr.split(' - ');
     if (parts.length < 2) return 60;
     const startStr = parts[0];
@@ -1444,9 +1445,13 @@ const CalendarView = () => {
   const PIXELS_PER_MINUTE = 1.6; // Approximates ~96px per hour (clear distinction)
 
   const parseTimeToPix = (timeStr) => {
+    if (!timeStr || typeof timeStr !== 'string') return 0;
     const startStr = timeStr.split(' - ')[0];
-    const [time, period] = startStr.trim().split(' ');
+    const parts = startStr.trim().split(' ');
+    if (parts.length < 2) return 0;
+    const [time, period] = parts;
     let [hours, minutes] = time.split(':').map(Number);
+    if (isNaN(hours)) return 0;
     if (period === 'PM' && hours !== 12) hours += 12;
     if (period === 'AM' && hours === 12) hours = 0;
     
@@ -1455,6 +1460,7 @@ const CalendarView = () => {
   };
 
   const getPositionStyles = (timeRange) => {
+    if (!timeRange) return { top: '0px', height: '60px' };
     const topPix = parseTimeToPix(timeRange);
     const durationMins = getDurationMins(timeRange);
     const heightPix = durationMins * PIXELS_PER_MINUTE;
@@ -2132,7 +2138,10 @@ const CalendarView = () => {
                          >
                            {/* Horizontal lines */}
                            {Array.from({ length: 24 }).map((_, i) => (
-                              <div key={i} className="grid-hour-line" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }} />
+                             <React.Fragment key={i}>
+                               <div className="grid-hour-line" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }} />
+                               <div className="grid-halfhour-line" style={{ top: `${(i * 60 + 30) * PIXELS_PER_MINUTE}px` }} />
+                             </React.Fragment>
                            ))}
                            
                            {/* Events */}

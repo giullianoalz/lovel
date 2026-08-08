@@ -695,6 +695,15 @@
   pointer-events: none;
 }
 
+.grid-halfhour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  border-top: 1px dashed var(--border-light);
+  pointer-events: none;
+}
+
 .agenda-event {
   border-radius: 8px;
   padding: 7px 9px;
