@@ -1,6 +1,6 @@
 .calendar-container {
   padding: 30px;
-  max-width: 1200px;
+  width: 100%;
   margin: 0 auto;
   animation: fadeIn 0.5s ease;
 }
@@ -694,7 +694,7 @@
 /* Week Time Grid View (TutorBird-style) */
 .week-schedule-grid {
   display: flex;
-  min-width: 900px;
+  width: 100%;
   background: white;
   border-radius: 12px;
   overflow: hidden;
