@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, DollarSign } from 'lucide-react';
+import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, DollarSign, Info } from 'lucide-react';
 import { startOfWeek } from 'date-fns';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -24,6 +24,7 @@ const LessonPlanReview = () => {
   const [supplyItems, setSupplyItems] = useState([]);
   const [supplyLoading, setSupplyLoading] = useState(true);
   const [purchasingId, setPurchasingId] = useState(null);
+  const [activityModal, setActivityModal] = useState(null);
 
   const loadPlans = async () => {
     setLoading(true);
@@ -217,6 +218,15 @@ const LessonPlanReview = () => {
                       </div>
                       {weekGroup.pending.map(item => (
                         <div key={item.id} className="lpr-supply-row">
+                          <label className="lpr-supply-checkbox">
+                            <input 
+                              type="checkbox" 
+                              onChange={() => handleMarkPurchased(item)}
+                              disabled={purchasingId === item.id}
+                            />
+                            <span className="lpr-custom-check"></span>
+                          </label>
+
                           <div className="lpr-supply-info">
                             <div className="lpr-supply-name">{item.itemName} <span>× {item.quantity}</span></div>
                             <div className="lpr-supply-meta">
@@ -224,22 +234,16 @@ const LessonPlanReview = () => {
                             </div>
                           </div>
                           
-                          <div className="lpr-supply-activity" title={item.lessonPlan?.mainActivity || ''}>
-                            {item.lessonPlan?.mainActivity && (
-                              <div className="lpr-supply-context">
-                                <strong>Activity:</strong> {item.lessonPlan.mainActivity}
-                              </div>
-                            )}
-                          </div>
-
                           <div className="lpr-supply-actions">
-                            <button
-                              onClick={() => handleMarkPurchased(item)}
-                              disabled={purchasingId === item.id}
-                              className="lpr-buy-btn"
-                            >
-                              <CheckCircle size={13} /> {purchasingId === item.id ? 'Saving...' : 'Mark Purchased'}
-                            </button>
+                            {item.lessonPlan?.mainActivity && (
+                              <button
+                                className="lpr-activity-btn"
+                                onClick={() => setActivityModal(item.lessonPlan.mainActivity)}
+                                title="View activity"
+                              >
+                                <Info size={14} /> Activity
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -252,21 +256,27 @@ const LessonPlanReview = () => {
                         <CheckCircle size={16} /> Purchased ({weekGroup.purchased.length})
                       </div>
                       {weekGroup.purchased.map(item => (
-                        <div key={item.id} className="lpr-supply-row">
+                        <div key={item.id} className="lpr-supply-row purchased">
+                          <label className="lpr-supply-checkbox">
+                            <input type="checkbox" checked readOnly disabled />
+                            <span className="lpr-custom-check checked"><CheckCircle size={12} /></span>
+                          </label>
+
                           <div className="lpr-supply-info">
                             <div className="lpr-supply-name purchased">{item.itemName} × {item.quantity}</div>
                             <div className="lpr-supply-meta">{item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName}</div>
                           </div>
 
-                          <div className="lpr-supply-activity" title={item.lessonPlan?.mainActivity || ''}>
-                            {item.lessonPlan?.mainActivity && (
-                              <div className="lpr-supply-context">
-                                <strong>Activity:</strong> {item.lessonPlan.mainActivity}
-                              </div>
-                            )}
-                          </div>
-
                           <div className="lpr-supply-actions">
+                            {item.lessonPlan?.mainActivity && (
+                              <button
+                                className="lpr-activity-btn"
+                                onClick={() => setActivityModal(item.lessonPlan.mainActivity)}
+                                title="View activity"
+                              >
+                                <Info size={14} /> Activity
+                              </button>
+                            )}
                             {item.cost != null && (
                               <span className="lpr-cost">
                                 <DollarSign size={13} /> {Number(item.cost).toFixed(2)}
@@ -342,6 +352,22 @@ const LessonPlanReview = () => {
               <button onClick={() => handleReview('APPROVED')} disabled={reviewSubmitting} className="lpr-btn-approve">
                 <CheckCircle size={16} /> {reviewSubmitting ? 'Saving...' : 'Approve'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Activity Context Modal */}
+      {activityModal && (
+        <div className="lpr-modal-overlay" onClick={() => setActivityModal(null)}>
+          <div className="lpr-modal activity-modal" onClick={e => e.stopPropagation()}>
+            <div className="lpr-modal-header">
+              <h3><Info size={18} /> Lesson Plan Activity</h3>
+              <button onClick={() => setActivityModal(null)} className="lpr-modal-close">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="lpr-modal-body">
+              <p>{activityModal}</p>
             </div>
           </div>
         </div>

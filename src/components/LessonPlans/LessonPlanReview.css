@@ -200,15 +200,63 @@
 
 .lpr-supply-row {
   display: grid;
-  grid-template-columns: 2fr 3fr auto;
+  grid-template-columns: auto 1fr auto;
   gap: 16px;
   align-items: center;
   padding: 12px 20px;
   border-bottom: 1px solid var(--bg-main);
+  transition: background 0.2s;
+}
+
+.lpr-supply-row:hover {
+  background: var(--bg-main);
 }
 
 .lpr-supply-row:last-child {
   border-bottom: none;
+}
+
+/* Custom Checkbox */
+.lpr-supply-checkbox {
+  position: relative;
+  display: flex;
+  cursor: pointer;
+  align-items: center;
+}
+
+.lpr-supply-checkbox input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+.lpr-custom-check {
+  height: 20px;
+  width: 20px;
+  background-color: white;
+  border: 2px solid var(--border-light);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.lpr-supply-checkbox input:checked ~ .lpr-custom-check,
+.lpr-custom-check.checked {
+  background-color: #10b981;
+  border-color: #10b981;
+  color: white;
+}
+
+.lpr-supply-row.purchased {
+  opacity: 0.7;
+}
+
+.lpr-supply-row.purchased .lpr-custom-check {
+  cursor: default;
 }
 
 .lpr-supply-info {
@@ -236,50 +284,35 @@
   margin-bottom: 2px;
 }
 
-.lpr-supply-activity {
-  min-width: 0;
-}
-
-.lpr-supply-context {
-  font-size: 12px;
-  color: var(--text-main);
-  background: var(--bg-main);
-  padding: 8px 12px;
-  border-radius: 8px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.lpr-supply-context strong {
-  font-weight: 600;
-  color: var(--text-muted);
-}
-
 .lpr-supply-actions {
   display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: flex-end;
 }
 
-.lpr-buy-btn {
-  padding: 6px 14px;
-  background: linear-gradient(135deg, var(--secondary-purple), #4f46e5);
-  color: var(--text-inverse);
-  border: none;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
+.lpr-activity-btn {
   display: flex;
   align-items: center;
   gap: 6px;
+  background: white;
+  border: 1px solid var(--border-light);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all 0.2s;
 }
 
-.lpr-buy-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
+.lpr-activity-btn:hover {
+  background: var(--bg-main);
+  border-color: #94a3b8;
+}
+
+.activity-modal {
+  max-width: 500px;
 }
 
 .lpr-cost {
