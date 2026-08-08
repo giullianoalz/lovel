@@ -283,9 +283,20 @@ export const sendAccountInvite = async (userId, { deliver = true, subject, messa
     : { ok: false, skipped: true };
   console.log(`[Invite] Step 3 done: ok=${delivery.ok}${delivery.error ? ` error=${delivery.error}` : ''}`);
 
+  // invitedAt means "a family was told this account exists" — it must stay
+  // untouched when that never happened. A failed send used to set it anyway,
+  // so the directory showed people as invited while nobody had heard from us;
+  // that's what let two real families sit invisible until they said something.
+  // `deliver: false` is not a failure: the caller (the Google Form intake)
+  // sends its own welcome email using the link this returns, so the account
+  // genuinely was announced, just not by us.
+  const wasAnnounced = delivery.ok || !deliver;
   const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { firebaseUid: firebaseUser.uid, invitedAt: new Date() },
+    data: {
+      firebaseUid: firebaseUser.uid,
+      ...(wasAnnounced ? { invitedAt: new Date() } : {}),
+    },
   });
 
   console.log(`[Invite] Complete: emailed=${delivery.ok}`);
