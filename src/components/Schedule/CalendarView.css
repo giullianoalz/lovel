@@ -780,30 +780,21 @@
   pointer-events: none;
 }
 
-/* Hover time indicator */
-.hover-time-line {
+/* Hover time label in the time axis */
+.hover-time-axis-label {
   position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: #3b82f6;
-  pointer-events: none;
-  z-index: 25;
-}
-
-.hover-time-label {
-  position: absolute;
-  left: 4px;
-  top: -9px;
+  right: 4px;
+  transform: translateY(-50%);
   font-size: 11px;
   font-weight: 700;
   color: #3b82f6;
   background: white;
-  padding: 0 3px;
+  padding: 1px 4px;
   border-radius: 3px;
   white-space: nowrap;
-  line-height: 1.4;
   pointer-events: none;
+  z-index: 30;
+  line-height: 1.4;
 }
 
 .agenda-event {
