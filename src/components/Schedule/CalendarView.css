@@ -734,6 +734,94 @@
   color: var(--text-muted);
 }
 
+/* Week List View */
+.list-week-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.list-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-day-header {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+  padding-bottom: 4px;
+  border-bottom: 2px solid var(--primary-light);
+}
+
+.list-day-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-event-row {
+  display: flex;
+  align-items: center;
+  background: white;
+  border-radius: 8px;
+  border-left: 4px solid var(--border-light);
+  padding: 12px 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  transition: transform 0.2s, box-shadow 0.2s;
+  min-height: 56px;
+}
+
+.list-event-row:hover {
+  transform: translateX(4px);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.08);
+}
+
+.list-event-row.math { border-left-color: var(--primary); }
+.list-event-row.science { border-left-color: #166534; }
+.list-event-row.languages { border-left-color: #991b1b; }
+.list-event-row.arts { border-left-color: #6b21a8; }
+.list-event-row.pto { border-left-color: #881337; }
+.list-event-row.meeting { border-left-color: #4c1d95; }
+
+.list-ev-time {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  min-width: 150px;
+  flex-shrink: 0;
+}
+
+.list-ev-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.list-ev-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.list-ev-check {
+  color: var(--primary);
+}
+
+.list-ev-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 /* Multi-Instructor Day View */
 .instructor-schedule-grid {
   display: flex;

@@ -1624,7 +1624,8 @@ const CalendarView = () => {
               <span className="view-icon"><CalendarIcon size={14} /></span>
               <select value={view} onChange={(e) => setView(e.target.value)} className="view-select">
                 <option value="month">Month</option>
-                <option value="week">Week</option>
+                <option value="list">Week (List)</option>
+                <option value="week">Week (Agenda)</option>
                 <option value="day">Day</option>
               </select>
             </div>
@@ -2009,6 +2010,73 @@ const CalendarView = () => {
       )}
 
       <div className="calendar-glass-box">
+        {view === 'list' && (
+          <div className="calendar-scroll-wrapper">
+             <div className="list-week-container">
+               {weekDates.map((date, idx) => {
+                 const dayEvents = [
+                   ...events.filter(e => e.dateStr === toISODate(date)),
+                   ...staffEvents.filter(e => e.dateStr === toISODate(date)),
+                 ].sort((a, b) => {
+                   const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
+                   const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
+                   return pa - pb;
+                 });
+
+                 // The user explicitly stated "no" to showing empty days with "No classes" message.
+                 // So we just hide days with zero events completely.
+                 if (dayEvents.length === 0) return null;
+                 
+                 const dateLabel = date.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+                 return (
+                   <div key={idx} className="list-day-group">
+                     <h3 className="list-day-header">{dateLabel}</h3>
+                     <div className="list-day-events">
+                       {dayEvents.map(item => {
+                          const isStaff = !!item.kind;
+                          return (
+                            <div
+                              key={item.id}
+                              className={`list-event-row ${isStaff ? item.kind : item.subject}`}
+                              onClick={!isStaff ? () => handleEventClick(item) : undefined}
+                              style={{ cursor: isStaff ? 'default' : 'pointer' }}
+                            >
+                              <div className="list-ev-time">{item.time}</div>
+                              <div className="list-ev-details">
+                                <div className="list-ev-title">
+                                  {!isStaff && <CheckCircle2 size={16} className="list-ev-check" />}
+                                  <strong>{item.title}</strong>
+                                </div>
+                                {!isStaff && (
+                                  <div className="list-ev-meta">
+                                    {item.type === 'Virtual' ? <Video size={13} /> : <MapPin size={13} />}
+                                    <span>{item.teacher.replace('Prof. ', '')}{item.students > 0 ? ` · ${item.students} student${item.students > 1 ? 's' : ''}` : ''}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                       })}
+                     </div>
+                   </div>
+                 );
+               })}
+               
+               {weekDates.every(date => {
+                   return events.filter(e => e.dateStr === toISODate(date)).length === 0 && 
+                          staffEvents.filter(e => e.dateStr === toISODate(date)).length === 0;
+               }) && (
+                 <div className="calendar-empty-day">
+                   <CalendarIcon size={40} />
+                   <h3>No events this week</h3>
+                   <p>There are no classes or events scheduled for this week.</p>
+                 </div>
+               )}
+             </div>
+          </div>
+        )}
+
         {view === 'week' && (
           <div className="calendar-scroll-wrapper">
             <div className="agenda-week-grid">
