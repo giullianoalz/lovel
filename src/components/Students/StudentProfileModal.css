@@ -11,8 +11,11 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(4px);
+  /* Dark and blurred enough that whatever is behind — a dense grid of cards
+     repeating the same names the modal itself lists, say — reads as an
+     indistinct backdrop rather than a second, "ghosted" copy of the content. */
+  background-color: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(8px);
   display: flex;
   justify-content: center;
   align-items: center;
