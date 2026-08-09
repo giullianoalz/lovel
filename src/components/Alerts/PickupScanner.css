@@ -1,0 +1,96 @@
+/* Pickup QR scanner — used one-handed on a phone at the door, so targets are
+   large and the result is readable at arm's length. */
+
+.scanner-modal {
+  position: relative;
+  width: min(420px, 94vw);
+  max-height: 90vh; overflow-y: auto;
+  padding: 22px;
+  background: var(--card-bg, #ffffff);
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  animation: fadeIn 0.25s ease-out;
+}
+
+.scanner-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.scanner-header h2 { margin: 0 0 2px; font-size: 18px; font-weight: 700; color: var(--text-main); }
+.scanner-header p { margin: 0; font-size: 12.5px; color: var(--text-muted); }
+
+.scanner-icon {
+  width: 44px; height: 44px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; border-radius: 13px;
+}
+
+.scanner-viewport {
+  position: relative;
+  width: 100%; aspect-ratio: 1;
+  background: #0f172a; border-radius: 16px; overflow: hidden;
+}
+.scanner-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Only a scratch surface for the jsQR path; never shown. */
+.scanner-canvas { display: none; }
+
+/* Tells the user where to hold the code without hiding the picture. */
+.scanner-reticle {
+  position: absolute; inset: 18%;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  border-radius: 14px;
+  box-shadow: 0 0 0 100vmax rgba(15, 23, 42, 0.35);
+  animation: scannerPulse 2s ease-in-out infinite;
+}
+
+@keyframes scannerPulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+
+.scanner-camera-error {
+  padding: 40px 20px; text-align: center; color: var(--text-muted);
+}
+.scanner-camera-error p { margin: 14px 0 0; font-size: 13px; }
+
+.scanner-result { text-align: center; padding: 8px 0 0; animation: fadeIn 0.25s ease-out; }
+
+.scanner-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: 20px;
+  background: #dcfce7; color: #15803d;
+  font-size: 12.5px; font-weight: 700;
+}
+
+.scanner-person { margin: 14px 0 2px; font-size: 24px; font-weight: 700; color: var(--text-main); }
+.scanner-relationship { margin: 0; font-size: 13px; color: var(--text-muted); }
+.scanner-authorised-by { margin: 6px 0 0; font-size: 12.5px; color: var(--text-muted); }
+
+.scanner-result-bad { padding: 30px 10px; color: #b91c1c; }
+.scanner-message { margin: 14px 0 20px; font-size: 14px; font-weight: 600; line-height: 1.45; }
+
+.scanner-list {
+  margin-top: 18px; padding: 12px 14px;
+  background: rgba(241, 245, 249, 0.7);
+  border-radius: 12px; text-align: left;
+}
+.scanner-list-muted { opacity: 0.72; }
+.scanner-list-label {
+  margin: 0 0 8px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
+}
+.scanner-list-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 5px 0; font-size: 14px; color: var(--text-main);
+}
+.scanner-stamp { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+.scanner-btn {
+  margin-top: 20px; width: 100%;
+  padding: 13px; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(148, 163, 184, 0.4); background: white;
+  font-size: 14px; font-weight: 600; color: var(--text-main);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.scanner-btn:hover { background: rgba(241, 245, 249, 0.9); }
+.scanner-btn:active { transform: translateY(1px); }
+.scanner-btn-primary { background: #4f46e5; border-color: #4f46e5; color: white; }
+.scanner-btn-primary:hover { background: #4338ca; }

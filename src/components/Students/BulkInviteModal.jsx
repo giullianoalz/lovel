@@ -12,7 +12,10 @@ import './BulkInviteModal.css';
 // before the request rather than as a 400 afterwards.
 const MAX_PER_BATCH = 100;
 
-const ROLE_LABELS = { ADMIN: 'Admin', TEACHER: 'Teacher', PARENT: 'Parent', STUDENT: 'Student' };
+const ROLE_LABELS = {
+  ADMIN: 'Admin', TEACHER: 'Teacher', PARENT: 'Parent', STUDENT: 'Student',
+  RECEPTIONIST: 'Front Desk',
+};
 
 /**
  * Clearing the sign-in backlog in one pass.

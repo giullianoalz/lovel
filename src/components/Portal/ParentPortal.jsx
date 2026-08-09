@@ -263,7 +263,9 @@ const PickupModal = ({ children, onClose, onCreated }) => {
         pickupPerson: form.pickupPerson,
         relationship: form.relationship,
         validDate: form.validDate,
-        studentName: children.find(c => c.id === form.studentId)?.fullName || '',
+        // The id, not the name: this is what ties the code to a child, and the
+        // desk resolves it on scan. Empty keeps meaning "all my children".
+        studentId: form.studentId,
       });
       setCreated(res.data);
       onCreated(res.data);
@@ -320,6 +322,9 @@ const PickupModal = ({ children, onClose, onCreated }) => {
           <div className="qr-result">
             <div className="qr-success-badge"><ShieldCheck size={20} /> Authorization created</div>
             <h3>{created.pickupPerson}</h3>
+            <p className="qr-valid-date">
+              Picking up: <strong>{created.student?.fullName || 'All children'}</strong>
+            </p>
             <p className="qr-valid-date">Valid until: <strong>{fmt(created.validDate)}</strong></p>
             <div className="qr-wrapper">
               <QRCodeSVG value={qrPayload} size={200} bgColor="#ffffff" fgColor="#1e293b" level="M" includeMargin />

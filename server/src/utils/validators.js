@@ -96,6 +96,10 @@ export const createInvoiceSchema = z.object({
 export const createPickupAuthSchema = z.object({
   pickupPerson: z.string().min(1, 'pickupPerson is required'),
   validDate: z.string().min(1, 'validDate is required'),
+  // Omitted or empty means "all my children" — the portal offers that, and one
+  // grandparent collecting three siblings shouldn't need three codes.
+  studentId: uuid.optional().or(z.literal('')),
+  relationship: z.string().optional(),
 }).passthrough();
 
 /**

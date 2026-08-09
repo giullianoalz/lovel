@@ -1,6 +1,6 @@
 import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
-import { hasRole, isOnly } from '../utils/roles.js';
+import { hasRole, isOnly, isFrontDeskOnly } from '../utils/roles.js';
 
 /**
  * Prisma filter limiting a teacher to the students they actually teach.
@@ -37,20 +37,41 @@ const rosterScope = (user) => {
  * guardian's contact details can be resolved. Teachers never get this — parent
  * contact stays inside the app so families can't be solicited directly.
  */
-const familyWithMembers = {
+const familyWithMembers = (withEmail = true) => ({
   include: {
     family: {
       include: {
         members: {
           include: {
             user: {
-              select: { id: true, fullName: true, email: true, phone: true, role: true, secondaryRoles: true },
+              select: {
+                id: true, fullName: true, phone: true, role: true, secondaryRoles: true,
+                ...(withEmail ? { email: true } : {}),
+              },
             },
           },
         },
       },
     },
   },
+});
+
+/**
+ * How much of a guardian's contact details this caller may read.
+ *
+ *   'full'  — admins.
+ *   'phone' — the front desk, and only the number. Reception answers the door
+ *             and the phone: when a child is waiting for a pickup that hasn't
+ *             come, someone has to be able to call. An address book entry is
+ *             enough for that. Email is not, because a written channel is
+ *             exactly what the app exists to keep the record of.
+ *   'none'  — everyone else, teachers included. Being a parent yourself doesn't
+ *             earn you another family's details.
+ */
+const parentContactLevel = (user) => {
+  if (hasRole(user, 'ADMIN')) return 'full';
+  if (isFrontDeskOnly(user)) return 'phone';
+  return 'none';
 };
 
 /**
@@ -66,7 +87,7 @@ const familyWithMembers = {
  * Any role counts, not just the primary one — a teacher's own child would
  * otherwise come back with no parent at all, since her primary role is TEACHER.
  */
-const withParentContact = (student) => {
+const withParentContact = (student, { includeEmail = true } = {}) => {
   const members = student.familyMembers?.[0]?.family?.members || [];
   const parents = members.filter(m => hasRole(m.user, 'PARENT'));
   const parent = (parents.find(m => m.isInvoiceRecipient) || parents[0])?.user || null;
@@ -74,7 +95,7 @@ const withParentContact = (student) => {
   return {
     ...student,
     parentName: parent?.fullName || null,
-    parentEmail: parent?.email || null,
+    parentEmail: includeEmail ? (parent?.email || null) : null,
     parentPhone: parent?.phone || null,
   };
 };
@@ -160,11 +181,11 @@ export const exportStudentsCsv = async (req, res, next) => {
 export const listStudents = async (req, res, next) => {
   try {
     const { status, search, familyId, page = 1, limit = 50 } = req.query;
-    // Parent contact is admin-only. It stays out of any teacher's reach —
-    // being a parent yourself doesn't earn you other families' details — and
-    // equally out of the front desk's, which reads this list to hand out
-    // seashells, not to hold a phone book.
-    const hideParentContact = !hasRole(req.user, 'ADMIN');
+    // See parentContactLevel. The directory is the only place the desk gets a
+    // guardian's number; the profile below stays admin/teacher, so reception
+    // reads a name and a phone and not a family's medical or billing history.
+    const contactLevel = parentContactLevel(req.user);
+    const hideParentContact = contactLevel === 'none';
 
     // Every clause is ANDed rather than merged onto one object: rosterScope can
     // itself be an OR (a teacher who is also a parent), and assigning
@@ -194,7 +215,9 @@ export const listStudents = async (req, res, next) => {
         take: parseInt(limit),
         orderBy: { fullName: 'asc' },
         include: {
-          familyMembers: hideParentContact ? { include: { family: true } } : familyWithMembers,
+          familyMembers: hideParentContact
+            ? { include: { family: true } }
+            : familyWithMembers(contactLevel === 'full'),
           enrollments: {
             where: { status: 'active' },
             include: {
@@ -216,7 +239,9 @@ export const listStudents = async (req, res, next) => {
     ]);
 
     res.json({
-      students: hideParentContact ? students : students.map(withParentContact),
+      students: hideParentContact
+        ? students
+        : students.map(s => withParentContact(s, { includeEmail: contactLevel === 'full' })),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -241,7 +266,7 @@ export const getStudent = async (req, res, next) => {
     const student = await prisma.user.findFirstOrThrow({
       where: { id: req.params.id, role: 'STUDENT', ...rosterScope(req.user) },
       include: {
-        familyMembers: familyWithMembers,
+        familyMembers: familyWithMembers(),
         enrollments: {
           include: {
             class: {

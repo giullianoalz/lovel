@@ -5,6 +5,7 @@ import { invalidate } from '../middleware/cache.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 import { getAdminUserIds } from '../services/notificationConfig.service.js';
 import { isOnly } from '../utils/roles.js';
+import { childIdsOfParent } from '../utils/family.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 
 // Shape a behavior log for the student/parent portals — exposes the reason
@@ -321,26 +322,38 @@ export const getStudentPortal = async (req, res, next) => {
 export const createPickupAuth = async (req, res, next) => {
   try {
     const parentId = req.user.id;
-    const { pickupPerson, relationship, validDate, studentName } = req.body;
+    const { pickupPerson, relationship, validDate, studentId } = req.body;
 
     if (!pickupPerson || !validDate) {
       return res.status(400).json({ error: 'Bad Request', message: 'pickupPerson and validDate are required.' });
     }
 
-    // Generate a unique hash token
-    const rawData = `${parentId}-${pickupPerson}-${validDate}-${Date.now()}`;
-    const qrCodeHash = crypto.createHash('sha256').update(rawData).digest('hex');
+    // An authorisation names a child, or it names none and covers the whole
+    // family. What it must never do is name someone else's child: this code
+    // releases a person from the building, so the parent's own family is the
+    // hard boundary — checked here rather than trusted from the request.
+    if (studentId && !(await childIdsOfParent(parentId)).includes(studentId)) {
+      return res.status(403).json({ error: 'Forbidden', message: 'That student is not in your family.' });
+    }
+
+    // The token is what the QR carries and the only thing the desk gets back,
+    // so it comes from the random source, not from a digest of the form fields
+    // — those are guessable, and a guessable token releases a child.
+    const qrCodeHash = crypto.randomBytes(32).toString('hex');
 
     const auth = await prisma.tempPickupAuth.create({
       data: {
         parentId,
+        studentId: studentId || null,
         pickupPerson,
+        relationship: relationship || null,
         validDate: new Date(validDate),
         qrCodeHash,
       },
+      include: { student: { select: { id: true, fullName: true } } },
     });
 
-    res.status(201).json({ ...auth, relationship, studentName });
+    res.status(201).json(auth);
   } catch (error) {
     next(error);
   }
@@ -353,6 +366,7 @@ export const getPickupAuths = async (req, res, next) => {
     const auths = await prisma.tempPickupAuth.findMany({
       where: { parentId },
       orderBy: { createdAt: 'desc' },
+      include: { student: { select: { id: true, fullName: true } } },
     });
     res.json(auths);
   } catch (error) {

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign, Cookie, AlertTriangle, FileWarning } from 'lucide-react';
+import { Bell, Clock, User, CheckCircle, Shield, AlertCircle, LogOut, LifeBuoy, ExternalLink, Ban, DollarSign, Cookie, AlertTriangle, FileWarning, DoorOpen } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { getSocket } from '../../lib/socket';
 import { useAuth } from '../../context/AuthContext';
+import CheckInBoard from './CheckInBoard';
 import './FrontDeskAlerts.css';
 
 const ALERT_TYPES = {
@@ -30,9 +31,13 @@ const FrontDeskAlerts = () => {
   const canHandleSnacks = hasRole('ADMIN', 'TEACHER');         // /rewards/snacks/*
   const canOpenStudent = hasRole('ADMIN', 'TEACHER', 'RECEPTIONIST'); // /students directory
   const canSeeBehavior = hasRole('ADMIN', 'RECEPTIONIST', 'TEACHER'); // GET /behavior
+  const canCheckIn = hasRole('ADMIN', 'RECEPTIONIST');          // /sessions/check-in-board
+  // Only the desk and admins are given a guardian's number (students.controller,
+  // parentContactLevel), so only they get the call button on the board.
+  const canSeeParentPhone = hasRole('ADMIN', 'RECEPTIONIST') && !hasRole('TEACHER');
   const [alerts, setAlerts] = useState([]);
   const [historyAlerts, setHistoryAlerts] = useState([]);
-  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'behavior' | 'history'
+  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'checkin' | 'behavior' | 'history'
   const socketRef = useRef(null);
   const navigate = useNavigate();
 
@@ -366,6 +371,14 @@ const FrontDeskAlerts = () => {
         <button className={`reg-tab ${activeTab === 'active' ? 'active' : ''}`} onClick={() => setActiveTab('active')}>
           <Bell size={14} /> Active Alerts ({alerts.length})
         </button>
+        {canCheckIn && (
+          <button
+            className={`reg-tab ${activeTab === 'checkin' ? 'active' : ''}`}
+            onClick={() => setActiveTab('checkin')}
+          >
+            <DoorOpen size={14} /> Check-In
+          </button>
+        )}
         {canSeeBehavior && (
           <button
             className={`reg-tab ${activeTab === 'behavior' ? 'active' : ''}`}
@@ -483,6 +496,12 @@ const FrontDeskAlerts = () => {
       )}
 
       {/* Behavior — warnings and slips from the Behavior Tracking module */}
+      {/* Mounted only while its tab is open, so the board's poll doesn't run
+          in the background behind the alert queue. */}
+      {activeTab === 'checkin' && canCheckIn && (
+        <CheckInBoard canSeeParentPhone={canSeeParentPhone} />
+      )}
+
       {activeTab === 'behavior' && canSeeBehavior && (
         <div className="history-panel">
           {behaviorLoading ? (

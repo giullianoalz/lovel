@@ -46,3 +46,19 @@ export const isOnly = (user, role) => {
   if (!held.includes(role)) return false;
   return !held.some((r) => r !== role && BROADER_THAN[role]?.includes(r));
 };
+
+/**
+ * True for someone working the desk and nothing else.
+ *
+ * Deliberately not `isOnly(user, 'RECEPTIONIST')`: that only excludes roles
+ * *broader* than front desk, so it stays true for a teacher who covers
+ * reception. Every widening this flag guards — the org-wide calendar, today's
+ * roster, a guardian's phone number — is one that teacher-scoped rules close on
+ * purpose, and the front-desk hat must not reopen it. A teacher who also works
+ * the desk keeps the teacher's narrower view.
+ *
+ * Admins are excluded too, so callers can read this as "front desk limits
+ * apply" without also having to ask whether someone broader is standing there.
+ */
+export const isFrontDeskOnly = (user) =>
+  hasRole(user, 'RECEPTIONIST') && !hasRole(user, 'TEACHER', 'ADMIN');

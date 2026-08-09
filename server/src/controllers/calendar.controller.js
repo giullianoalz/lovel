@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import prisma from '../config/database.js';
-import { hasRole } from '../utils/roles.js';
+import { hasRole, isFrontDeskOnly } from '../utils/roles.js';
 
 export const getCalendarData = async (req, res, next) => {
   try {
@@ -20,8 +20,7 @@ export const getCalendarData = async (req, res, next) => {
     // are their schedule, and nothing a colleague needs. A teacher who also
     // covers reception is still a teacher, so the front-desk hat doesn't
     // reopen it.
-    const isFrontDesk = hasRole(req.user, 'RECEPTIONIST') && !hasRole(req.user, 'TEACHER');
-    const canSeeOrgWide = hasRole(req.user, 'ADMIN') || isFrontDesk;
+    const canSeeOrgWide = hasRole(req.user, 'ADMIN') || isFrontDeskOnly(req.user);
     const isOrgWide = orgWide === 'true' && canSeeOrgWide;
 
     let sessions = [];

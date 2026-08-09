@@ -1,5 +1,6 @@
 import prisma from '../config/database.js';
-import { hasRole, isOnly } from '../utils/roles.js';
+import { hasRole, isOnly, isFrontDeskOnly } from '../utils/roles.js';
+import { childIdsOfParent } from '../utils/family.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 import {
@@ -22,6 +23,21 @@ const NO_SHOW_SUGGESTED_PERCENT = 50;
 const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
 
 /**
+ * Today, as a filter on `Session.date`.
+ *
+ * Sessions are stored at UTC midnight of their calendar day, so the bounds are
+ * built the same way rather than from the raw clock. The *local* day is
+ * deliberate: read off UTC, the academy's day would roll over at 8pm Eastern
+ * and blank the front desk's board while children are still in the building.
+ */
+const todayRange = () => {
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const start = new Date(`${day}T00:00:00.000Z`);
+  return { gte: start, lt: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+};
+
+/**
  * Which sessions this user is allowed to see.
  *
  * `GET /sessions` and `GET /sessions/:id` carry `authenticate` and nothing
@@ -34,9 +50,6 @@ const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
  * (date range, classId, teacherId) instead of replacing them.
  */
 export const sessionScope = async (user) => {
-  // RECEPTIONIST deliberately grants nothing here. Front desk is a hat worn on
-  // top of another role — the teachers who cover reception still see only their
-  // own classes on the calendar, exactly like any other teacher.
   if (hasRole(user, 'ADMIN')) return {};
 
   // Each role the account holds contributes what it may see, and the branches
@@ -49,23 +62,21 @@ export const sessionScope = async (user) => {
     branches.push({ class: { teacherId: user.id } });
   }
 
+  // Front desk gets today's board across every class — who is in the building
+  // right now, in which room, with which teacher — because that is the question
+  // asked at the door. It stops there: yesterday's attendance and next month's
+  // timetable are not reception's to read off a lobby screen, and a teacher who
+  // covers the desk keeps the narrower teacher scope above.
+  if (isFrontDeskOnly(user)) {
+    branches.push({ date: todayRange() });
+  }
+
   if (hasRole(user, 'STUDENT', 'PARENT')) {
     // A student sees their own classes; a parent sees their children's. Both
     // resolve to a set of student ids, so they share one branch.
     let studentIds = hasRole(user, 'STUDENT') ? [user.id] : [];
     if (hasRole(user, 'PARENT')) {
-      const familyMembers = await prisma.familyMember.findMany({
-        where: { userId: user.id },
-        select: { familyId: true },
-      });
-      const children = await prisma.familyMember.findMany({
-        where: {
-          familyId: { in: familyMembers.map((f) => f.familyId) },
-          user: { role: 'STUDENT' },
-        },
-        select: { userId: true },
-      });
-      studentIds = [...new Set([...studentIds, ...children.map((c) => c.userId)])];
+      studentIds = [...new Set([...studentIds, ...(await childIdsOfParent(user.id))])];
     }
     branches.push({
       class: { enrollments: { some: { studentId: { in: studentIds }, status: 'active' } } },
@@ -160,7 +171,9 @@ export const listSessions = async (req, res, next) => {
 export const getSession = async (req, res, next) => {
   try {
     const scope = await sessionScope(req.user);
-    const isStaff = hasRole(req.user, 'ADMIN', 'TEACHER');
+    const frontDesk = isFrontDeskOnly(req.user);
+    // Front desk needs the roster to check children in at the door.
+    const isStaff = hasRole(req.user, 'ADMIN', 'TEACHER') || frontDesk;
 
     const session = await prisma.session.findFirstOrThrow({
       where: { id: req.params.id, ...scope },
@@ -182,6 +195,14 @@ export const getSession = async (req, res, next) => {
         materials: true,
       },
     });
+
+    // A receptionist who is also a parent reaches her own children's future
+    // classes through the parent branch of the scope, where she is a parent and
+    // not staff. The roster rides along only for the day she works the door.
+    if (frontDesk && session.attendance) {
+      const { gte, lt } = todayRange();
+      if (!(session.date >= gte && session.date < lt)) delete session.attendance;
+    }
 
     res.json({ session });
   } catch (error) {
@@ -473,6 +494,285 @@ export const updateAttendance = async (req, res, next) => {
         console.error('[Attendance] no-show admin notification failed:', err.message)
       );
     }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/sessions/check-in-board
+ *
+ * Today's classes with their rosters, each child already carrying whether the
+ * desk has seen them arrive or leave. One request rather than a session list
+ * plus a detail fetch per class: the lobby screen is open all day on a machine
+ * nobody is watching, and it re-polls.
+ *
+ * Cancelled sessions are dropped — nobody is coming to those, and a room the
+ * desk can't check anyone into is only noise on the board.
+ */
+export const checkInBoard = async (req, res, next) => {
+  try {
+    const { gte, lt } = todayRange();
+
+    const sessions = await prisma.session.findMany({
+      where: { date: { gte, lt }, status: { not: 'CANCELLED' } },
+      orderBy: [{ startTime: 'asc' }],
+      include: {
+        class: {
+          select: {
+            id: true,
+            name: true,
+            subject: true,
+            teacher: { select: { id: true, fullName: true } },
+            enrollments: {
+              where: { status: 'active' },
+              select: { student: { select: { id: true, fullName: true, avatarUrl: true } } },
+            },
+          },
+        },
+        attendance: {
+          select: { studentId: true, status: true, checkedAt: true, checkedOutAt: true, checkedOutTo: true },
+        },
+      },
+    });
+
+    // The roster is driven by enrolment, not by the attendance table: a child
+    // nobody has touched yet must still appear, as a name waiting to be checked
+    // in. Attendance only decorates them.
+    const board = sessions.map((session) => {
+      const marks = new Map(session.attendance.map((a) => [a.studentId, a]));
+      return {
+        id: session.id,
+        date: session.date,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        status: session.status,
+        className: session.class?.name || null,
+        subject: session.class?.subject || null,
+        teacherName: session.class?.teacher?.fullName || null,
+        roster: (session.class?.enrollments || [])
+          .map(({ student }) => {
+            const mark = marks.get(student.id);
+            return {
+              studentId: student.id,
+              fullName: student.fullName,
+              avatarUrl: student.avatarUrl,
+              status: mark?.status || null,
+              checkedAt: mark?.checkedAt || null,
+              checkedOutAt: mark?.checkedOutAt || null,
+              checkedOutTo: mark?.checkedOutTo || null,
+            };
+          })
+          .sort((a, b) => a.fullName.localeCompare(b.fullName)),
+      };
+    });
+
+    res.json({ sessions: board });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/sessions/pickup/scan
+ *
+ * The desk scans the QR a parent generated and the children it covers are
+ * checked out, stamped with the name of the person collecting them.
+ *
+ * The scan is the whole action — no confirm step — so everything that could
+ * make it the wrong action is refused before anything is written: an unknown
+ * token, one past its valid date, or a child who never arrived today. A code
+ * already used is not an error; it answers with the departure it already
+ * recorded, because a second scan at a busy door is a repeat, not a new pickup.
+ *
+ * Releasing a child to the wrong adult is the failure that matters here, so the
+ * response always names who the authorisation is for and who created it, and
+ * the desk is expected to read it back before handing anyone over.
+ */
+export const scanPickup = async (req, res, next) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: 'Validation Error', message: 'token is required.' });
+    }
+
+    const auth = await prisma.tempPickupAuth.findUnique({
+      where: { qrCodeHash: token },
+      include: {
+        parent: { select: { id: true, fullName: true } },
+        student: { select: { id: true, fullName: true } },
+      },
+    });
+
+    if (!auth) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'This QR code is not recognised. Ask the parent to generate a new one.',
+      });
+    }
+
+    // validDate is a DATE column — midnight UTC of the last day it covers — so
+    // the comparison is against today's midnight, not the clock. Comparing raw
+    // instants would expire a code that is still valid for the rest of the day.
+    const { gte: todayStart, lt: tomorrowStart } = todayRange();
+    if (auth.validDate < todayStart) {
+      return res.status(410).json({
+        error: 'Gone',
+        message: `This authorisation expired on ${auth.validDate.toISOString().slice(0, 10)}.`,
+        pickupPerson: auth.pickupPerson,
+      });
+    }
+
+    // No student on the authorisation means the whole family, which is what the
+    // portal's "All children" option writes.
+    const studentIds = auth.studentId
+      ? [auth.studentId]
+      : await childIdsOfParent(auth.parentId);
+
+    if (studentIds.length === 0) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'This authorisation covers no children.',
+      });
+    }
+
+    const attendance = await prisma.attendance.findMany({
+      where: {
+        studentId: { in: studentIds },
+        session: { date: { gte: todayStart, lt: tomorrowStart } },
+      },
+      include: { student: { select: { id: true, fullName: true } } },
+    });
+
+    if (attendance.length === 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Nobody on this authorisation has been checked in today, so there is no one to release.',
+        pickupPerson: auth.pickupPerson,
+      });
+    }
+
+    const alreadyOut = attendance.filter((a) => a.checkedOutAt);
+    const toRelease = attendance.filter((a) => !a.checkedOutAt);
+
+    const checkedOutAt = new Date();
+    if (toRelease.length > 0) {
+      await prisma.attendance.updateMany({
+        where: { id: { in: toRelease.map((a) => a.id) } },
+        data: { checkedOutAt, checkedOutTo: auth.pickupPerson },
+      });
+    }
+
+    res.json({
+      pickupPerson: auth.pickupPerson,
+      relationship: auth.relationship,
+      authorisedBy: auth.parent?.fullName || null,
+      validDate: auth.validDate,
+      released: toRelease.map((a) => ({
+        studentId: a.studentId,
+        fullName: a.student.fullName,
+        checkedOutAt,
+      })),
+      alreadyOut: alreadyOut.map((a) => ({
+        studentId: a.studentId,
+        fullName: a.student.fullName,
+        checkedOutAt: a.checkedOutAt,
+        checkedOutTo: a.checkedOutTo,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/sessions/:id/check-in
+ *
+ * The desk's version of attendance: one child at a time, arriving or leaving,
+ * for a session happening today.
+ *
+ * Deliberately not a widening of `PUT /:id/attendance`. That route takes the
+ * whole sheet and runs the no-show review, so a mis-tap at the door could open
+ * a suggested 50% charge against a family and notify the admin queue. Here the
+ * desk may only record that someone walked in (PRESENT/LATE) or walked out.
+ * ABSENT and EXCUSED remain the teacher's call — they held the slot and are the
+ * ones who know whether the seat stayed empty.
+ */
+const CHECK_IN_STATUSES = ['PRESENT', 'LATE'];
+
+export const checkInStudent = async (req, res, next) => {
+  try {
+    const { studentId, action = 'IN', status = 'PRESENT' } = req.body;
+    const direction = String(action).toUpperCase();
+    const arriving = direction === 'IN';
+
+    if (!studentId) {
+      return res.status(400).json({ error: 'Validation Error', message: 'studentId is required.' });
+    }
+    if (!['IN', 'OUT'].includes(direction)) {
+      return res.status(400).json({ error: 'Validation Error', message: 'action must be IN or OUT.' });
+    }
+    const arrivalStatus = String(status).toUpperCase();
+    if (arriving && !CHECK_IN_STATUSES.includes(arrivalStatus)) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'status must be PRESENT or LATE. Absences are recorded by the teacher.',
+      });
+    }
+
+    // The desk works one day: the door is the only thing it reports on. Loading
+    // the session first also confirms the student is actually enrolled, so a
+    // stray id can't create an attendance row against someone else's class.
+    const { gte, lt } = todayRange();
+    const session = await prisma.session.findFirst({
+      where: { id: req.params.id, date: { gte, lt } },
+      select: {
+        id: true,
+        class: {
+          select: {
+            enrollments: { where: { status: 'active', studentId }, select: { id: true } },
+          },
+        },
+      },
+    });
+
+    if (!session) return res.status(404).json(NOT_FOUND);
+    if (!session.class?.enrollments?.length) {
+      return res.status(404).json({ error: 'Not Found', message: 'That student is not enrolled in this class.' });
+    }
+
+    const key = { sessionId_studentId: { sessionId: session.id, studentId } };
+
+    if (!arriving) {
+      // Check-out only annotates an arrival that already happened. Without this
+      // the desk could stamp a departure for a child who never came in.
+      const existing = await prisma.attendance.findUnique({ where: key });
+      if (!existing) {
+        return res.status(409).json({
+          error: 'Conflict',
+          message: 'That student has not been checked in yet.',
+        });
+      }
+      // No name on a manual check-out: the desk pressed a button, it didn't
+      // verify anyone. Clearing it matters because the row may still carry the
+      // person from an earlier scanned pickup, and a stale name here would read
+      // as a record of who collected the child.
+      const attendance = await prisma.attendance.update({
+        where: key,
+        data: { checkedOutAt: new Date(), checkedOutTo: null },
+      });
+      return res.json({ message: 'Checked out.', attendance });
+    }
+
+    const attendance = await prisma.attendance.upsert({
+      where: key,
+      // Re-checking someone in clears a departure stamp: children leave for a
+      // pickup and come back, and the desk shouldn't have to explain that.
+      update: { status: arrivalStatus, checkedAt: new Date(), checkedOutAt: null, checkedOutTo: null },
+      create: { sessionId: session.id, studentId, status: arrivalStatus },
+    });
+
+    res.json({ message: 'Checked in.', attendance });
   } catch (error) {
     next(error);
   }

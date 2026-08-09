@@ -108,6 +108,7 @@ model User {
   payRates               TeacherPayRate[]
   spaceReservations      SpaceReservation[]
   tempPickupAuths        TempPickupAuth[]
+  pickupAuthsAsStudent   TempPickupAuth[]          @relation("PickupAuthStudent")
   assignments            Assignment[]              @relation("TeacherAssignments")
   grades                 Grade[]                   @relation("StudentGrades")
   cancellationsAsStudent SessionCancellation[]     @relation("StudentCancellations")
@@ -342,6 +343,14 @@ model Attendance {
   studentId String           @map("student_id") @db.Uuid
   status    AttendanceStatus @default(PRESENT)
   checkedAt DateTime         @default(now()) @map("checked_at") @db.Timestamptz(6)
+  // Stamped by the front desk when a child leaves. Nullable and ignored by the
+  // teacher's attendance sheet: still-null on a past session means nobody
+  // signed them out, not that they never arrived.
+  checkedOutAt DateTime?     @map("checked_out_at") @db.Timestamptz(6)
+  // Who the child was released to. Free text rather than a relation: most
+  // pickups are by someone with no account here (a grandparent, a neighbour),
+  // and the name on the authorisation is the record worth keeping.
+  checkedOutTo String?       @map("checked_out_to") @db.VarChar(255)
   session   Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   student   User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
@@ -1275,12 +1284,22 @@ model SpaceReservation {
 model TempPickupAuth {
   id           String   @id @default(uuid()) @db.Uuid
   parentId     String   @map("parent_id") @db.Uuid
+  // Which child this authorises. Null means every child in the parent's family
+  // — the portal offers "All children" and a grandparent collecting three
+  // siblings shouldn't need three codes. Nullable also because the rows written
+  // before the desk could scan anything never recorded a child at all.
+  studentId    String?  @map("student_id") @db.Uuid
   pickupPerson String   @map("pickup_person") @db.VarChar(255)
+  // Shown to whoever is at the desk ("Grandmother"), so the name on the screen
+  // can be matched against the person standing there.
+  relationship String?  @db.VarChar(100)
   validDate    DateTime @map("valid_date") @db.Date
   qrCodeHash   String   @unique @map("qr_code_hash") @db.VarChar(255)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   parent       User     @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student      User?    @relation("PickupAuthStudent", fields: [studentId], references: [id], onDelete: Cascade)
 
+  @@index([studentId])
   @@map("temp_pickup_auths")
 }
 

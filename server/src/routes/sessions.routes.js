@@ -16,6 +16,9 @@ import {
   bulkUpdateSessions,
   updateSession,
   updateAttendance,
+  checkInBoard,
+  checkInStudent,
+  scanPickup,
   addSessionNote,
   supervisionSessions,
   cancelStudentSession,
@@ -33,6 +36,14 @@ router.get('/cancellations', authenticate, requireRole('ADMIN'), listCancellatio
 
 // PATCH /api/sessions/cancellations/:id/resolve — Admin decides the final charge
 router.patch('/cancellations/:id/resolve', authenticate, requireRole('ADMIN'), validate(resolveCancellationSchema), resolveCancellation);
+
+// GET /api/sessions/check-in-board — Today's rosters for the door (Admin/front
+// desk). Above '/:id' so "check-in-board" isn't read as a session id.
+router.get('/check-in-board', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), checkInBoard);
+
+// POST /api/sessions/pickup/scan — Validate a pickup QR and release the child
+// (Admin/front desk). Above '/:id' so "pickup" isn't read as a session id.
+router.post('/pickup/scan', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), scanPickup);
 
 // GET /api/sessions — List sessions for calendar (All auth users)
 router.get('/', authenticate, listSessions);
@@ -54,6 +65,12 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), updateSession)
 
 // PUT /api/sessions/:id/attendance — Batch update attendance (Admin/Teacher)
 router.put('/:id/attendance', authenticate, requireRole('ADMIN', 'TEACHER'), validate(updateAttendanceSchema), updateAttendance);
+
+// POST /api/sessions/:id/check-in — Record one arrival/departure at the door
+// (Admin/front desk). Narrower than the attendance sheet above on purpose: it
+// only writes PRESENT/LATE for today, so the desk can never trip the no-show
+// review that suggests a charge. See checkInStudent.
+router.post('/:id/check-in', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), checkInStudent);
 
 // POST /api/sessions/:id/notes — Add session notes (Admin/Teacher)
 router.post('/:id/notes', authenticate, requireRole('ADMIN', 'TEACHER'), addSessionNote);
