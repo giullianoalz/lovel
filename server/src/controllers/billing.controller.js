@@ -7,6 +7,7 @@ import { round2 } from '../services/registrationPricing.service.js';
 import { nextLcNumber } from '../services/invoicing.service.js';
 import { buildInvoicePdf, invoicePdfFilename } from '../services/invoicePdf.service.js';
 import { sendInvoiceEmail } from '../services/email.service.js';
+import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -634,7 +635,13 @@ export const sendInvoice = async (req, res, next) => {
 
     const student = await invoiceStudent(invoice);
     const withStudent = { ...invoice, student };
-    const pdf = await buildInvoicePdf(withStudent);
+    const [pdf, checkoutUrl] = await Promise.all([
+      buildInvoicePdf(withStudent),
+      // Missing Stripe config or an already-paid invoice both come back null
+      // here — the email just omits the card button rather than failing the
+      // whole send over a payment method the family doesn't need anyway.
+      getOrCreateInvoiceCheckoutUrl(invoice).catch(() => null),
+    ]);
 
     const result = await sendInvoiceEmail({
       to: recipient.email,
@@ -643,6 +650,7 @@ export const sendInvoice = async (req, res, next) => {
       message,
       pdf,
       pdfFilename: invoicePdfFilename(invoice),
+      checkoutUrl,
     });
 
     if (!result.ok) {

@@ -455,7 +455,32 @@ export const defaultInvoiceSubject = (invoice) =>
 export const defaultInvoiceMessage = (invoice) =>
   `Here is invoice ${invoice.invoiceNumber}. A PDF copy is attached for your records.`;
 
-export const buildInvoiceEmailHtml = ({ invoice, message }) => {
+// Mirrors PAYMENT_METHODS in src/components/Portal/ParentPortal.jsx — the
+// same accounts, kept in sync by hand like the other admin-editable defaults
+// in this file, since an email template and a React component can't share a
+// literal without a shared package neither side has.
+const PAYMENT_METHODS = [
+  { name: 'Zelle', detail: 'Send to', value: 'lovelearningfl@gmail.com' },
+  { name: 'Venmo', detail: 'Username', value: '@LoveLearningFL' },
+  { name: 'PayPal', detail: 'Send to', value: 'lovelearningfl@gmail.com' },
+  { name: 'EMA · Step Up for Students', detail: 'Request from your Step Up portal using invoice #', value: invoiceNum => invoiceNum },
+];
+
+const paymentMethodRow = (invoiceNumber) => PAYMENT_METHODS.map((m) => `
+  <tr>
+    <td style="padding:8px 0;font-family:${FONT};font-size:13px;color:${BRAND.text};border-bottom:1px solid #f1f5f9;">
+      <strong>${m.name}</strong> — ${m.detail}: <span style="color:${BRAND.muted};">${typeof m.value === 'function' ? m.value(invoiceNumber) : m.value}</span>
+    </td>
+  </tr>
+`).join('');
+
+/**
+ * @param {string} [checkoutUrl] A live Stripe Checkout link for the balance.
+ *   Omitted (or the invoice is already paid) hides the card button entirely
+ *   — an email is not the place to advertise a payment method that doesn't
+ *   work right now.
+ */
+export const buildInvoiceEmailHtml = ({ invoice, message, checkoutUrl }) => {
   const balance = Number(invoice.totalAmount) - Number(invoice.amountPaid);
   const paid = Number(invoice.amountPaid);
 
@@ -479,7 +504,18 @@ export const buildInvoiceEmailHtml = ({ invoice, message }) => {
           </td>
         </tr>
       </table>
-      ${p('You can pay from your parent portal, or reply to this email if you would rather arrange it with the front desk.')}
+      ${balance > 0 && checkoutUrl ? `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
+          ${button(checkoutUrl, `Pay ${formatCurrency(balance)} by card`)}
+        </td></tr></table>
+      ` : ''}
+      ${balance > 0 ? `
+        ${p('Other ways to pay:')}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;">
+          <tbody>${paymentMethodRow(invoice.invoiceNumber)}</tbody>
+        </table>
+      ` : ''}
+      ${p('Questions about this invoice? Just reply to this email and the front desk will help.')}
     `,
   });
 };
@@ -493,11 +529,11 @@ export const buildInvoiceEmailHtml = ({ invoice, message }) => {
  *
  * Never throws — returns { ok, error } so the caller can record the outcome.
  */
-export const sendInvoiceEmail = async ({ to, invoice, subject, message, pdf, pdfFilename }) =>
+export const sendInvoiceEmail = async ({ to, invoice, subject, message, pdf, pdfFilename, checkoutUrl }) =>
   send({
     to,
     subject: subject || defaultInvoiceSubject(invoice),
-    html: buildInvoiceEmailHtml({ invoice, message }),
+    html: buildInvoiceEmailHtml({ invoice, message, checkoutUrl }),
     attachments: pdf ? [{ filename: pdfFilename || `${invoice.invoiceNumber}.pdf`, content: pdf }] : [],
   });
 

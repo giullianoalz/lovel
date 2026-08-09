@@ -5,6 +5,7 @@ import { invalidate } from '../middleware/cache.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 import { getAdminUserIds } from '../services/notificationConfig.service.js';
 import { isOnly } from '../utils/roles.js';
+import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 
 // Shape a behavior log for the student/parent portals — exposes the reason
 // ("why") behind each positive note or warning, not just the count.
@@ -753,49 +754,8 @@ export const createPaymentSession = async (req, res, next) => {
       return res.status(503).json({ error: 'Payment gateway not configured. Please contact the academy.' });
     }
 
-    // A cached link is only safe to reuse if it hasn't expired AND still
-    // reflects the current amount owed — a partial Zelle/cash payment made
-    // after the link was created would otherwise leave the family paying the
-    // stale (higher) amount, or the family hitting an already-expired link.
-    if (invoice.stripePaymentLink && invoice.stripePaymentLinkId) {
-      const existingSession = await stripe.checkout.sessions.retrieve(invoice.stripePaymentLinkId).catch(() => null);
-      const stillValid = existingSession
-        && existingSession.status === 'open'
-        && existingSession.expires_at * 1000 > Date.now()
-        && existingSession.amount_total === Math.round(amountDue * 100);
-      if (stillValid) {
-        return res.json({ url: invoice.stripePaymentLink, existing: true });
-      }
-    }
-
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      mode: 'payment',
-      line_items: [{
-        price_data: {
-          currency: 'usd',
-          unit_amount: Math.round(amountDue * 100),
-          product_data: {
-            name: `Invoice ${invoice.invoiceNumber}`,
-            description: invoice.dateRange || 'Lovelearning Academy',
-          },
-        },
-        quantity: 1,
-      }],
-      metadata: { invoiceId: invoice.id, familyId: familyMember.familyId },
-      success_url: `${frontendUrl}/portal/parent?payment=success`,
-      cancel_url: `${frontendUrl}/portal/parent?payment=cancelled`,
-    });
-
-    // Save the Stripe URL so subsequent visits skip re-creation
-    await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: { stripePaymentLink: session.url, stripePaymentLinkId: session.id },
-    });
-
-    res.json({ url: session.url });
+    const url = await getOrCreateInvoiceCheckoutUrl(invoice);
+    res.json({ url });
   } catch (error) {
     next(error);
   }

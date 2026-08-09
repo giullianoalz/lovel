@@ -63,7 +63,16 @@ export const previewInvoiceEmail = async (req, res, next) => {
       return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
     }
 
-    res.json({ subject, html: toPreviewHtml(buildInvoiceEmailHtml({ invoice, message })) });
+    // A placeholder, not a live Stripe link: this fires on every debounced
+    // keystroke in the review modal, and minting a real Checkout session that
+    // often would spam Stripe for no reason — the real one is created once,
+    // at actual send time. The sandboxed preview iframe can't navigate it
+    // anyway, so the placeholder looks identical to the family's real email.
+    const balance = Number(invoice.totalAmount) - Number(invoice.amountPaid);
+    res.json({
+      subject,
+      html: toPreviewHtml(buildInvoiceEmailHtml({ invoice, message, checkoutUrl: balance > 0 ? '#' : null })),
+    });
   } catch (error) {
     next(error);
   }

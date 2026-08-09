@@ -122,11 +122,24 @@ export const buildInvoicePdf = async (invoice) => {
   totalsRow('Subtotal', money(invoice.subtotal));
   if (Number(invoice.amountPaid) > 0) totalsRow('Paid', `−${money(invoice.amountPaid)}`);
 
+  // Drawn as a self-contained block rather than through totalsRow: that helper
+  // treats `y` as a text baseline, but a filled box needs `y` to be its own
+  // top edge — reusing it here is what let the box creep up into the
+  // Subtotal row above it instead of sitting cleanly below it.
   const balance = Number(invoice.totalAmount) - Number(invoice.amountPaid);
-  y -= 4;
-  page.drawRectangle({ x: right - 220, y: y - 6, width: 220, height: 30, color: TINT });
-  y += 2;
-  totalsRow(balance > 0 ? 'Balance due' : 'Paid in full', money(Math.max(0, balance)), { strong: true });
+  y -= 12; // clearance below the last row before the highlighted total
+  const boxHeight = 34;
+  const boxTop = y;
+  const boxBottom = boxTop - boxHeight;
+  page.drawRectangle({ x: right - 220, y: boxBottom, width: 220, height: boxHeight, color: TINT });
+
+  const totalLabel = balance > 0 ? 'Balance due' : 'Paid in full';
+  const totalValue = money(Math.max(0, balance));
+  const textBaseline = boxBottom + boxHeight / 2 - 4.5; // vertically centers a 12pt line
+  page.drawText(totalLabel, { x: right - 200, y: textBaseline, size: 12, font: bold, color: INK });
+  page.drawText(totalValue, { x: amountX - bold.widthOfTextAtSize(totalValue, 12), y: textBaseline, size: 12, font: bold, color: INK });
+
+  y = boxBottom - 14;
 
   // ── Footer ──
   const footerY = MARGIN + 24;
