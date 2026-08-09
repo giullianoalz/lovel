@@ -2137,7 +2137,7 @@ const CalendarView = () => {
                   })}
                   {/* Hover time label floats in the axis */}
                   {hoverTime && (
-                    <div className="hover-time-axis-label" style={{ top: `${hoverTime.top + 76}px` }}>
+                    <div className="hover-time-axis-label" style={{ top: `${hoverTime.top + 60}px` }}>
                       {hoverTime.label}
                     </div>
                   )}
