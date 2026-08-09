@@ -1236,7 +1236,6 @@
   border-top: 1px solid var(--border-light);
   border-left: 1px solid var(--border-light);
   border-radius: 8px;
-  overflow: hidden;
   min-width: 900px; /* Minimum width for the month grid */
   background: white;
 }
@@ -1250,6 +1249,9 @@
   border-bottom: 1px solid var(--border-light);
   border-right: 1px solid var(--border-light);
   background: white;
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .month-cell {
