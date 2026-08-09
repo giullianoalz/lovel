@@ -819,13 +819,8 @@
 
 .agenda-event:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  z-index: 50 !important;
-  width: max-content !important;
-  min-width: 140px;
-  max-width: 250px;
-  height: max-content !important;
-  min-height: 100%;
+  box-shadow: var(--shadow-sm);
+  z-index: 15 !important;
 }
 
 .agenda-event.math     { background: #dbeafe; border-left-color: #3b82f6; }
