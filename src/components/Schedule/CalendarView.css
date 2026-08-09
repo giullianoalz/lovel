@@ -1792,6 +1792,11 @@
     margin-top: 4px;
   }
 
+  .view-dropdown-menu {
+    right: auto;
+    left: 0;
+  }
+
   .view-btn {
     flex: 1;
     text-align: center;
