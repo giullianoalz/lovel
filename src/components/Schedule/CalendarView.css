@@ -701,6 +701,7 @@
 .week-schedule-grid {
   display: flex;
   width: 100%;
+  min-width: 900px;
   background: white;
   border-radius: 12px;
   border: 1px solid var(--border-light);
