@@ -812,7 +812,6 @@
   flex-direction: column;
   gap: 2px;
   overflow: hidden;
-  word-break: break-word;
   white-space: normal;
   transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
@@ -839,6 +838,7 @@
   font-weight: 700;
   color: var(--text-main);
   line-height: 1.1;
+  overflow: hidden;
 }
 
 .agenda-ev-title {
@@ -848,8 +848,9 @@
   font-size: 11px;
   color: var(--text-main);
   line-height: 1.2;
+  overflow: hidden;
 }
-.agenda-ev-title strong { font-weight: 600; }
+.agenda-ev-title strong { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; }
 .agenda-ev-check { color: #16a34a; flex-shrink: 0; margin-top: 1px; }
 
 .agenda-ev-desc {
