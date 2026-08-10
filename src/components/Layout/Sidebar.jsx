@@ -30,7 +30,7 @@ import { timeOfDayMinutes, nowMinutes } from '../../lib/time';
 import NotifDrawer from '../Notifications/NotifDrawer';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useToast } from './ToastProvider';
-import { InstallNavItem } from './InstallNavItem';
+import { InstallNavItem, InstallHeaderButton } from './InstallNavItem';
 import { PushNotificationNavItem } from './PushNotificationNavItem';
 import { getNotificationLink } from '../../lib/notificationLink';
 import './Sidebar.css';
@@ -153,7 +153,8 @@ const Sidebar = () => {
         />
         
         {role && (
-          <div style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', zIndex: 200 }}>
+          <div style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', zIndex: 200, display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <InstallHeaderButton />
             <button ref={bellRef} className="global-notif-bell" onClick={() => setIsNotifOpen(p => !p)}
               aria-label={notif.unreadCount > 0 ? `Notifications, ${notif.unreadCount} unread` : 'Notifications'}
               style={{ position: 'relative', background: 'transparent', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

@@ -8,11 +8,33 @@
   text-align: left;
 }
 
+/* Compact install pill in the mobile top bar. */
+.install-header-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--primary);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 12px -4px rgba(6, 78, 59, 0.45);
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+
+.install-header-btn:hover { background: var(--primary-hover); }
+.install-header-btn:active { transform: scale(0.95); }
+
 /* Normal flow (not fixed/sticky) so the banner reserves its own space at the
-   end of the page — it can never render on top of / hide whatever content
-   sits above it, even on short pages (e.g. an empty-state card). */
+   top of the page — it can never render on top of / hide whatever content
+   sits below it, even on short pages (e.g. an empty-state card). */
 .install-banner {
-  margin: 20px auto;
+  margin: 0 auto 20px;
   z-index: 2500;
   width: calc(100% - 32px);
   max-width: 480px;

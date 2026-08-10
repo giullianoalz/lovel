@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Download, X, Share } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useInstallPrompt } from '../../hooks/useInstallPrompt';
+import { InstallIOSHelp } from './InstallIOSHelp';
 import './InstallPromptBanner.css';
 
 /** Persistent "Install app" entry for the sidebar nav — stays available even after the banner is dismissed. */
@@ -20,21 +21,34 @@ export const InstallNavItem = ({ onNavigate }) => {
         <span>Install app</span>
       </button>
 
-      {showIOSHelp && (
-        <div className="install-ios-overlay" onClick={() => setShowIOSHelp(false)}>
-          <div className="install-ios-card" onClick={(e) => e.stopPropagation()}>
-            <button className="install-ios-close" onClick={() => setShowIOSHelp(false)} aria-label="Close">
-              <X size={16} />
-            </button>
-            <h3>Install on iPhone/iPad</h3>
-            <ol>
-              <li><Share size={16} /> Tap the <strong>Share</strong> button in Safari.</li>
-              <li>Choose <strong>Add to Home Screen</strong>.</li>
-            </ol>
-            <button className="install-ios-done" onClick={() => setShowIOSHelp(false)}>Got it</button>
-          </div>
-        </div>
-      )}
+      {showIOSHelp && <InstallIOSHelp onClose={() => setShowIOSHelp(false)} />}
+    </>
+  );
+};
+
+/**
+ * Same action as the nav item, but pinned in the mobile top bar so it's on
+ * screen without opening the menu — the sidebar entry is invisible on phones
+ * until you tap the hamburger, which is where most families live.
+ */
+export const InstallHeaderButton = () => {
+  const { canInstall, isIOS, promptInstall } = useInstallPrompt();
+  const [showIOSHelp, setShowIOSHelp] = useState(false);
+
+  if (!canInstall) return null;
+
+  return (
+    <>
+      <button
+        className="install-header-btn"
+        onClick={() => (isIOS ? setShowIOSHelp(true) : promptInstall())}
+        aria-label="Install the app"
+      >
+        <Download size={16} />
+        <span>Install</span>
+      </button>
+
+      {showIOSHelp && <InstallIOSHelp onClose={() => setShowIOSHelp(false)} />}
     </>
   );
 };

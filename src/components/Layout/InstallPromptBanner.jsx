@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Download, X, Share } from 'lucide-react';
+import { Download, X } from 'lucide-react';
 import { useInstallPrompt } from '../../hooks/useInstallPrompt';
+import { InstallIOSHelp } from './InstallIOSHelp';
 import './InstallPromptBanner.css';
 
 export const InstallPromptBanner = () => {
@@ -31,21 +32,7 @@ export const InstallPromptBanner = () => {
       </div>
 
       {showIOSHelp && (
-        <div className="install-ios-overlay" onClick={() => setShowIOSHelp(false)}>
-          <div className="install-ios-card" onClick={(e) => e.stopPropagation()}>
-            <button className="install-ios-close" onClick={() => setShowIOSHelp(false)} aria-label="Close">
-              <X size={16} />
-            </button>
-            <h3>Install on iPhone/iPad</h3>
-            <ol>
-              <li><Share size={16} /> Tap the <strong>Share</strong> button in Safari.</li>
-              <li>Choose <strong>Add to Home Screen</strong>.</li>
-            </ol>
-            <button className="install-ios-done" onClick={() => { dismiss(); setShowIOSHelp(false); }}>
-              Got it
-            </button>
-          </div>
-        </div>
+        <InstallIOSHelp onClose={() => { dismiss(); setShowIOSHelp(false); }} />
       )}
     </>
   );

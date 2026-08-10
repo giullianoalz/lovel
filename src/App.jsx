@@ -126,6 +126,7 @@ function App() {
                 <div className="app-container">
                   <Sidebar />
                   <main className="content">
+                    <InstallPromptBanner />
                     <ErrorBoundary>
                     <Suspense fallback={<RouteFallback />}>
                     <Routes>
@@ -277,7 +278,6 @@ function App() {
                     </Routes>
                     </Suspense>
                     </ErrorBoundary>
-                    <InstallPromptBanner />
                   </main>
                 </div>
               </ProtectedRoute>
