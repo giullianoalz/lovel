@@ -9,6 +9,7 @@ import {
   getParentUserIdsForStudents,
 } from '../services/notificationConfig.service.js';
 import { loadPayCategories, freezeSessionRates, clearFrozenRates } from '../services/payroll.service.js';
+import { sessionStartInstant } from '../utils/academyTime.js';
 
 /**
  * The pay fields on a session, if this request is allowed to set them.
@@ -926,10 +927,7 @@ const processNoShowReviews = async (sessionId, attendanceRecords, staffId) => {
   if (!session) return [];
 
   // Notice is 0 or negative for a no-show (the class is happening / has passed).
-  const start = new Date(session.date);
-  const st = new Date(session.startTime);
-  start.setUTCHours(st.getUTCHours(), st.getUTCMinutes(), st.getUTCSeconds());
-  const hoursBeforeClass = Math.min(0, (start.getTime() - Date.now()) / 3_600_000);
+  const hoursBeforeClass = Math.min(0, (sessionStartInstant(session).getTime() - Date.now()) / 3_600_000);
 
   const created = [];
   for (const record of attendanceRecords) {
@@ -1163,12 +1161,7 @@ export const cancelStudentSession = async (req, res, next) => {
       });
     }
 
-    const classDateTime = new Date(session.date);
-    const startOfDay = new Date(Date.UTC(classDateTime.getUTCFullYear(), classDateTime.getUTCMonth(), classDateTime.getUTCDate()));
-    const startTime = new Date(session.startTime);
-    startOfDay.setUTCHours(startTime.getUTCHours(), startTime.getUTCMinutes(), startTime.getUTCSeconds());
-
-    const hoursBeforeClass = (startOfDay.getTime() - Date.now()) / (1000 * 60 * 60);
+    const hoursBeforeClass = (sessionStartInstant(session).getTime() - Date.now()) / (1000 * 60 * 60);
     const suggestedChargePercent = hoursBeforeClass >= CANCELLATION_WINDOW_HOURS ? 0 : LATE_CANCELLATION_SUGGESTED_PERCENT;
     const autoResolved = suggestedChargePercent === 0;
 

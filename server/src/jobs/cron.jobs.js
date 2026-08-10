@@ -8,6 +8,7 @@ import {
   getAdminUserIds,
   getParentUserIdsForStudents,
 } from '../services/notificationConfig.service.js';
+import { academyToday, sessionStartInstant } from '../utils/academyTime.js';
 
 /**
  * Scheduled background jobs for the Academy Management System.
@@ -254,7 +255,9 @@ const sendClassStartingSoonReminders = async () => {
   const notifyParents = config.audience.includes('PARENTS');
   const adminIds = notifyAdmins ? await getAdminUserIds() : [];
   const now = new Date();
-  const todayDateOnly = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  // The academy's today, not the server's: after 8 PM local the UTC date has
+  // already rolled over, and this job would be reading tomorrow's schedule.
+  const todayDateOnly = academyToday(now);
 
   const sessions = await prisma.session.findMany({
     where: { date: todayDateOnly, status: 'SCHEDULED' },
@@ -274,11 +277,7 @@ const sendClassStartingSoonReminders = async () => {
   if (sessions.length === 0) return;
 
   for (const session of sessions) {
-    const startAt = new Date(todayDateOnly);
-    const st = new Date(session.startTime);
-    startAt.setUTCHours(st.getUTCHours(), st.getUTCMinutes(), st.getUTCSeconds());
-
-    const minutesUntilStart = (startAt.getTime() - now.getTime()) / 60000;
+    const minutesUntilStart = (sessionStartInstant(session).getTime() - now.getTime()) / 60000;
     // Already started, or further out than the configured window — skip.
     if (minutesUntilStart <= 0 || minutesUntilStart > minutesBefore) continue;
 
