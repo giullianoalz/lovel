@@ -27,6 +27,23 @@ const STAFF_VISIBLE_USER_FIELDS = [
 ];
 
 /**
+ * The students sharing a family with `user`, as `{ id, fullName }`.
+ *
+ * The directory lists guardians by their own name, which is not how the office
+ * thinks about them — the front desk knows "Ana's mum" and has to work out
+ * which row that is. Sending the children along lets the card name them (and
+ * the search box match on them) instead of showing a family label nobody uses.
+ *
+ * Empty unless the caller asked for the nested members; the chat picker doesn't.
+ */
+const childrenOf = (user) =>
+  (user.familyMembers || [])
+    .flatMap((fm) => fm.family?.members || [])
+    .filter((m) => hasRole(m.user, 'STUDENT'))
+    .map((m) => ({ id: m.user.id, fullName: m.user.fullName }))
+    .filter((c, i, all) => all.findIndex((o) => o.id === c.id) === i);
+
+/**
  * Shapes one user row for `viewer`. `canSignIn`/`emailUsable` are derived, not
  * columns: the directory needs to show who can actually log in, which depends
  * on whether the row is backed by a real Firebase account and a deliverable
@@ -36,6 +53,7 @@ const presentUser = (user, viewer, maskMap = EMPTY_MASK_MAP) => {
   const base = {
     canSignIn: hasSignInAccount(user),
     emailUsable: !isPlaceholderEmail(user.email),
+    children: childrenOf(user),
   };
 
   // A teacher browsing the directory (this endpoint backs the chat "New
@@ -152,7 +170,22 @@ export const listUsers = async (req, res, next) => {
         take: parseInt(limit),
         orderBy: { fullName: 'asc' },
         include: {
-          familyMembers: { include: { family: true } },
+          // The family's other members ride along so a guardian's row can name
+          // their children — see childrenOf. Only names and roles, so this
+          // stays cheap enough for the 200-row directory load.
+          familyMembers: {
+            include: {
+              family: {
+                include: {
+                  members: {
+                    include: {
+                      user: { select: { id: true, fullName: true, role: true, secondaryRoles: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       }),
       prisma.user.count({ where }),

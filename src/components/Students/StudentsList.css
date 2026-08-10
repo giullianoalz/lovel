@@ -194,6 +194,25 @@
   min-width: 80px;
 }
 
+/* A student's name inside a guardian's card — reads as text, acts as a link
+   through to their profile. */
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--primary);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.2s ease;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+  color: var(--primary-hover);
+}
+
 .allergy-alert {
   display: inline-flex;
   align-items: center;

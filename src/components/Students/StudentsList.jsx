@@ -118,10 +118,23 @@ const StudentsList = () => {
     (statusFilter === 'All' || t.status === statusFilter)
   );
 
-  const filteredParents = parents.filter(p =>
-    (p.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (p.email || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // The child's name counts as a match: the office knows families by the
+  // student, so looking a guardian up by their own name first is backwards.
+  const filteredParents = parents.filter(p => {
+    const q = searchQuery.toLowerCase();
+    return (p.fullName || '').toLowerCase().includes(q) ||
+      (p.email || '').toLowerCase().includes(q) ||
+      (p.children || []).some(c => (c.fullName || '').toLowerCase().includes(q));
+  });
+
+  // Jumping from a guardian's card to their child's profile. The roster is
+  // already loaded, so this needs no fetch — and it silently does nothing for
+  // a role that may not open profiles at all.
+  const openStudentById = (studentId) => {
+    if (!canOpenProfile) return;
+    const student = students.find(s => s.id === studentId);
+    if (student) setSelectedStudent(student);
+  };
 
   // Opens the preview modal instead of sending straight away, so the admin
   // reads (and can edit) the subject/message first.
@@ -343,6 +356,23 @@ const StudentsList = () => {
                   </div>
 
                   <div className="card-details">
+                    {/* The guardian used to live only in the tooltip of the
+                        mail/phone icons, so a roster of 46 children showed no
+                        parent anywhere — you had to open a profile to learn who
+                        to call. Teachers see nothing here: the backend sends
+                        no guardian at all for them (parentContactLevel). */}
+                    {student.parentName && student.parentName !== 'No Parent Assigned' && (
+                      <div className="detail-item">
+                        <span className="detail-label">Parent:</span>
+                        <span>
+                          {student.parentName}
+                          {student.parentPhone && student.parentPhone !== 'N/A' && (
+                            <span className="text-muted" style={{ fontSize: '12px' }}> · {student.parentPhone}</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="detail-item">
                       <span className="detail-label">Allergies:</span>
                       <span className={student.allergies !== 'None' ? 'allergy-alert' : ''}>
@@ -604,6 +634,7 @@ const StudentsList = () => {
             <div className="students-grid">
               {filteredParents.map(parent => {
                 const familyName = parent.familyMembers?.[0]?.family?.name;
+                const children = parent.children || [];
                 return (
                   <div key={parent.id} className="premium-card student-card">
                     <div className="card-top">
@@ -629,6 +660,30 @@ const StudentsList = () => {
                         <span className="detail-label">Email:</span>
                         <span style={{ fontSize: '13px' }}>
                           {parent.emailUsable ? parent.email : <em>No real email on file</em>}
+                        </span>
+                      </div>
+                      <div className="detail-item">
+                        <span className="detail-label">Students:</span>
+                        <span style={{ fontSize: '13px' }}>
+                          {children.length === 0 ? (
+                            <em>No student linked</em>
+                          ) : (
+                            children.map((child, i) => (
+                              <span key={child.id}>
+                                {i > 0 && ', '}
+                                {/* Opens the child's profile, so "who is this
+                                    parent?" and "what's going on with the kid?"
+                                    are one click apart rather than two screens. */}
+                                <button
+                                  type="button"
+                                  className="link-btn"
+                                  onClick={() => openStudentById(child.id)}
+                                >
+                                  {child.fullName}
+                                </button>
+                              </span>
+                            ))
+                          )}
                         </span>
                       </div>
                       <div className="detail-item">
