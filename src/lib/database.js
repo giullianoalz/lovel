@@ -709,12 +709,13 @@ export const database = {
     }
   },
 
-  // Cancellation policy: >=48h before class is free (auto-resolved server-side);
-  // <48h suggests a 50% charge but never charges automatically — it opens an
-  // admin review item instead. Real money — no mock fallback if this fails.
+  // Cancellation policy: never charges automatically, whatever the notice — it
+  // always opens an admin review item. Notice only sets the suggestion: >=24h
+  // suggests 50%, later suggests the full session. Real money — no mock
+  // fallback if this fails.
   cancelStudentSession: async (sessionId, studentId, reason) => {
     const response = await api.post(`/sessions/${sessionId}/cancel-student`, { studentId, reason });
-    return response.data; // { cancellation, autoResolved }
+    return response.data; // { cancellation }
   },
 
   fetchPendingCancellations: async () => {

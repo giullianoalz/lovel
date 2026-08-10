@@ -61,17 +61,24 @@ const readPayFields = async (req) => {
   return { data };
 };
 
-// A student cancelling with less than this many hours' notice triggers a
-// suggested (not automatic) 50% charge that the admin must review.
-const CANCELLATION_WINDOW_HOURS = 48;
-const LATE_CANCELLATION_SUGGESTED_PERCENT = 50;
+// Every cancellation reaches the admin for a decision — none is ever charged
+// automatically, however much notice was given. What the notice changes is the
+// amount suggested: cancelling at least this many hours ahead suggests half the
+// session, anything later suggests the whole of it, which is what the waiver
+// families sign says ("if I do not cancel before 24 hours of my scheduled time,
+// I will lose that paid session" — see constants/waiverText.js).
+const CANCELLATION_WINDOW_HOURS = 24;
+const ADVANCE_CANCELLATION_SUGGESTED_PERCENT = 50;
+const LATE_CANCELLATION_SUGGESTED_PERCENT = 100;
 
 // A student marked ABSENT with no prior cancellation is a no-show: the teacher
-// held the slot and waited, so it's chargeable. Like a late cancellation it
-// opens a review item (never an automatic charge) — the admin confirms the
-// amount. The reason string is also the marker used to recognise (and clean up)
-// auto-created no-show items when a mis-marked student is later set present.
-const NO_SHOW_SUGGESTED_PERCENT = 50;
+// held the slot and waited. No notice at all is the extreme of a late
+// cancellation, so it suggests the same full charge. Like every other
+// cancellation it opens a review item, never an automatic charge — the admin
+// confirms the amount. The reason string is also the marker used to recognise
+// (and clean up) auto-created no-show items when a mis-marked student is later
+// set present.
+const NO_SHOW_SUGGESTED_PERCENT = 100;
 const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
 
 /**
@@ -1130,9 +1137,10 @@ export const addSessionNote = async (req, res, next) => {
 /**
  * POST /api/sessions/:id/cancel-student
  * Admin/front-desk cancels a single student's spot in a session.
- * >=48h before the class: free, auto-resolved, no admin action needed.
- * <48h before the class: suggests a 50% charge but does NOT charge anything —
- * it opens a review item and notifies the admin, who decides the final amount.
+ *
+ * Never charges anything by itself. It opens a review item and notifies the
+ * admin, who decides the final amount — including waiving it. Notice only sets
+ * what gets suggested: >=24h suggests 50%, later suggests the full session.
  */
 export const cancelStudentSession = async (req, res, next) => {
   try {
@@ -1162,8 +1170,10 @@ export const cancelStudentSession = async (req, res, next) => {
     }
 
     const hoursBeforeClass = (sessionStartInstant(session).getTime() - Date.now()) / (1000 * 60 * 60);
-    const suggestedChargePercent = hoursBeforeClass >= CANCELLATION_WINDOW_HOURS ? 0 : LATE_CANCELLATION_SUGGESTED_PERCENT;
-    const autoResolved = suggestedChargePercent === 0;
+    const inTime = hoursBeforeClass >= CANCELLATION_WINDOW_HOURS;
+    const suggestedChargePercent = inTime
+      ? ADVANCE_CANCELLATION_SUGGESTED_PERCENT
+      : LATE_CANCELLATION_SUGGESTED_PERCENT;
 
     const [, cancellation] = await prisma.$transaction([
       prisma.attendance.upsert({
@@ -1179,9 +1189,7 @@ export const cancelStudentSession = async (req, res, next) => {
           reason: reason || null,
           hoursBeforeClass,
           suggestedChargePercent,
-          status: autoResolved ? 'RESOLVED' : 'PENDING_REVIEW',
-          finalChargePercent: autoResolved ? 0 : null,
-          resolvedAt: autoResolved ? new Date() : null,
+          status: 'PENDING_REVIEW',
         },
         include: { student: { select: { id: true, fullName: true } } },
       }),
@@ -1208,36 +1216,34 @@ export const cancelStudentSession = async (req, res, next) => {
       });
     }
 
-    if (!autoResolved) {
-      const io = req.app.get('io');
-      if (io) {
-        io.to('admin_room').emit('cancellation_pending', {
-          id: cancellation.id,
-          studentName: cancellation.student.fullName,
-          className: session.class.name,
-          sessionDate: session.date,
-          hoursBeforeClass,
-          suggestedChargePercent,
-          reason: cancellation.reason,
-          createdAt: cancellation.createdAt,
-        });
-      }
-      await broadcastToManagement(
-        'Cancellation needs a decision',
-        `${cancellation.student.fullName} cancelled ${session.class.name} with less than 48h notice — decide how much to charge (suggested ${LATE_CANCELLATION_SUGGESTED_PERCENT}%).`,
-        { cancellationId: cancellation.id }
-      );
-      // Durable copy for the admin bell (the FCM push + socket event above are ephemeral).
-      await notifyAdmins({
-        type: 'CANCELLATION',
-        title: 'Cancellation needs a decision',
-        message: `${cancellation.student.fullName} cancelled ${session.class.name} with less than 48h notice — decide how much to charge (suggested ${LATE_CANCELLATION_SUGGESTED_PERCENT}%).`,
-        referenceType: 'sessionCancellation',
-        referenceId: cancellation.id,
+    const io = req.app.get('io');
+    if (io) {
+      io.to('admin_room').emit('cancellation_pending', {
+        id: cancellation.id,
+        studentName: cancellation.student.fullName,
+        className: session.class.name,
+        sessionDate: session.date,
+        hoursBeforeClass,
+        suggestedChargePercent,
+        reason: cancellation.reason,
+        createdAt: cancellation.createdAt,
       });
     }
+    const noticeSummary = hoursBeforeClass <= 0
+      ? 'after the class had already started'
+      : `with ${Math.round(hoursBeforeClass)}h notice`;
+    const decisionMessage = `${cancellation.student.fullName} cancelled ${session.class.name} ${noticeSummary} — decide how much to charge (suggested ${suggestedChargePercent}%).`;
+    await broadcastToManagement('Cancellation needs a decision', decisionMessage, { cancellationId: cancellation.id });
+    // Durable copy for the admin bell (the FCM push + socket event above are ephemeral).
+    await notifyAdmins({
+      type: 'CANCELLATION',
+      title: 'Cancellation needs a decision',
+      message: decisionMessage,
+      referenceType: 'sessionCancellation',
+      referenceId: cancellation.id,
+    });
 
-    res.status(201).json({ cancellation, autoResolved });
+    res.status(201).json({ cancellation });
   } catch (error) {
     next(error);
   }

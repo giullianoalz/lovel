@@ -116,16 +116,14 @@ const SupervisionPanel = () => {
     if (!cancelTarget) return;
     setCancelSubmitting(true);
     try {
-      const { autoResolved } = await api
+      const { cancellation } = await api
         .post(`/sessions/${cancelTarget.sessionId}/cancel-student`, {
           studentId: cancelTarget.studentId,
           reason: cancelReason || null,
         })
         .then(r => r.data);
       setActionMessage(
-        autoResolved
-          ? `${cancelTarget.studentName}'s cancellation was free (48h+ notice) — no charge.`
-          : `${cancelTarget.studentName}'s cancellation is under 48h — sent to the admin to decide the charge.`
+        `${cancelTarget.studentName}'s cancellation was sent to the admin to decide the charge (suggested ${cancellation.suggestedChargePercent}%).`
       );
       setCancelTarget(null);
       await fetchData();
@@ -401,8 +399,9 @@ const SupervisionPanel = () => {
           <div className="cancel-modal" onClick={e => e.stopPropagation()}>
             <h3><Ban size={18} /> Cancel {cancelTarget.studentName}'s spot</h3>
             <p>
-              {cancelTarget.className} — the system will automatically check the 48-hour policy:
-              free if cancelled 48h+ before class, otherwise it's sent to the admin to decide the charge (suggested 50%).
+              {cancelTarget.className} — nothing is charged here. It goes to the admin to decide,
+              with a suggestion based on the notice: 50% if cancelled 24h+ before class, the full
+              session if later.
             </p>
             <label className="cancel-modal-label">Reason (optional)</label>
             <textarea
