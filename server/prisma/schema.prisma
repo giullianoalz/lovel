@@ -65,6 +65,12 @@ model User {
   // not the same work, and a flat per-session rate paid them the same. This is
   // the fallback rate — a category override in TeacherPayRate wins over it.
   hourlyRate             Decimal?                  @map("hourly_rate") @db.Decimal(10, 2)
+  // "She gets $17.50 an hour, whatever she's doing." Some people are hired on
+  // one number and the category rates must not quietly pay them more for
+  // covering a class. With this set, `hourlyRate` above wins over every
+  // category rate — only a rate typed onto a single calendar entry beats it,
+  // because that is somebody deliberately saying "this one is different".
+  flatRateOnly           Boolean                   @default(false) @map("flat_rate_only")
   accommodationNotes     String?                   @map("accommodation_notes")
   medicalNotes           String?                   @map("medical_notes")
   authoredAnnouncements  Announcement[]
@@ -78,6 +84,7 @@ model User {
   fitReportsAsStudent    ClassFitReport[]          @relation("StudentFitReports")
   fitReportsAsTeacher    ClassFitReport[]          @relation("TeacherFitReports")
   taughtClasses          Class[]                   @relation("TeacherClasses")
+  coTaughtClasses        Class[]                   @relation("ClassCoTeachers")
   familyMembers          FamilyMember[]
   marketingSubmissions   MarketingSubmission[]     @relation("TeacherSubmissions")
   materials              Material[]
@@ -106,6 +113,8 @@ model User {
   supplyItems            SupplyItem[]
   timeOffRequests        TimeOffRequest[]
   payRates               TeacherPayRate[]
+  workShifts             WorkShift[]               @relation("StaffShifts")
+  shiftsScheduled        WorkShift[]               @relation("ShiftScheduledBy")
   spaceReservations      SpaceReservation[]
   tempPickupAuths        TempPickupAuth[]
   pickupAuthsAsStudent   TempPickupAuth[]          @relation("PickupAuthStudent")
@@ -230,6 +239,7 @@ model Class {
   enrollments      ClassEnrollment[]
   classFitReports  ClassFitReport[]
   teacher          User?                 @relation("TeacherClasses", fields: [teacherId], references: [id])
+  coTeachers       User[]                @relation("ClassCoTeachers")
   term             RegistrationTerm?     @relation("TermClasses", fields: [termId], references: [id])
   priorityHolds    PriorityHold[]
   firstChoiceReqs  RegistrationRequest[] @relation("FirstChoice")
@@ -268,6 +278,32 @@ model Session {
   // link exists on the Tuesday session and nowhere else. Left null the meeting
   // is in person, unless the whole Class is VIRTUAL — see resolveMeetingUrl().
   meetingUrl      String?               @map("meeting_url")
+  // What kind of work this meeting is, for pay. Chosen on the calendar entry
+  // rather than inferred, because the thing that decides the rate is what the
+  // teacher was hired to do that hour ("private tutoring", "in-person class"),
+  // and no property of the row can tell those apart. Left null, the payroll
+  // engine falls back to the old guess — online if there's a meeting link,
+  // in person otherwise — so every session booked before this existed keeps
+  // paying exactly what it paid.
+  payCategoryKey  String?               @map("pay_category_key") @db.VarChar(40)
+  // A rate for this one meeting, overriding every other rate. For the one-off:
+  // a teacher covering a class at an agreed number, a session someone was paid
+  // extra for. Null means "use the normal cascade" — see payroll.service.js.
+  payRateOverride Decimal?              @map("pay_rate_override") @db.Decimal(10, 2)
+  // The rate this hour was actually worked at, stamped the moment it was
+  // confirmed COMPLETED.
+  //
+  // Without it, pay is whatever the rate says today: give somebody a raise in
+  // March and February's payroll silently reprices to the new number. The hour
+  // was worked under the old contract, so the old number is the true one, and
+  // the only way to keep it is to write it down when the work is confirmed.
+  //
+  // Null on anything not yet confirmed — those price live, so editing a rate
+  // still fixes the hours that haven't been signed off.
+  paidRate        Decimal?              @map("paid_rate") @db.Decimal(10, 2)
+  // Which step of the cascade produced `paidRate` ("category", "flat", …), kept
+  // so the payslip can still explain a frozen rate months later.
+  paidRateSource  String?               @map("paid_rate_source") @db.VarChar(20)
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
   behaviorLogs    BehaviorLog[]
@@ -335,6 +371,83 @@ model TeacherPayRate {
   @@unique([teacherId, category])
   @@index([teacherId])
   @@map("teacher_pay_rates")
+}
+
+// A kind of work, and what it pays by default.
+//
+// This is the list an admin actually thinks in: front desk $20, private
+// tutoring $30, in-person class $50, planning $20. Putting the rate on the
+// category means scheduling somebody for an hour of front desk is all it takes
+// to know what that hour costs — nobody has to remember to also set a rate.
+//
+// A row here is not a permission or a schedule, only a price tag. The two
+// built-in keys ONLINE and IN_PERSON are seeded to match what the payroll
+// engine used to infer, so pay rates set before categories existed keep
+// resolving to the same money.
+model PayCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  // Stable identifier stored on sessions, shifts and TeacherPayRate rows. Set
+  // once, at creation, and never edited: renaming "Front desk" is a label
+  // change, but changing its key would orphan every hour already booked to it.
+  key         String   @unique @db.VarChar(40)
+  label       String   @db.VarChar(80)
+  // What an hour of this work pays anyone, unless that person has their own
+  // rate for it. Nullable because a category can exist purely to group hours
+  // (an unpaid meeting), and because "no rate yet" must be distinguishable
+  // from "$0 an hour".
+  defaultRate Decimal? @map("default_rate") @db.Decimal(10, 2)
+  // Whether this kind of work is teaching (offered on class sessions) or a
+  // shift (offered on work shifts). Both lists stay selectable everywhere —
+  // this only decides what the pickers suggest first.
+  teaching    Boolean  @default(false)
+  color       String?  @db.VarChar(20)
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([active])
+  @@map("pay_categories")
+}
+
+// Paid hours that aren't a class: reception, planning, a staff meeting, setup.
+//
+// These can't be Sessions. A Session belongs to a Class, and a Class shows up
+// in enrolment, the parent portal and the registration reports — "Front Desk"
+// with no students would be wrong in all three. It also can't be paid the way
+// sessions are, which require an attendance record to exist: nobody takes
+// attendance at the front desk.
+//
+// So a shift is its own thing: a person, a block of time, and what kind of
+// work it was. It appears on the calendar alongside classes and it is paid
+// once marked COMPLETED.
+model WorkShift {
+  id              String          @id @default(uuid()) @db.Uuid
+  staffId         String          @map("staff_id") @db.Uuid
+  date            DateTime        @db.Date
+  // TIME columns, matching Session: the calendar reasons about a day and two
+  // clock times, and a timestamptz would drag every shift across a DST border.
+  startTime       DateTime        @map("start_time") @db.Time(6)
+  endTime         DateTime        @map("end_time") @db.Time(6)
+  payCategoryKey  String?         @map("pay_category_key") @db.VarChar(40)
+  payRateOverride Decimal?        @map("pay_rate_override") @db.Decimal(10, 2)
+  // Stamped when the shift is marked worked — same reason as Session.paidRate:
+  // the hour belongs to the contract that was in force when it happened.
+  paidRate        Decimal?        @map("paid_rate") @db.Decimal(10, 2)
+  paidRateSource  String?         @map("paid_rate_source") @db.VarChar(20)
+  status          WorkShiftStatus @default(SCHEDULED)
+  title           String?         @db.VarChar(255)
+  notes           String?
+  createdById     String?         @map("created_by") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  staff     User  @relation("StaffShifts", fields: [staffId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("ShiftScheduledBy", fields: [createdById], references: [id])
+
+  @@index([staffId, date])
+  @@index([date])
+  @@map("work_shifts")
 }
 
 model Attendance {
@@ -1060,6 +1173,17 @@ enum RegistrationEmailStatus {
   FAILED
 
   @@map("registration_email_status")
+}
+
+// A shift is paid only once someone confirms it happened, the same way a class
+// is only paid once it's COMPLETED. Scheduling somebody must never be enough to
+// create money.
+enum WorkShiftStatus {
+  SCHEDULED @map("scheduled")
+  COMPLETED @map("completed")
+  CANCELLED @map("cancelled")
+
+  @@map("work_shift_status")
 }
 
 enum SessionStatus {

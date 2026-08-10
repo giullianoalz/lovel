@@ -8,7 +8,7 @@ const MAX_STUDENTS_CAP = 100;
 // null if the input is valid. Catches typos (maxStudents=0, a stray letter)
 // and a teacherId that doesn't point to an actual active-ish teacher before
 // they become a class nobody can enroll into or a foreign-key crash.
-const validateClassInput = async ({ maxStudents, teacherId, priceOverride }) => {
+const validateClassInput = async ({ maxStudents, teacherId, coTeacherIds, priceOverride }) => {
   if (maxStudents !== undefined && maxStudents !== null && maxStudents !== '') {
     const n = Number(maxStudents);
     if (!Number.isInteger(n) || n < 1 || n > MAX_STUDENTS_CAP) {
@@ -41,6 +41,26 @@ const validateClassInput = async ({ maxStudents, teacherId, priceOverride }) => 
     }
   }
 
+  if (coTeacherIds && Array.isArray(coTeacherIds) && coTeacherIds.length > 0) {
+    const coTeachers = await prisma.user.findMany({
+      where: { id: { in: coTeacherIds } },
+      select: { id: true, role: true, secondaryRoles: true, status: true },
+    });
+    
+    if (coTeachers.length !== coTeacherIds.length) {
+      return 'One or more co-teachers do not exist.';
+    }
+    
+    for (const t of coTeachers) {
+      if (!hasRole(t, 'TEACHER')) {
+        return 'All co-teachers must reference an existing teacher account.';
+      }
+      if (t.status === 'SUSPENDED') {
+        return 'One of the co-teachers is suspended and cannot be assigned.';
+      }
+    }
+  }
+
   return null;
 };
 
@@ -58,9 +78,17 @@ export const listClasses = async (req, res, next) => {
     // ADMIN is broad enough to escape the narrowing; a teacher who also covers
     // the front desk stays scoped to their own, same as on the calendar.
     if (isOnly(req.user, 'TEACHER')) {
-      where.teacherId = req.user.id;
+      where.OR = [
+        { teacherId: req.user.id },
+        { coTeachers: { some: { id: req.user.id } } }
+      ];
     } else if (teacherId) {
-      where.teacherId = teacherId;
+      // If there's an existing OR array (from search), we must combine with AND.
+      // But we haven't added search yet, so it's safe to just set OR.
+      where.OR = [
+        { teacherId },
+        { coTeachers: { some: { id: teacherId } } }
+      ];
     }
     if (status) where.status = status;
     if (search) {
@@ -78,6 +106,9 @@ export const listClasses = async (req, res, next) => {
         orderBy: { name: 'asc' },
         include: {
           teacher: {
+            select: { id: true, fullName: true },
+          },
+          coTeachers: {
             select: { id: true, fullName: true },
           },
           _count: {
@@ -157,13 +188,13 @@ export const getClass = async (req, res, next) => {
  */
 export const createClass = async (req, res, next) => {
   try {
-    const { name, subject, teacherId, type, meetingUrl, maxStudents, termId, groupType, priceOverride } = req.body;
+    const { name, subject, teacherId, coTeacherIds, type, meetingUrl, maxStudents, termId, groupType, priceOverride } = req.body;
 
     if (!name) {
       return res.status(400).json({ error: 'Validation Error', message: 'Class name is required.' });
     }
 
-    const validationError = await validateClassInput({ maxStudents, teacherId, priceOverride });
+    const validationError = await validateClassInput({ maxStudents, teacherId, coTeacherIds, priceOverride });
     if (validationError) {
       return res.status(400).json({ error: 'Validation Error', message: validationError });
     }
@@ -187,9 +218,13 @@ export const createClass = async (req, res, next) => {
         ...(priceOverride !== undefined && priceOverride !== null && priceOverride !== ''
           ? { priceOverride: Number(priceOverride) }
           : {}),
+        ...(coTeacherIds && Array.isArray(coTeacherIds) && coTeacherIds.length > 0
+          ? { coTeachers: { connect: coTeacherIds.map(id => ({ id })) } }
+          : {}),
       },
       include: {
         teacher: { select: { fullName: true } },
+        coTeachers: { select: { fullName: true } },
       },
     });
 
@@ -206,9 +241,9 @@ export const createClass = async (req, res, next) => {
  */
 export const updateClass = async (req, res, next) => {
   try {
-    const { name, subject, teacherId, type, meetingUrl, maxStudents, status, groupType, priceOverride } = req.body;
+    const { name, subject, teacherId, coTeacherIds, type, meetingUrl, maxStudents, status, groupType, priceOverride } = req.body;
 
-    const validationError = await validateClassInput({ maxStudents, teacherId, priceOverride });
+    const validationError = await validateClassInput({ maxStudents, teacherId, coTeacherIds, priceOverride });
     if (validationError) {
       return res.status(400).json({ error: 'Validation Error', message: validationError });
     }
@@ -236,7 +271,12 @@ export const updateClass = async (req, res, next) => {
         ...(groupType && { groupType }),
         ...(clearsPrice ? { priceOverride: null } : {}),
         ...(setsPrice ? { priceOverride: Number(priceOverride) } : {}),
+        ...(Array.isArray(coTeacherIds) ? { coTeachers: { set: coTeacherIds.map(id => ({ id })) } } : {}),
       },
+      include: {
+        teacher: { select: { fullName: true } },
+        coTeachers: { select: { fullName: true } },
+      }
     });
 
     invalidate('classes:*', 'registration:classes:*');

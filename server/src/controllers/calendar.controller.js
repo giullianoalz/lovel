@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../config/database.js';
 import { hasRole, isFrontDeskOnly } from '../utils/roles.js';
+import { loadPayCategories } from '../services/payroll.service.js';
 
 export const getCalendarData = async (req, res, next) => {
   try {
@@ -26,16 +27,60 @@ export const getCalendarData = async (req, res, next) => {
     let sessions = [];
     let ptoRequests = [];
     let spaceReservations = [];
+    let workShifts = [];
 
     // Get Teacher's Sessions
     sessions = await prisma.session.findMany({
       where: {
         date: { gte: fromDate, lte: toDate },
-        class: { teacherId: userId }
+        class: {
+          OR: [
+            { teacherId: userId },
+            { coTeachers: { some: { id: userId } } }
+          ]
+        }
       },
       include: {
-        class: { select: { id: true, name: true, subject: true, type: true } }
+        class: { 
+          select: { 
+            id: true, name: true, subject: true, type: true, teacherId: true,
+            teacher: { select: { id: true, fullName: true } },
+            coTeachers: { select: { id: true, fullName: true } }
+          } 
+        }
       }
+    });
+
+    // Paid hours that aren't a class — reception, planning, a staff meeting.
+    // Scoped exactly like sessions: your own, unless you're one of the people
+    // who builds the rota, who need to see everyone's.
+    const shiftWhere = {
+      date: { gte: fromDate, lte: toDate },
+      status: { not: 'CANCELLED' },
+      ...(isOrgWide ? {} : { staffId: userId }),
+    };
+    const [shiftRows, payCategories] = await Promise.all([
+      prisma.workShift.findMany({
+        where: shiftWhere,
+        include: { staff: { select: { id: true, fullName: true, avatarUrl: true } } },
+        orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+      }),
+      loadPayCategories(),
+    ]);
+    const categoryByKey = new Map(payCategories.map((c) => [c.key, c]));
+
+    // What a colleague earns is not on anybody else's calendar: the block shows
+    // who and what kind of work, and the rate only for admins and its owner.
+    const canSeePay = hasRole(req.user, 'ADMIN');
+    workShifts = shiftRows.map((s) => {
+      const decorated = {
+        ...s,
+        categoryLabel: categoryByKey.get(s.payCategoryKey)?.label || null,
+        categoryColor: categoryByKey.get(s.payCategoryKey)?.color || null,
+      };
+      return canSeePay || s.staffId === userId
+        ? decorated
+        : { ...decorated, payRateOverride: null, notes: null };
     });
 
     // Get PTO if requested
@@ -75,7 +120,8 @@ export const getCalendarData = async (req, res, next) => {
     res.json({
       sessions,
       ptoRequests,
-      spaceReservations
+      spaceReservations,
+      workShifts
     });
   } catch (error) {
     next(error);

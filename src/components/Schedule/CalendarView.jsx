@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
@@ -8,6 +8,7 @@ import { formatTimeOfDay } from '../../lib/time';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
 import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
+import ShiftScheduler from './ShiftScheduler';
 import './CalendarView.css';
 
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -231,6 +232,10 @@ const CalendarView = () => {
   const navigate = useNavigate();
   const toast = useToast();
   const canAddEvents = hasRole('ADMIN');
+  // What an hour pays is admin-only, here and on the server: the routes reject
+  // the pay fields from anyone else, so a teacher must never see a control that
+  // is going to bounce.
+  const canSetPay = hasRole('ADMIN');
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
   const [currentDate, setCurrentDate] = useState(new Date());
   const [sessions, setSessions] = useState([]);
@@ -277,6 +282,11 @@ const CalendarView = () => {
   // Add Event States
   const [isAddEventDropdownOpen, setIsAddEventDropdownOpen] = useState(false);
   const [activeModal, setActiveModal] = useState(null); // 'quick', 'full'
+  const [isShiftSchedulerOpen, setIsShiftSchedulerOpen] = useState(false);
+  // The kinds of work an hour can be, for the picker on a session. Only the
+  // active ones: a retired category shouldn't be offered on new work, though
+  // sessions already booked to it keep it.
+  const [payCategories, setPayCategories] = useState([]);
 
   /* ── PTO & Shared Spaces ── */
   const [calPanel, setCalPanel] = useState(null); // 'pto' | 'spaces' | null
@@ -607,7 +617,27 @@ const CalendarView = () => {
           title: `${r.purpose || r.space?.name || 'Meeting'}${r.user?.fullName ? ` — ${r.user.fullName}` : ''}`,
         };
       });
-      setStaffEvents([...pto, ...spaces]);
+      // Paid hours that aren't a class — reception, planning, a staff meeting.
+      // They belong on the calendar for the same reason classes do: it's the
+      // schedule, and here it is also the thing that decides what the hour
+      // costs. The rate rides on the chip for whoever is allowed to see it,
+      // so an admin building next week's rota can read the money as they go.
+      const shifts = (res.data.workShifts || []).map(s => {
+        const label = s.categoryLabel || 'Shift';
+        const who = s.staff?.fullName || '';
+        return {
+          id: `shift-${s.id}`,
+          shiftId: s.id,
+          kind: 'shift',
+          dateStr: new Date(s.date).toISOString().split('T')[0],
+          time: `${formatTimeOfDay(s.startTime)} - ${formatTimeOfDay(s.endTime)}`,
+          teacherName: who,
+          categoryColor: s.categoryColor || null,
+          status: s.status,
+          title: `${s.title || label}${who ? ` — ${who}` : ''}`,
+        };
+      });
+      setStaffEvents([...pto, ...spaces, ...shifts]);
     } catch {
       if (seq === staffEventsSeqRef.current) setStaffEvents([]);
     }
@@ -616,6 +646,15 @@ const CalendarView = () => {
   useEffect(() => {
     loadStaffEvents(view, currentDate);
   }, [view, currentDate, role]);
+
+  // Loaded once: the list is short, changes rarely, and every session opened
+  // needs it to name the kind of work this hour is.
+  useEffect(() => {
+    if (!canSetPay) return;
+    database.fetchPayCategories({ activeOnly: true })
+      .then(setPayCategories)
+      .catch(() => setPayCategories([]));
+  }, [canSetPay]);
 
   const reloadTeachers = () => database.fetchTeachers().then(setTeachers);
 
@@ -639,9 +678,16 @@ const CalendarView = () => {
       .filter(s => s.status !== 'CANCELLED')
       .map(s => {
         const classInfo = classesById[s.classId] || {};
-        const teacherName = classInfo.teacher?.fullName;
-        // The link belongs to this meeting, not to the class: a hybrid class
-        // reads as Virtual only on the days that carry one.
+        // The session's own payload carries this now (sessions.controller.js),
+        // so it resolves even when GET /classes 403s — front desk and any other
+        // non-staff viewer never populates classesById at all.
+        const primaryTeacher = s.class?.teacher?.fullName || classInfo.teacher?.fullName;
+        const coTeachers = s.class?.coTeachers || classInfo.coTeachers || [];
+        const allTeacherNames = [primaryTeacher, ...coTeachers.map(c => c.fullName)].filter(Boolean);
+        const teacherNameStr = allTeacherNames.length > 1 
+          ? `${primaryTeacher || coTeachers[0].fullName} (+${allTeacherNames.length - 1})`
+          : (primaryTeacher || 'Unassigned');
+
         const cls = {
           type: s.class?.type || classInfo.type,
           meetingUrl: s.class?.meetingUrl ?? classInfo.meetingUrl,
@@ -656,8 +702,9 @@ const CalendarView = () => {
           dateStr: new Date(s.date).toISOString().split('T')[0],
           type: cls.type === 'VIRTUAL' || s.meetingUrl ? 'Virtual' : 'In-Person',
           classType: cls.type || 'IN_PERSON',
-          teacher: teacherName || 'Unassigned',
+          teacher: teacherNameStr,
           teacherId: s.class?.teacherId || classInfo.teacherId || classInfo.teacher?.id || null,
+          coTeacherIds: coTeachers.map(c => c.id),
           students: classInfo._count?.enrollments ?? 0,
           studentList: null, // lazily loaded when the event is opened
           studentIds: [],
@@ -670,6 +717,14 @@ const CalendarView = () => {
           // Only ever a default to prefill when someone marks *this* meeting
           // virtual — never shown as this session's link.
           classMeetingUrl: cls.meetingUrl || '',
+          // What kind of work this hour is, for pay. Null means it still falls
+          // back to the old guess (online if there's a link, else in person).
+          payCategoryKey: s.payCategoryKey || '',
+          payRateOverride: s.payRateOverride == null ? '' : String(s.payRateOverride),
+          // Once the hour is confirmed its rate is written down and no longer
+          // follows the category, so the picker says so instead of implying an
+          // edit here would change what was paid.
+          paidRate: s.paidRate == null ? null : Number(s.paidRate),
           status: s.status,
         };
       });
@@ -979,12 +1034,19 @@ const CalendarView = () => {
       title: selectedEvent.title,
       subject: selectedEvent.subject,
       teacherId: selectedEvent.teacherId || '',
+      coTeacherIds: selectedEvent.coTeacherIds || [],
       date: selectedEvent.dateStr,
       startTime,
       endTime,
       origDate: selectedEvent.dateStr,
       origStartTime: startTime,
       applyToSeries: false,
+      payCategoryKey: selectedEvent.payCategoryKey || '',
+      payRateOverride: selectedEvent.payRateOverride || '',
+      // Separate from applyToSeries on purpose: retiming one session is usually
+      // a one-off, but "this class is private tutoring" is nearly always true of
+      // the whole term, and mixing the two would make each fix the other.
+      applyCategoryToSeries: false,
       studentList: [...(selectedEvent.studentIds || [])],
     });
     setIsEditingEvent(true);
@@ -1001,9 +1063,19 @@ const CalendarView = () => {
         name: editEventForm.title,
         subject: editEventForm.subject,
         teacherId: editEventForm.teacherId || undefined,
+        coTeacherIds: editEventForm.coTeacherIds || [],
       });
       const { date, startTime, endTime } = editEventForm;
-      await api.put(`/sessions/${selectedEvent.id}`, { date, startTime, endTime });
+      // The pay fields only ride along for an admin — the route rejects them
+      // from anyone else, so sending them would turn a teacher's ordinary
+      // retiming into a 400.
+      const payFields = canSetPay
+        ? {
+            payCategoryKey: editEventForm.payCategoryKey || null,
+            payRateOverride: editEventForm.payRateOverride ?? '',
+          }
+        : {};
+      await api.put(`/sessions/${selectedEvent.id}`, { date, startTime, endTime, ...payFields });
 
       // Same time, every following week: the fix for a whole semester booked an
       // hour off, without opening each session in turn.
@@ -1020,6 +1092,24 @@ const CalendarView = () => {
         toast.success(res.data.message);
       }
 
+      // "This class is private tutoring" is a statement about the term, not
+      // about Tuesday. Applied from this session onward, never to earlier ones:
+      // opening a session in March must not reach back and reprice January.
+      // Any of those later sessions already confirmed are re-priced at the new
+      // rate, which is the point — this is how a miscategorised class is fixed.
+      if (canSetPay && editEventForm.applyCategoryToSeries) {
+        const weekday = new Date(`${editEventForm.origDate}T00:00:00Z`).getUTCDay();
+        const res = await api.patch('/sessions/bulk', {
+          classId: selectedEvent.classId,
+          weekday,
+          matchStartTime: editEventForm.origStartTime,
+          from: editEventForm.origDate,
+          payCategoryKey: editEventForm.payCategoryKey || null,
+          payRateOverride: editEventForm.payRateOverride ?? '',
+        });
+        toast.success(res.data.message);
+      }
+
       const newTeacher = teachers.find(t => t.id === editEventForm.teacherId);
       const updated = {
         ...selectedEvent,
@@ -1032,6 +1122,8 @@ const CalendarView = () => {
         studentList: editEventForm.studentList.map(s => s.name),
         studentIds: editEventForm.studentList,
         students: editEventForm.studentList.length,
+        payCategoryKey: editEventForm.payCategoryKey || '',
+        payRateOverride: editEventForm.payRateOverride || '',
       };
       setSelectedEvent(updated);
       setIsEditingEvent(false);
@@ -1184,6 +1276,7 @@ const CalendarView = () => {
         name: newEventForm.title || newEventForm.category || 'New Class',
         subject: subjectClass(newEventForm.title),
         teacherId: tutor?.id,
+        coTeacherIds: newEventForm.coTeacherIds || [],
         type: isVirtual ? 'VIRTUAL' : 'IN_PERSON',
         maxStudents: Math.max(attendeeIds.length, 10),
       });
@@ -1611,6 +1704,14 @@ const CalendarView = () => {
                       <CalendarIcon size={16} />
                       <span>Add Non-Tutoring Event</span>
                     </div>
+                    {/* Paid hours that aren't a class. Only admins: scheduling
+                        one is deciding what it costs. */}
+                    {hasRole('ADMIN') && (
+                      <div className="dropdown-item" onClick={() => { setIsShiftSchedulerOpen(true); setIsAddEventDropdownOpen(false); }}>
+                        <Clock size={16} />
+                        <span>Work Shift (front desk, planning…)</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2525,7 +2626,7 @@ const CalendarView = () => {
                         onChange={e => setEditEventForm(prev => ({ ...prev, teacherId: e.target.value }))}
                         style={{ flex: 1, height: '34px', fontSize: '13px' }}
                       >
-                        <option value="">Unassigned</option>
+                        <option value="">Unassigned (Primary)</option>
                         {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                       <AddSelfAsTeacher
@@ -2536,6 +2637,24 @@ const CalendarView = () => {
                         }}
                         onError={toast.error}
                       />
+                    </div>
+                    <div className="meta-item" style={{ flexWrap: 'wrap', marginTop: '-8px' }}>
+                      <User size={16} style={{ visibility: 'hidden' }} />
+                      <select
+                        className="form-control"
+                        multiple
+                        value={editEventForm.coTeacherIds || []}
+                        onChange={e => {
+                          const options = [...e.target.selectedOptions];
+                          const values = options.map(o => o.value);
+                          setEditEventForm(prev => ({ ...prev, coTeacherIds: values }));
+                        }}
+                        style={{ flex: 1, minHeight: '60px', fontSize: '13px', marginTop: '4px' }}
+                      >
+                        {teachers.filter(t => t.id !== editEventForm.teacherId).map(t => (
+                          <option key={t.id} value={t.id}>{t.name} (Co-teacher)</option>
+                        ))}
+                      </select>
                     </div>
                     <div className="meta-item cal-edit-when">
                       <Clock size={16} />
@@ -2587,6 +2706,67 @@ const CalendarView = () => {
                         <option value="arts">Arts</option>
                       </select>
                     </div>
+
+                    {/* What kind of work this hour is, for pay. A private
+                        tutoring hour and an in-person class are the same shape
+                        of row, so nothing but this can tell them apart — and
+                        without it they'd pay the same rate. */}
+                    {canSetPay && (
+                      <div className="cal-pay-block">
+                        <div className="meta-item">
+                          <DollarSign size={16} />
+                          <select
+                            className="form-control"
+                            value={editEventForm.payCategoryKey}
+                            onChange={e => setEditEventForm(prev => ({ ...prev, payCategoryKey: e.target.value }))}
+                            style={{ flex: 1, height: '34px', fontSize: '13px' }}
+                            title="What this hour pays as"
+                          >
+                            <option value="">
+                              Work it out automatically ({selectedEvent.type === 'Virtual' ? 'online session' : 'in-person class'})
+                            </option>
+                            {payCategories.map(c => (
+                              <option key={c.key} value={c.key}>
+                                {c.label}{c.defaultRate != null ? ` — $${Number(c.defaultRate).toFixed(2)}/hr` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="cal-pay-rate">
+                            <span>$</span>
+                            <input
+                              type="number" min="0" step="0.01" inputMode="decimal"
+                              className="form-control"
+                              value={editEventForm.payRateOverride}
+                              onChange={e => setEditEventForm(prev => ({ ...prev, payRateOverride: e.target.value }))}
+                              placeholder="rate"
+                              title="A rate for this one session, overriding everything else"
+                            />
+                            <span>/hr</span>
+                          </div>
+                        </div>
+
+                        <label className="cal-series-toggle">
+                          <input
+                            type="checkbox"
+                            checked={editEventForm.applyCategoryToSeries}
+                            onChange={e => setEditEventForm(prev => ({ ...prev, applyCategoryToSeries: e.target.checked }))}
+                          />
+                          <span>
+                            Pay every {weekdayNameOf(editEventForm.origDate)} session of this class from here on the same way
+                          </span>
+                        </label>
+
+                        {/* Confirmed hours carry the rate they were worked at,
+                            so changing the category now cannot move what was
+                            already paid — better said here than discovered on
+                            the payslip. */}
+                        <p className="cal-pay-hint">
+                          {selectedEvent.paidRate != null
+                            ? `This session was already confirmed at $${selectedEvent.paidRate.toFixed(2)}/hr. Changing the category re-prices it at the new rate.`
+                            : 'Leave the rate empty to use the category’s rate, or the teacher’s own rate for that work.'}
+                        </p>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -2598,6 +2778,21 @@ const CalendarView = () => {
                       <Clock size={16} />
                       <span>{selectedEvent.time}</span>
                     </div>
+                    {/* Only worth a row once somebody has actually said what
+                        this hour is: an unset one pays the same as it always
+                        did, and a line saying "automatic" is noise. */}
+                    {canSetPay && selectedEvent.payCategoryKey && (
+                      <div className="meta-item">
+                        <DollarSign size={16} />
+                        <span>
+                          {payCategories.find(c => c.key === selectedEvent.payCategoryKey)?.label
+                            || selectedEvent.payCategoryKey}
+                          {selectedEvent.payRateOverride && (
+                            <strong className="cal-pay-tag">${Number(selectedEvent.payRateOverride).toFixed(2)}/hr</strong>
+                          )}
+                        </span>
+                      </div>
+                    )}
                     <div className={`meta-item${isEditingLink ? ' cal-link-cell' : ''}`} style={{ flexWrap: 'wrap', gap: '8px' }}>
                       {isEditingLink ? (
                         <div className="cal-link-editor">
@@ -3057,7 +3252,7 @@ const CalendarView = () => {
                 <div className="form-group">
                   <label>Tutor</label>
                   <select className="form-control" value={newEventForm.tutor} onChange={e => setNewEventForm({...newEventForm, tutor: e.target.value})}>
-                    <option value="">Select tutor...</option>
+                    <option value="">Select tutor (Primary)...</option>
                     {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                   <AddSelfAsTeacher
@@ -3068,6 +3263,23 @@ const CalendarView = () => {
                     }}
                     onError={toast.error}
                   />
+                </div>
+
+                <div className="form-group mt-8">
+                  <label>Co-Tutors</label>
+                  <select 
+                    className="form-control" 
+                    multiple 
+                    value={newEventForm.coTeacherIds || []} 
+                    onChange={e => {
+                      const options = [...e.target.selectedOptions];
+                      const values = options.map(o => o.value);
+                      setNewEventForm({...newEventForm, coTeacherIds: values});
+                    }}
+                    style={{ minHeight: '60px' }}
+                  >
+                    {teachers.filter(t => t.id !== newEventForm.tutor).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
                 </div>
 
                 <div className="form-group mt-8" ref={attendeeSectionRef} style={{ position: 'relative' }}>
@@ -3275,6 +3487,16 @@ const CalendarView = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {isShiftSchedulerOpen && (
+        <ShiftScheduler
+          defaultDate={toISODate(currentDate)}
+          onClose={() => setIsShiftSchedulerOpen(false)}
+          // Shifts ride on the calendar the same way PTO does, so a new one has
+          // to come back through that fetch to appear on the grid.
+          onSaved={() => loadStaffEvents(view, currentDate)}
+        />
       )}
     </div>
   );
