@@ -11,6 +11,14 @@ const MEDIA_BASE = SOCKET_URL;
 
 const ChatHub = () => {
   const { user, hasRole } = useAuth();
+
+  // A teacher can't look a guardian up by name or address — both are hidden
+  // from them, and the server matches guardians on their child's name instead
+  // (server/src/utils/parentPrivacy.js), so the hint has to say so.
+  const peopleSearchPlaceholder = hasRole('TEACHER') && !hasRole('ADMIN')
+    ? 'Search by student or staff name...'
+    : 'Search by name or email...';
+
   const [activeChat, setActiveChat] = useState(null);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -738,7 +746,7 @@ const ChatHub = () => {
             <input
               type="text"
               className="form-control"
-              placeholder="Search by name or email..."
+              placeholder={peopleSearchPlaceholder}
               value={peopleQuery}
               onChange={(e) => {
                 setPeopleQuery(e.target.value);

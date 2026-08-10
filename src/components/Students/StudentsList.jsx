@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, UserPlus, AlertCircle, Cookie, Mail, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy, Shell, Check, X } from 'lucide-react';
+import { Search, UserPlus, AlertCircle, Cookie, Mail, Phone, CalendarDays, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy, Shell, Check, X } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -445,6 +445,19 @@ const StudentsList = () => {
                         <Mail size={18} />
                       </a>
                     )}
+                    {/* Front desk gets phone but never email (students.controller,
+                        parentContactLevel) — without this call button, that phone
+                        number had nowhere to appear on the card at all. */}
+                    {student.parentPhone && student.parentPhone !== 'N/A' && (
+                      <a
+                        className="icon-btn"
+                        href={`tel:${student.parentPhone}`}
+                        title={`Call ${student.parentName || 'parent'} (${student.parentPhone})`}
+                        aria-label={`Call ${student.parentName || 'parent'}`}
+                      >
+                        <Phone size={18} />
+                      </a>
+                    )}
                     <button
                       className="icon-btn"
                       title="Internal Chat"
@@ -452,6 +465,19 @@ const StudentsList = () => {
                       onClick={() => navigate('/chat')}
                     >
                       <MessageSquare size={18} />
+                    </button>
+                    {/* Everyone who reaches this screen may ask "when is this
+                        kid's next class" — it's the calendar, not the medical/
+                        billing history View Profile opens, so it isn't gated
+                        the same way. Jumps to Calendar pre-filtered to this
+                        student via the ?student= param CalendarView reads. */}
+                    <button
+                      className="icon-btn"
+                      title={`View ${student.name}'s schedule`}
+                      aria-label={`View ${student.name}'s schedule`}
+                      onClick={() => navigate(`/calendar?student=${encodeURIComponent(student.name)}`)}
+                    >
+                      <CalendarDays size={18} />
                     </button>
                     {canOpenProfile && (
                       <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>

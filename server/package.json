@@ -15,7 +15,8 @@
     "db:seed": "node prisma/seed.js",
     "db:studio": "npx prisma studio",
     "db:backup": "node scripts/backup-db.js",
-    "gmail:auth": "node scripts/gmail-auth.mjs"
+    "gmail:auth": "node scripts/gmail-auth.mjs",
+    "notifications:mask-parents": "node scripts/mask-parent-names-in-notifications.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",

@@ -60,7 +60,7 @@ export default defineConfig({
 
       devOptions: {
         // Enable SW in dev mode so you can test offline behavior locally
-        enabled: false,
+        enabled: true,
       },
     }),
   ],

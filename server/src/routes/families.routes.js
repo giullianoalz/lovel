@@ -12,11 +12,16 @@ import {
 
 const router = Router();
 
-// GET /api/families — List all families (Admin/Teacher)
-router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listFamilies);
+// Admin-only, both of them. These return every family member's name, email and
+// phone — exactly the guardian details a teacher must not hold (the rest of the
+// app now shows them "Ana's Parent"; see utils/parentPrivacy.js). No teacher
+// screen reads these endpoints, so the roster views lose nothing.
 
-// GET /api/families/:id — Get family detail (Admin/Teacher)
-router.get('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), getFamily);
+// GET /api/families — List all families (Admin)
+router.get('/', authenticate, requireRole('ADMIN'), listFamilies);
+
+// GET /api/families/:id — Get family detail (Admin)
+router.get('/:id', authenticate, requireRole('ADMIN'), getFamily);
 
 // POST /api/families — Create family (Admin)
 router.post('/', authenticate, requireRole('ADMIN'), createFamily);

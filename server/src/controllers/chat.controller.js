@@ -4,6 +4,7 @@ import prisma from '../config/database.js';
 import { hasRole } from '../utils/roles.js';
 import { generateAssistantReply, isAssistantEnabled } from '../services/ai.service.js';
 import { findContactInfo } from '../utils/contentFilter.js';
+import { buildParentMaskMap, displayNameFor, masksParentIdentity } from '../utils/parentPrivacy.js';
 import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 
@@ -24,12 +25,15 @@ async function notifyOtherParticipants({ io, threadId, senderId, senderName, pre
   try {
     const others = await prisma.chatParticipant.findMany({
       where: { threadId, userId: { not: senderId } },
-      select: { userId: true },
+      select: { user: { select: { id: true, role: true, secondaryRoles: true } } },
     });
-    const title = `New message from ${senderName}`;
-    await Promise.all(others.map(({ userId: recipientId }) =>
-      sendNotification({
-        userId: recipientId,
+    // The notification title carries the sender's name, so it needs the same
+    // masking the thread itself gets — otherwise a teacher's bell (and their
+    // phone's lock screen) spells out the guardian's real name.
+    await Promise.all(others.map(async ({ user: recipient }) => {
+      const title = `New message from ${await displayNameForViewer(recipient, senderId, senderName)}`;
+      await sendNotification({
+        userId: recipient.id,
         type: 'chat_message',
         title,
         message: preview,
@@ -39,12 +43,10 @@ async function notifyOtherParticipants({ io, threadId, senderId, senderName, pre
         // ChatHub opens the thread from ?thread=. Without it the push lands on
         // the dashboard and the reader has to find the conversation themselves.
         link: `/chat?thread=${threadId}`,
-        dedupKey: `chat-message:${messageId}:${recipientId}`,
-      })
-    ));
-    if (io) {
-      others.forEach(({ userId: recipientId }) => {
-        io.to(`user_${recipientId}`).emit('notification', {
+        dedupKey: `chat-message:${messageId}:${recipient.id}`,
+      });
+      if (io) {
+        io.to(`user_${recipient.id}`).emit('notification', {
           type: 'chat_message',
           title,
           message: preview,
@@ -52,11 +54,67 @@ async function notifyOtherParticipants({ io, threadId, senderId, senderName, pre
           referenceId: threadId,
           createdAt: new Date(),
         });
-      });
-    }
+      }
+    }));
   } catch (err) {
     console.error('Chat notification failed:', err.message);
   }
+}
+
+/**
+ * The name one viewer is allowed to see for `senderId`. Falls back to the real
+ * name for anyone who isn't a masked viewer (parents, students, admins).
+ */
+async function displayNameForViewer(viewer, senderId, realName) {
+  if (!senderId || !masksParentIdentity(viewer)) return realName;
+  const map = await buildParentMaskMap(viewer, [senderId]);
+  return map.get(senderId) || realName;
+}
+
+/**
+ * The create-thread endpoints used to hand back whole Prisma user rows for
+ * every participant — guardian email and phone included, to a teacher who had
+ * just clicked "New Conversation". The client only reads `thread.id`, so the
+ * participants come back as identity-only, with the same masking the inbox uses.
+ */
+async function presentThread(thread, viewer) {
+  const maskMap = await buildParentMaskMap(viewer, (thread.participants || []).map(p => p.userId));
+  return {
+    id: thread.id,
+    name: thread.name,
+    isBot: thread.isBot,
+    status: thread.status,
+    participants: (thread.participants || []).map(p => ({
+      userId: p.userId,
+      user: p.user ? { id: p.user.id, fullName: displayNameFor(maskMap, p.user), role: p.user.role } : null,
+    })),
+  };
+}
+
+/**
+ * Delivers a message over Socket.IO. Normally that's one emit to the thread
+ * room, but when a teacher is in the thread the payload isn't the same for
+ * everyone — they must read "Ana's Parent" where the rest read the real name —
+ * so it goes out per participant, to the personal room every socket joins on
+ * connect (see server/src/index.js).
+ */
+async function broadcastMessage({ io, threadId, message, senderId }) {
+  if (!io) return;
+
+  const participants = await prisma.chatParticipant.findMany({
+    where: { threadId },
+    select: { user: { select: { id: true, role: true, secondaryRoles: true } } },
+  });
+
+  if (!participants.some(({ user }) => masksParentIdentity(user))) {
+    io.to(threadId).emit('receive_message', { threadId, message });
+    return;
+  }
+
+  await Promise.all(participants.map(async ({ user }) => {
+    const sender = await displayNameForViewer(user, senderId, message.sender);
+    io.to(`user_${user.id}`).emit('receive_message', { threadId, message: { ...message, sender } });
+  }));
 }
 
 /** Returns true if `now` (HH:MM, local) falls within a quiet-hours window that may wrap midnight. */
@@ -155,11 +213,18 @@ export const getThreads = async (req, res, next) => {
       )
     );
 
+    // One lookup for every counterpart across the whole inbox: for a teacher,
+    // the guardians in it read as "Ana's Parent" instead of by name.
+    const maskMap = await buildParentMaskMap(
+      req.user,
+      participants.flatMap(p => p.thread.participants.map(part => part.userId))
+    );
+
     const threads = participants.map((p, idx) => {
       const thread = p.thread;
       // Find the other participants to determine the thread name if not set
       const otherParticipants = thread.participants.filter(part => part.userId !== userId);
-      const otherNames = otherParticipants.map(part => part.user.fullName).join(', ');
+      const otherNames = otherParticipants.map(part => displayNameFor(maskMap, part.user)).join(', ');
 
       const lastMsg = thread.messages[0];
       const isBlocked = p.isBlocked;
@@ -315,7 +380,7 @@ export const createThread = async (req, res, next) => {
         where: { id: assistantThreadId },
         include: { participants: { include: { user: true } } },
       });
-      return res.status(200).json({ thread: assistantThread });
+      return res.status(200).json({ thread: await presentThread(assistantThread, req.user) });
     }
 
     // For direct 1:1 threads, reuse an existing thread between the same two users
@@ -337,7 +402,7 @@ export const createThread = async (req, res, next) => {
         t.participants.some(p => p.userId === b)
       );
       if (existing) {
-        return res.status(200).json({ thread: existing });
+        return res.status(200).json({ thread: await presentThread(existing, req.user) });
       }
     }
 
@@ -358,7 +423,7 @@ export const createThread = async (req, res, next) => {
       }
     });
 
-    res.status(201).json({ thread });
+    res.status(201).json({ thread: await presentThread(thread, req.user) });
   } catch (error) {
     next(error);
   }
@@ -418,7 +483,7 @@ export const createGroupThread = async (req, res, next) => {
         where: { name, participants: { some: { userId } } },
         include: { participants: { include: { user: true } } },
       });
-      if (existing) return res.status(200).json({ thread: existing });
+      if (existing) return res.status(200).json({ thread: await presentThread(existing, req.user) });
     }
 
     const thread = await prisma.chatThread.create({
@@ -431,7 +496,7 @@ export const createGroupThread = async (req, res, next) => {
       include: { participants: { include: { user: true } } }
     });
 
-    res.status(201).json({ thread });
+    res.status(201).json({ thread: await presentThread(thread, req.user) });
   } catch (error) {
     next(error);
   }
@@ -462,12 +527,14 @@ export const getMessages = async (req, res, next) => {
       }
     });
 
+    const maskMap = await buildParentMaskMap(req.user, messages.map(m => m.senderId));
+
     const formattedMessages = messages.map(msg => {
       const isMe = msg.senderId === userId;
       return {
         id: msg.id,
         senderId: msg.senderId,
-        sender: isMe ? 'Me' : (msg.sender ? msg.sender.fullName : 'System'),
+        sender: isMe ? 'Me' : (msg.sender ? displayNameFor(maskMap, msg.sender) : 'System'),
         text: msg.text,
         ...formatAttachment(msg),
         time: msg.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -576,12 +643,8 @@ export const sendMessage = async (req, res, next) => {
 
     // Broadcast to other participants via Socket.IO
     const io = req.app.get('io');
-    if (io) {
-      io.to(threadId).emit('receive_message', {
-        threadId,
-        message: formattedMessage
-      });
-    }
+    broadcastMessage({ io, threadId, message: formattedMessage, senderId: userId })
+      .catch(err => console.error('Chat broadcast failed:', err.message));
 
     // Respond immediately with the user's message so the UI never waits on the AI.
     res.status(201).json({ message: formattedMessage });
@@ -793,9 +856,8 @@ export const uploadAttachment = async (req, res, next) => {
     };
 
     const io = req.app.get('io');
-    if (io) {
-      io.to(threadId).emit('receive_message', { threadId, message: formattedMessage });
-    }
+    broadcastMessage({ io, threadId, message: formattedMessage, senderId: userId })
+      .catch(err => console.error('Chat broadcast failed:', err.message));
 
     res.status(201).json({ message: formattedMessage });
 
