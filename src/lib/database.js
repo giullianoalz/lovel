@@ -264,9 +264,67 @@ export const database = {
     return response.data;
   },
 
-  updateTeacherPayroll: async (teacherId, { baseSalary, salaryPeriod, hourlyRate, categoryRates }) => {
-    const response = await api.put(`/users/${teacherId}/payroll`, { baseSalary, salaryPeriod, hourlyRate, categoryRates });
+  updateTeacherPayroll: async (teacherId, { baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates }) => {
+    const response = await api.put(`/users/${teacherId}/payroll`, {
+      baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates,
+    });
     return response.data.user;
+  },
+
+  // --- Pay categories: the kinds of work, and what each one pays ---
+  // No mock fallback, for the same reason as payroll: these are the rates the
+  // calendar prices hours at, and an invented "Front desk $20" is a number
+  // somebody would schedule against.
+  fetchPayCategories: async ({ activeOnly = false } = {}) => {
+    const response = await api.get(`/pay-categories${activeOnly ? '?activeOnly=true' : ''}`);
+    return response.data.categories;
+  },
+
+  createPayCategory: async (payload) => {
+    const response = await api.post('/pay-categories', payload);
+    return response.data.category;
+  },
+
+  updatePayCategory: async (id, payload) => {
+    const response = await api.put(`/pay-categories/${id}`, payload);
+    return response.data.category;
+  },
+
+  deletePayCategory: async (id) => {
+    const response = await api.delete(`/pay-categories/${id}`);
+    return response.data;
+  },
+
+  // --- Work shifts: paid hours that aren't a class ---
+  fetchShifts: async ({ from, to, staffId, status } = {}) => {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    if (staffId) params.set('staffId', staffId);
+    if (status) params.set('status', status);
+    const qs = params.toString();
+    const response = await api.get(`/shifts${qs ? `?${qs}` : ''}`);
+    return response.data.shifts;
+  },
+
+  createShift: async (payload) => {
+    const response = await api.post('/shifts', payload);
+    return response.data;
+  },
+
+  updateShift: async (id, payload) => {
+    const response = await api.put(`/shifts/${id}`, payload);
+    return response.data.shift;
+  },
+
+  completeShifts: async (payload) => {
+    const response = await api.post('/shifts/complete', payload);
+    return response.data;
+  },
+
+  deleteShift: async (id) => {
+    const response = await api.delete(`/shifts/${id}`);
+    return response.data;
   },
 
   updateStudentHealth: async (studentId, updates) => {

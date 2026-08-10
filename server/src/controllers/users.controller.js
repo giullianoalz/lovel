@@ -1,7 +1,10 @@
 import prisma from '../config/database.js';
 import { isOnly, hasRole } from '../utils/roles.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
-import { computeTeacherPayroll, computePayrollSummary, PAY_CATEGORIES } from '../services/payroll.service.js';
+import { computeTeacherPayroll, computePayrollSummary, loadPayCategories } from '../services/payroll.service.js';
+import { buildParentMaskMap, masksParentIdentity } from '../utils/parentPrivacy.js';
+
+const EMPTY_MASK_MAP = new Map();
 
 /**
  * What one staff member may learn about another.
@@ -29,11 +32,19 @@ const STAFF_VISIBLE_USER_FIELDS = [
  * on whether the row is backed by a real Firebase account and a deliverable
  * address.
  */
-const presentUser = (user, viewer) => {
+const presentUser = (user, viewer, maskMap = EMPTY_MASK_MAP) => {
   const base = {
     canSignIn: hasSignInAccount(user),
     emailUsable: !isPlaceholderEmail(user.email),
   };
+
+  // A teacher browsing the directory (this endpoint backs the chat "New
+  // Conversation" picker) gets guardians as "Ana's Parent", with no address or
+  // phone attached — see utils/parentPrivacy.js.
+  const maskedName = maskMap.get(user.id);
+  if (maskedName) {
+    return { ...base, id: user.id, fullName: maskedName, role: user.role, status: user.status, isMaskedParent: true };
+  }
 
   // hasRole, not `viewer.role ===`: administration is a permission, and an
   // account whose primary hat is TEACHER but that also holds ADMIN runs the
@@ -68,12 +79,35 @@ export const listUsers = async (req, res, next) => {
     }
     if (status) andClauses.push({ status: status.toUpperCase() });
     if (search) {
-      andClauses.push({
-        OR: [
-          { fullName: { contains: search, mode: 'insensitive' } },
-          { email: { contains: search, mode: 'insensitive' } },
-        ],
-      });
+      const nameMatch = { fullName: { contains: search, mode: 'insensitive' } };
+      const emailMatch = { email: { contains: search, mode: 'insensitive' } };
+
+      if (masksParentIdentity(req.user)) {
+        // Masking the label isn't enough on its own: if searching "maria" still
+        // returned the row rendered as "Ana's Parent", the search box would
+        // give back the exact name the label hides — same for the address.
+        // For a teacher, guardians are reachable through their child's name.
+        andClauses.push({
+          OR: [
+            {
+              AND: [
+                { role: { not: 'PARENT' } },
+                { NOT: { secondaryRoles: { has: 'PARENT' } } },
+                { OR: [nameMatch, emailMatch] },
+              ],
+            },
+            {
+              familyMembers: {
+                some: {
+                  family: { members: { some: { user: { AND: [{ role: 'STUDENT' }, nameMatch] } } } },
+                },
+              },
+            },
+          ],
+        });
+      } else {
+        andClauses.push({ OR: [nameMatch, emailMatch] });
+      }
     }
 
     // This endpoint backs the chat "New Conversation" picker. A teacher must
@@ -124,8 +158,10 @@ export const listUsers = async (req, res, next) => {
       prisma.user.count({ where }),
     ]);
 
+    const maskMap = await buildParentMaskMap(req.user, users.map((u) => u.id));
+
     res.json({
-      users: users.map((user) => presentUser(user, req.user)),
+      users: users.map((user) => presentUser(user, req.user, maskMap)),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -156,7 +192,10 @@ export const getUser = async (req, res, next) => {
     // panel loads it this way — so self is returned whole, like an admin's view.
     // A teacher looking at someone else gets the trimmed projection.
     const isSelf = user.id === req.user.id;
-    res.json({ user: isSelf ? user : presentUser(user, req.user) });
+    if (isSelf) return res.json({ user });
+
+    const maskMap = await buildParentMaskMap(req.user, [user.id]);
+    res.json({ user: presentUser(user, req.user, maskMap) });
   } catch (error) {
     next(error);
   }
@@ -390,23 +429,26 @@ export const setTeachingRole = async (req, res, next) => {
  * Body: {
  *   baseSalary?:   number|null,   // fixed amount, for salaried staff
  *   salaryPeriod?: 'MONTHLY'|'ANNUAL',  // how to read baseSalary
- *   hourlyRate?:   number|null,   // fallback rate per hour taught
- *   categoryRates?: { ONLINE?: number|null, IN_PERSON?: number|null }
+ *   hourlyRate?:   number|null,   // fallback rate per hour worked
+ *   flatRateOnly?: boolean,       // "$17.50 an hour, whatever the work"
+ *   categoryRates?: { [categoryKey]: number|null }
  * }
  * Any part may be sent alone; null or '' clears that rate. Clearing a category
- * override removes the row, so the teacher falls back to their base rate.
+ * override removes the row, so the person falls back to the category's own rate
+ * and then to their base rate.
  */
 export const updateTeacherPayroll = async (req, res, next) => {
   try {
-    const { baseSalary, salaryPeriod, hourlyRate, categoryRates } = req.body;
+    const { baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates } = req.body;
 
     if (
       baseSalary === undefined && salaryPeriod === undefined &&
-      hourlyRate === undefined && categoryRates === undefined
+      hourlyRate === undefined && categoryRates === undefined &&
+      flatRateOnly === undefined
     ) {
       return res.status(400).json({
         error: 'Validation Error',
-        message: 'Send baseSalary, salaryPeriod, hourlyRate, or categoryRates.',
+        message: 'Send baseSalary, salaryPeriod, hourlyRate, flatRateOnly, or categoryRates.',
       });
     }
 
@@ -440,10 +482,11 @@ export const updateTeacherPayroll = async (req, res, next) => {
       data[key] = parsed.value;
     }
     if (salaryPeriod !== undefined) data.salaryPeriod = salaryPeriod;
+    if (flatRateOnly !== undefined) data.flatRateOnly = Boolean(flatRateOnly);
 
     // Validate every category override before touching the database, so a typo
     // in the second one can't leave the first already saved.
-    const validKeys = PAY_CATEGORIES.map((c) => c.key);
+    const validKeys = (await loadPayCategories()).map((c) => c.key);
     const overrideOps = [];
     for (const [category, raw] of Object.entries(categoryRates || {})) {
       if (!validKeys.includes(category)) {
@@ -462,17 +505,19 @@ export const updateTeacherPayroll = async (req, res, next) => {
       where: { id: req.params.id },
       select: {
         id: true, fullName: true, role: true, secondaryRoles: true,
-        baseSalary: true, salaryPeriod: true, hourlyRate: true,
+        baseSalary: true, salaryPeriod: true, hourlyRate: true, flatRateOnly: true,
         payRates: { select: { category: true, hourlyRate: true } },
       },
     });
     if (!target) {
       return res.status(404).json({ error: 'Not Found', message: 'That user does not exist.' });
     }
-    if (!hasRole(target, 'TEACHER', 'ADMIN')) {
+    // Front desk staff are paid for their shifts, so they need rates too — the
+    // check is "does this person work here", not "does this person teach".
+    if (!hasRole(target, 'TEACHER', 'ADMIN', 'RECEPTIONIST')) {
       return res.status(400).json({
         error: 'Validation Error',
-        message: `${target.fullName} is not a teacher, so there is no payroll to set.`,
+        message: `${target.fullName} is not staff, so there is no payroll to set.`,
       });
     }
 
@@ -498,6 +543,7 @@ export const updateTeacherPayroll = async (req, res, next) => {
       where: { id: req.params.id },
       select: {
         id: true, fullName: true, baseSalary: true, salaryPeriod: true, hourlyRate: true,
+        flatRateOnly: true,
         payRates: { select: { category: true, hourlyRate: true } },
       },
     });
@@ -506,6 +552,7 @@ export const updateTeacherPayroll = async (req, res, next) => {
     // changed whose pay. Worth a real record if this ever gets contested.
     const describe = (u) =>
       `base ${u.baseSalary ?? '—'}/${u.salaryPeriod === 'ANNUAL' ? 'yr' : 'mo'}, hourly ${u.hourlyRate ?? '—'}` +
+      (u.flatRateOnly ? ' (flat)' : '') +
       (u.payRates.length ? `, ${u.payRates.map((r) => `${r.category}=${r.hourlyRate}`).join(' ')}` : '');
     console.log(`[Payroll] ${req.user.email} set ${target.fullName}: ${describe(target)} -> ${describe(updated)}`);
 

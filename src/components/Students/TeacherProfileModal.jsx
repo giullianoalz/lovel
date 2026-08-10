@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, MapPin, Video, Pencil, Save } from 'lucide-react';
+import { X, DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, MapPin, Pencil, Save, Receipt, Coffee, Lock } from 'lucide-react';
 import { database } from '../../lib/database';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
@@ -7,6 +7,34 @@ import ErrorBanner from '../Layout/ErrorBanner';
 import './TeacherProfileModal.css';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+const money = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Why an hour was paid what it was, in as few words as fit next to the money.
+ *
+ * The rate cascade has five steps and an admin signing off pay should never
+ * have to guess which one applied — "$30.00 · category rate" answers it on the
+ * line itself.
+ */
+const RATE_SOURCE_TEXT = {
+  event: 'set on this entry',
+  flat: 'flat rate',
+  teacher: 'personal rate',
+  category: 'category rate',
+  base: 'base rate',
+  unset: 'no rate set',
+  // Stamped before the sources were recorded, or by a path that didn't name
+  // one. Still a real frozen rate — just without the "why".
+  frozen: 'rate at the time',
+};
+
+/** A TIME column comes back as an ISO timestamp on a placeholder day. */
+const clock = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
+};
 
 const TeacherProfileModal = ({ teacher, onClose }) => {
   const { hasRole } = useAuth();
@@ -21,7 +49,7 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
   // same rule, this only keeps the controls out of a teacher's way.
   const canEditPay = hasRole('ADMIN');
   const [isEditingRates, setIsEditingRates] = useState(false);
-  const [rateForm, setRateForm] = useState({ baseSalary: '', salaryPeriod: 'MONTHLY', hourlyRate: '', categoryRates: {} });
+  const [rateForm, setRateForm] = useState({ baseSalary: '', salaryPeriod: 'MONTHLY', hourlyRate: '', flatRateOnly: false, categoryRates: {} });
   const [savingRates, setSavingRates] = useState(false);
 
   const loadPayroll = async () => {
@@ -54,9 +82,13 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
       // The agreed figure, not the month's share: someone hired at $63,000 a
       // year must see 63,000 here, or saving would file a twelfth of their
       // salary as the new yearly one.
-      baseSalary: payroll?.salaryAmount ? String(payroll.salaryAmount) : '',
+      // `!= null`, not truthiness: an agreed salary of zero has to prefill as
+      // "0", or opening the card and saving would silently downgrade it to
+      // "not set" — which is a different thing, even though both pay nothing.
+      baseSalary: payroll?.salaryAmount != null ? String(payroll.salaryAmount) : '',
       salaryPeriod: payroll?.salaryPeriod || 'MONTHLY',
       hourlyRate: payroll?.hourlyRate != null ? String(payroll.hourlyRate) : '',
+      flatRateOnly: Boolean(payroll?.flatRateOnly),
       categoryRates,
     });
     setIsEditingRates(true);
@@ -72,6 +104,7 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
         baseSalary: rateForm.baseSalary.trim(),
         salaryPeriod: rateForm.salaryPeriod,
         hourlyRate: rateForm.hourlyRate.trim(),
+        flatRateOnly: rateForm.flatRateOnly,
         categoryRates,
       });
       setIsEditingRates(false);
@@ -121,7 +154,18 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
               <span className={`status-tag ${teacher.status?.replace(' ', '').toLowerCase()}`}>
                 {teacher.status}
               </span>
-              <span className="role-badge">Teacher</span>
+              {/* Every hat this person wears, not a hardcoded "Teacher": the
+                  payroll roster now includes front desk and salaried admins,
+                  and mislabelling somebody on their own pay card is how an
+                  admin starts doubting the figure beside it. */}
+              {(teacher.role
+                ? [teacher.role, ...(teacher.secondaryRoles || [])]
+                : ['TEACHER']
+              ).map(r => (
+                <span className="role-badge" key={r}>
+                  {r === 'RECEPTIONIST' ? 'Front Desk' : r.charAt(0) + r.slice(1).toLowerCase()}
+                </span>
+              ))}
             </div>
           </div>
           <div className="teacher-contact-bar">
@@ -157,6 +201,7 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                   </div>
                   <div className="payroll-total-sessions">
                     <Calendar size={14} /> {payroll.totalHours} h across {payroll.totalSessionCount} session{payroll.totalSessionCount === 1 ? '' : 's'}
+                    {payroll.totalShiftCount > 0 && <> and {payroll.totalShiftCount} shift{payroll.totalShiftCount === 1 ? '' : 's'}</>}
                   </div>
                 </div>
 
@@ -179,15 +224,15 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                   {/* One line per kind of work, so the hours behind the total
                       are readable without opening the rate settings. */}
                   {(payroll.breakdown || []).map(b => (
-                    <div className="breakdown-item" key={b.category}>
+                    <div className="breakdown-item" key={b.category || 'none'}>
                       <div className="breakdown-label">
-                        {b.category === 'ONLINE' ? <Video size={14} /> : <MapPin size={14} />}
+                        <span className="cat-dot" style={b.color ? { background: b.color } : undefined} />
                         <span>
-                          {b.category === 'ONLINE' ? 'Online' : 'In-person'} ({b.hours} h × ${b.rate.toFixed(2)})
+                          {b.label} ({b.hours} h × {b.mixedRates ? 'mixed rates' : money(b.rate)})
                         </span>
                       </div>
                       <div className="breakdown-value accent">
-                        ${b.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        {money(b.amount)}
                       </div>
                     </div>
                   ))}
@@ -273,31 +318,63 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                         </div>
                       </label>
 
-                      <h5 className="rate-subhead">Rate by type of session</h5>
-                      {(payroll.categoryRates || []).map(c => (
-                        <label className="rate-edit-row" key={c.category}>
-                          <span>{c.label}</span>
+                      {/* "She gets $17.50 an hour, whatever she's doing." With
+                          this on, the category rates below stop applying — only
+                          a rate typed onto one calendar entry still wins. */}
+                      <label className="rate-flat-toggle">
+                        <input
+                          type="checkbox"
+                          checked={rateForm.flatRateOnly}
+                          onChange={e => setRateForm(f => ({ ...f, flatRateOnly: e.target.checked }))}
+                        />
+                        <span>
+                          <strong>Same rate for everything</strong>
+                          <small>Pay the hourly rate above for every kind of work, ignoring the rates below.</small>
+                        </span>
+                      </label>
+
+                      <h5 className="rate-subhead">Rate by kind of work</h5>
+                      {(payroll.categoryRates || []).filter(c => c.active !== false).map(c => (
+                        <label className={`rate-edit-row${rateForm.flatRateOnly ? ' rate-edit-row-muted' : ''}`} key={c.category}>
+                          <span>
+                            <span className="cat-dot" style={c.color ? { background: c.color } : undefined} />
+                            {c.label}
+                          </span>
                           <div className="rate-input-wrap">
                             <span className="rate-currency">$</span>
                             <input
                               type="number" min="0" step="0.01" inputMode="decimal"
                               className="form-control"
                               value={rateForm.categoryRates[c.category] ?? ''}
+                              disabled={rateForm.flatRateOnly}
                               onChange={e => setRateForm(f => ({
                                 ...f,
                                 categoryRates: { ...f.categoryRates, [c.category]: e.target.value },
                               }))}
-                              placeholder={rateForm.hourlyRate ? `${rateForm.hourlyRate} (base)` : '0.00'}
+                              // What this hour would pay if the box is left
+                              // empty — the category's own rate first, because
+                              // that is what the cascade actually reaches for.
+                              placeholder={
+                                c.categoryDefault != null
+                                  ? `${c.categoryDefault} (category)`
+                                  : rateForm.hourlyRate ? `${rateForm.hourlyRate} (base)` : '0.00'
+                              }
                             />
                           </div>
                         </label>
                       ))}
 
                       <p className="rate-hint">
-                        Paid per hour actually taught. A type left empty falls back to the hourly
-                        rate above; set one to pay a different amount for that kind of session.
-                        Whether a session counts as online is decided per meeting, so a class that
-                        meets in person on Monday and over Zoom on Tuesday pays each at its own rate.
+                        Pay is per hour worked, at the rate for that kind of work. A box left empty
+                        falls back to the category's own rate, then to the hourly rate above — fill
+                        one in only to pay this person differently from everyone else for that work.
+                        The kind of work is chosen on the calendar entry, so the same person can be
+                        at the front desk at 10 and teaching at 1 on two different rates.
+                      </p>
+                      <p className="rate-hint">
+                        Changing a rate here only affects work that hasn't been confirmed yet. Hours
+                        already marked complete keep the rate they were worked at, so a new contract
+                        never rewrites a month that was already signed off.
                       </p>
                       <div className="rate-edit-actions">
                         <button className="cancel-btn" onClick={() => setIsEditingRates(false)} disabled={savingRates}>
@@ -313,14 +390,19 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                       <div className="rate-row">
                         <span>Base Salary</span>
                         <strong>
-                          {payroll.salaryPeriod === 'ANNUAL'
-                            ? <>
-                                ${payroll.salaryAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}/yr
-                                {' '}<span className="rate-inherited">
-                                  (${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}/mo)
-                                </span>
-                              </>
-                            : <>${payroll.baseSalary.toLocaleString('en-US', { minimumFractionDigits: 2 })}/mo</>}
+                          {/* Nothing agreed, an agreed zero, or a real figure —
+                              three different answers. The owners draw no
+                              salary, so "no salary" has to be sayable. */}
+                          {payroll.salaryAmount == null
+                            ? <span className="rate-unset">not set</span>
+                            : payroll.salaryAmount === 0
+                              ? <>{money(0)} <span className="rate-inherited">(no salary)</span></>
+                              : payroll.salaryPeriod === 'ANNUAL'
+                                ? <>
+                                    {money(payroll.salaryAmount)}/yr
+                                    {' '}<span className="rate-inherited">({money(payroll.baseSalary)}/mo)</span>
+                                  </>
+                                : <>{money(payroll.baseSalary)}/mo</>}
                         </strong>
                       </div>
                       <div className="rate-row">
@@ -331,18 +413,30 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                             : <span className="rate-unset">not set</span>}
                         </strong>
                       </div>
-                      {(payroll.categoryRates || []).map(c => (
-                        <div className="rate-row rate-row-sub" key={c.category}>
-                          <span>{c.label}</span>
-                          <strong>
-                            {c.rate != null
-                              ? `$${c.rate.toLocaleString('en-US', { minimumFractionDigits: 2 })}/hr`
-                              : <span className="rate-inherited">
-                                  {c.source === 'base' ? `$${c.effectiveRate.toFixed(2)}/hr (base)` : 'not set'}
-                                </span>}
-                          </strong>
-                        </div>
-                      ))}
+                      {payroll.flatRateOnly ? (
+                        <p className="rate-hint rate-hint-tight">
+                          Paid this rate for every kind of work. Category rates don't apply — only a
+                          rate set on a single calendar entry does.
+                        </p>
+                      ) : (
+                        (payroll.categoryRates || []).filter(c => c.active !== false).map(c => (
+                          <div className="rate-row rate-row-sub" key={c.category}>
+                            <span>
+                              <span className="cat-dot" style={c.color ? { background: c.color } : undefined} />
+                              {c.label}
+                            </span>
+                            <strong>
+                              {c.rate != null
+                                ? `${money(c.rate)}/hr`
+                                : <span className="rate-inherited">
+                                    {c.source === 'unset'
+                                      ? 'not set'
+                                      : `${money(c.effectiveRate)}/hr (${RATE_SOURCE_TEXT[c.source] || c.source})`}
+                                  </span>}
+                            </strong>
+                          </div>
+                        ))
+                      )}
                     </>
                   )}
                 </div>
@@ -365,11 +459,54 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
             )}
           </div>
 
-          {/* Right: Class History */}
+          {/* Right: the statement — every paid hour, and what it paid.
+              A total nobody can reconstruct is a total nobody can defend, so
+              this is the line-by-line an admin reads before releasing money. */}
           <div className="profile-col">
+            {payroll?.lineItems?.length > 0 && (
+              <div className="statement-section">
+                <h3><Receipt size={18} /> What this month paid for</h3>
+                <div className="statement-list">
+                  {payroll.lineItems.map(item => (
+                    <div className={`statement-row${item.rateSource === 'unset' ? ' statement-row-flagged' : ''}`} key={`${item.kind}-${item.id}`}>
+                      <div className="statement-when">
+                        <strong>{new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}</strong>
+                        <small>{clock(item.startTime)}–{clock(item.endTime)}</small>
+                      </div>
+                      <div className="statement-what">
+                        <span className="statement-title">
+                          {item.kind === 'shift' ? <Coffee size={12} /> : <BookOpen size={12} />}
+                          {item.title}
+                        </span>
+                        <span className="statement-cat">
+                          <span className="cat-dot" style={item.categoryColor ? { background: item.categoryColor } : undefined} />
+                          {item.categoryLabel}
+                        </span>
+                      </div>
+                      <div className="statement-math">
+                        <span>{item.hours} h × {money(item.rate)}</span>
+                        <small>
+                          {/* Locked means this hour was confirmed and its rate
+                              written down: changing the rate today cannot move
+                              it. An unlocked line still prices live. */}
+                          {item.locked && <Lock size={9} className="statement-lock" />}
+                          {RATE_SOURCE_TEXT[item.rateSource] || item.rateSource}
+                        </small>
+                      </div>
+                      <div className="statement-amount">{money(item.amount)}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="statement-total">
+                  <span>{payroll.totalHours} h worked</span>
+                  <strong>{money(payroll.hourlyEarnings)}</strong>
+                </div>
+              </div>
+            )}
+
             <div className="class-history-section">
               <h3><BookOpen size={18} /> Classes & Sessions</h3>
-              
+
               {classes.length > 0 ? (
                 <div className="class-history-list">
                   {classes.map(cls => (

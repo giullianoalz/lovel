@@ -8,6 +8,57 @@ import {
   getAdminUserIds,
   getParentUserIdsForStudents,
 } from '../services/notificationConfig.service.js';
+import { loadPayCategories, freezeSessionRates, clearFrozenRates } from '../services/payroll.service.js';
+
+/**
+ * The pay fields on a session, if this request is allowed to set them.
+ *
+ * What a session pays is chosen while scheduling it — "this Tuesday hour is
+ * private tutoring, not a class" — so it rides on the ordinary session routes
+ * rather than a separate screen. But those routes are open to the teacher who
+ * owns the class, and a teacher must not be able to price their own hour, so
+ * anyone who isn't an admin sending these fields is refused outright rather
+ * than having them quietly dropped.
+ *
+ * Returns { data } to merge into the write, or { error } to reject with.
+ */
+const readPayFields = async (req) => {
+  const { payCategoryKey, payRateOverride } = req.body;
+  if (payCategoryKey === undefined && payRateOverride === undefined) return { data: {} };
+
+  if (!hasRole(req.user, 'ADMIN')) {
+    return { error: 'Only an admin can set what a session pays.' };
+  }
+
+  const data = {};
+  if (payCategoryKey !== undefined) {
+    if (payCategoryKey) {
+      const categories = await loadPayCategories();
+      if (!categories.some((c) => c.key === payCategoryKey)) {
+        return { error: `There is no pay category "${payCategoryKey}".` };
+      }
+    }
+    // Empty clears it, and the session falls back to the old guess — online if
+    // it has a meeting link, in person otherwise.
+    data.payCategoryKey = payCategoryKey || null;
+  }
+
+  if (payRateOverride !== undefined) {
+    if (payRateOverride === null || payRateOverride === '') {
+      data.payRateOverride = null;
+    } else {
+      const n = typeof payRateOverride === 'number'
+        ? payRateOverride
+        : parseFloat(String(payRateOverride).replace(/[$,\s]/g, ''));
+      if (!Number.isFinite(n)) return { error: 'The rate for this session must be a number.' };
+      if (n < 0) return { error: 'The rate for this session cannot be negative.' };
+      if (n > 99999999.99) return { error: 'That rate is implausibly large.' };
+      data.payRateOverride = Math.round(n * 100) / 100;
+    }
+  }
+
+  return { data };
+};
 
 // A student cancelling with less than this many hours' notice triggers a
 // suggested (not automatic) 50% charge that the admin must review.
@@ -50,7 +101,13 @@ const todayRange = () => {
  * (date range, classId, teacherId) instead of replacing them.
  */
 export const sessionScope = async (user) => {
-  if (hasRole(user, 'ADMIN')) return {};
+  // Front desk sees every class on every date, same as admin — the calendar
+  // is where reception finds "when is this child's next class" or "was
+  // Tuesday's session moved," and that question isn't bounded to today. The
+  // one thing that stays bounded to today is the *roster* (who actually
+  // showed up) — getSession strips attendance for any day but today, and the
+  // check-in board queries today directly rather than through this scope.
+  if (hasRole(user, 'ADMIN') || isFrontDeskOnly(user)) return {};
 
   // Each role the account holds contributes what it may see, and the branches
   // are ORed: a teacher who is also a parent watches her own classes *and* her
@@ -59,16 +116,14 @@ export const sessionScope = async (user) => {
   const branches = [];
 
   if (hasRole(user, 'TEACHER')) {
-    branches.push({ class: { teacherId: user.id } });
-  }
-
-  // Front desk gets today's board across every class — who is in the building
-  // right now, in which room, with which teacher — because that is the question
-  // asked at the door. It stops there: yesterday's attendance and next month's
-  // timetable are not reception's to read off a lobby screen, and a teacher who
-  // covers the desk keeps the narrower teacher scope above.
-  if (isFrontDeskOnly(user)) {
-    branches.push({ date: todayRange() });
+    branches.push({
+      class: {
+        OR: [
+          { teacherId: user.id },
+          { coTeachers: { some: { id: user.id } } },
+        ],
+      },
+    });
   }
 
   if (hasRole(user, 'STUDENT', 'PARENT')) {
@@ -106,18 +161,24 @@ const denyForeignClass = async (user, classId) => {
   if (!isOnly(user, 'TEACHER')) return null;
   const cls = await prisma.class.findUnique({
     where: { id: classId },
-    select: { teacherId: true },
+    select: { teacherId: true, coTeachers: { select: { id: true } } },
   });
-  return cls && cls.teacherId === user.id ? null : NOT_FOUND;
+  if (!cls) return NOT_FOUND;
+  const isAssigned = cls.teacherId === user.id || cls.coTeachers.some((t) => t.id === user.id);
+  return isAssigned ? null : NOT_FOUND;
 };
 
 const denyForeignSession = async (user, sessionId) => {
   if (!isOnly(user, 'TEACHER')) return null;
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { class: { select: { teacherId: true } } },
+    select: { class: { select: { teacherId: true, coTeachers: { select: { id: true } } } } },
   });
-  return session && session.class?.teacherId === user.id ? null : NOT_FOUND;
+  if (!session) return NOT_FOUND;
+  const isAssigned =
+    session.class?.teacherId === user.id ||
+    (session.class?.coTeachers || []).some((t) => t.id === user.id);
+  return isAssigned ? null : NOT_FOUND;
 };
 
 /**
@@ -143,6 +204,14 @@ export const listSessions = async (req, res, next) => {
     const scope = await sessionScope(req.user);
     const scopedWhere = Object.keys(scope).length ? { AND: [where, scope] } : where;
 
+    // The calendar's "By Students" filter needs a roster to search against, and
+    // GET /classes?includeRoster=true — where it used to get one — is
+    // ADMIN/TEACHER only (it also carries pricing, which is exactly why it's
+    // gated). A parent or student browsing their *own* calendar doesn't need
+    // classmates' names either. So the roster only rides along here for staff,
+    // the same boundary getSession already draws around the attendance list.
+    const isStaff = hasRole(req.user, 'ADMIN', 'TEACHER') || isFrontDeskOnly(req.user);
+
     const sessions = await prisma.session.findMany({
       where: scopedWhere,
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
@@ -151,14 +220,39 @@ export const listSessions = async (req, res, next) => {
           // teacherId travels with the session so the calendar can offer the
           // admin's "Take Attendance" jump without depending on the separate
           // (paginated, staff-only) /classes fetch having the class in hand.
-          select: { name: true, subject: true, type: true, meetingUrl: true, teacherId: true },
+          //
+          // teacher.fullName rides along too, for the same reason: GET /classes
+          // is ADMIN/TEACHER only (it also carries pricing and the full roster,
+          // which front desk has no business reading), so without a name here
+          // every calendar event front desk opens shows "Unassigned" — the id
+          // was visible, just nothing anyone could resolve it to.
+          select: {
+            name: true, subject: true, type: true, meetingUrl: true, teacherId: true,
+            teacher: { select: { id: true, fullName: true } },
+            ...(isStaff ? {
+              enrollments: {
+                where: { status: 'active' },
+                select: { student: { select: { id: true, fullName: true } } },
+              },
+            } : {}),
+          },
         },
         notes: { orderBy: { createdAt: 'desc' } },
         materials: true,
       },
     });
 
-    res.json({ sessions });
+    // A one-off rate on a session is somebody's pay. Admins see it because they
+    // set it, and a teacher sees it on their own class because it is their own
+    // money — front desk, who can read the whole building's calendar, does not.
+    const isAdmin = hasRole(req.user, 'ADMIN');
+    res.json({
+      sessions: sessions.map((s) =>
+        isAdmin || s.class?.teacherId === req.user.id
+          ? s
+          : { ...s, payRateOverride: null, paidRate: null }
+      ),
+    });
   } catch (error) {
     next(error);
   }
@@ -225,6 +319,9 @@ export const createSession = async (req, res, next) => {
     const denied = await denyForeignClass(req.user, classId);
     if (denied) return res.status(404).json(denied);
 
+    const pay = await readPayFields(req);
+    if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
+
     // Convert startTime/endTime strings to proper DateTime objects for PostgreSQL TIME column
     const startObj = new Date(`1970-01-01T${startTime}:00Z`);
     const endObj = new Date(`1970-01-01T${endTime}:00Z`);
@@ -236,6 +333,7 @@ export const createSession = async (req, res, next) => {
         startTime: startObj,
         endTime: endObj,
         status: 'SCHEDULED',
+        ...pay.data,
       },
     });
 
@@ -265,6 +363,11 @@ export const bulkScheduleSessions = async (req, res, next) => {
 
     const denied = await denyForeignClass(req.user, classId);
     if (denied) return res.status(404).json(denied);
+
+    // A term of Tuesdays is one kind of work all the way through, so the
+    // category is set once here rather than on each generated session.
+    const pay = await readPayFields(req);
+    if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
 
     // Parse as UTC-midnight dates and check weekday with getUTCDay() throughout —
     // mixing local getDay() with UTC-parsed dates shifts the matched weekday
@@ -307,7 +410,7 @@ export const bulkScheduleSessions = async (req, res, next) => {
     const createdSessions = await prisma.$transaction(
       newDates.map((date) =>
         prisma.session.create({
-          data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED' },
+          data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED', ...pay.data },
         })
       )
     );
@@ -341,8 +444,11 @@ export const bulkUpdateSessions = async (req, res, next) => {
     if (!classId) {
       return res.status(400).json({ error: 'Validation Error', message: 'classId is required.' });
     }
-    if (!startTime && !endTime && !status && meetingUrl === undefined) {
-      return res.status(400).json({ error: 'Validation Error', message: 'Nothing to change — pass startTime, endTime, status, or meetingUrl.' });
+    const pay = await readPayFields(req);
+    if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
+
+    if (!startTime && !endTime && !status && meetingUrl === undefined && Object.keys(pay.data).length === 0) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Nothing to change — pass startTime, endTime, status, meetingUrl, or the pay category.' });
     }
     if ((startTime && !endTime) || (endTime && !startTime)) {
       return res.status(400).json({ error: 'Validation Error', message: 'startTime and endTime must be changed together.' });
@@ -373,7 +479,7 @@ export const bulkUpdateSessions = async (req, res, next) => {
       return res.json({ message: 'No sessions matched — nothing was changed.', updated: 0 });
     }
 
-    const data = {};
+    const data = { ...pay.data };
     if (startTime) data.startTime = new Date(`1970-01-01T${startTime}:00Z`);
     if (endTime) data.endTime = new Date(`1970-01-01T${endTime}:00Z`);
     if (status) data.status = status.toUpperCase();
@@ -381,10 +487,21 @@ export const bulkUpdateSessions = async (req, res, next) => {
     // point of the per-session field is that the other weekdays stay untouched.
     if (meetingUrl !== undefined) data.meetingUrl = meetingUrl?.trim() || null;
 
+    const targetIds = targets.map((s) => s.id);
     await prisma.session.updateMany({
-      where: { id: { in: targets.map((s) => s.id) } },
+      where: { id: { in: targetIds } },
       data,
     });
+
+    // Same rule as the single-session route: confirming stamps the rate,
+    // anything else releases it. Retiming or recategorising a series that was
+    // already signed off re-stamps at whatever the rate is now.
+    if (data.status && data.status !== 'COMPLETED') {
+      await clearFrozenRates({ sessionIds: targetIds });
+    } else {
+      if (Object.keys(pay.data).length > 0) await clearFrozenRates({ sessionIds: targetIds });
+      await freezeSessionRates(targetIds);
+    }
 
     res.json({
       message: `${targets.length} session${targets.length === 1 ? '' : 's'} updated.`,
@@ -406,7 +523,10 @@ export const updateSession = async (req, res, next) => {
     const denied = await denyForeignSession(req.user, req.params.id);
     if (denied) return res.status(404).json(denied);
 
-    const updateData = {};
+    const pay = await readPayFields(req);
+    if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
+
+    const updateData = { ...pay.data };
 
     if (status) updateData.status = status.toUpperCase();
     if (date) updateData.date = new Date(date);
@@ -420,6 +540,20 @@ export const updateSession = async (req, res, next) => {
       where: { id: req.params.id },
       data: updateData,
     });
+
+    // An hour belongs to the contract that was in force when it happened, so
+    // the rate is stamped onto the session the moment it is confirmed — and
+    // released again if it stops being confirmed, or if an admin corrects the
+    // rate on one already signed off. Order matters: clear first, then freeze,
+    // so a correction re-stamps at the new number instead of keeping the old.
+    if (updateData.status && updateData.status !== 'COMPLETED') {
+      await clearFrozenRates({ sessionIds: [req.params.id] });
+    } else {
+      if (pay.data.payRateOverride !== undefined || pay.data.payCategoryKey !== undefined) {
+        await clearFrozenRates({ sessionIds: [req.params.id] });
+      }
+      await freezeSessionRates([req.params.id]);
+    }
 
     res.json({ message: 'Session updated.', session });
   } catch (error) {

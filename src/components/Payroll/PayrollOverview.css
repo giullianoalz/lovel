@@ -115,3 +115,39 @@
 @media (max-width: 900px) {
   .po-stat-row { grid-template-columns: 1fr; }
 }
+
+/* Opens the rates behind the whole screen: change "Front desk" here and every
+   front-desk hour on the calendar reprices. */
+.po-categories-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  color: var(--text-main, #1e293b);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.po-categories-btn:hover {
+  border-color: var(--primary, #6366f1);
+  color: var(--primary, #6366f1);
+  transform: translateY(-1px);
+}
+
+/* One dot per kind of work, in the colour it wears on the calendar, so a column
+   header and a calendar block read as the same thing. */
+.po-cat-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted, #94a3b8);
+  margin-right: 6px;
+  vertical-align: middle;
+}

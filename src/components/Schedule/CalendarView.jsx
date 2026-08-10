@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { resolveMeetingUrl } from '../../lib/meetingLink';
@@ -230,6 +230,7 @@ const JumpToDatePicker = ({ currentDate, view, onPick, onClose }) => {
 const CalendarView = () => {
   const { role, hasRole } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const canAddEvents = hasRole('ADMIN');
   // What an hour pays is admin-only, here and on the server: the routes reject
@@ -693,6 +694,13 @@ const CalendarView = () => {
           meetingUrl: s.class?.meetingUrl ?? classInfo.meetingUrl,
         };
         const meetingUrl = resolveMeetingUrl(s, cls) || '';
+        // Same fallback as the teacher name above: the session's own payload
+        // carries the roster for staff now (sessions.controller.js), so "By
+        // Students" resolves without GET /classes — which front desk can't
+        // reach — ever populating classesById. `??`, not `||`: a class with
+        // zero active enrollments is a real, staff-visible `[]`, not a signal
+        // to fall back to the (possibly stale) classesById roster.
+        const roster = s.class?.enrollments ?? classInfo.enrollments ?? [];
         return {
           id: s.id,
           classId: s.classId,
@@ -705,12 +713,12 @@ const CalendarView = () => {
           teacher: teacherNameStr,
           teacherId: s.class?.teacherId || classInfo.teacherId || classInfo.teacher?.id || null,
           coTeacherIds: coTeachers.map(c => c.id),
-          students: classInfo._count?.enrollments ?? 0,
+          students: roster.length || classInfo._count?.enrollments || 0,
           studentList: null, // lazily loaded when the event is opened
           studentIds: [],
           // Enrolled student names (lowercased) — powers the "By Students"
           // search filter without waiting for the lazy per-event roster fetch.
-          rosterNames: (classInfo.enrollments || []).map(en => (en.student?.fullName || '').toLowerCase()),
+          rosterNames: roster.map(en => (en.student?.fullName || '').toLowerCase()),
           notes: s.notes?.[0]?.notes || '',
           materials: (s.materials || []).map(m => ({ name: m.name, url: m.fileUrl })),
           meetingUrl,
@@ -862,6 +870,22 @@ const CalendarView = () => {
       students: prev.students.filter(s => s !== student)
     }));
   };
+
+  // Arriving from a Directory card's "Schedule" link (?student=Full+Name):
+  // pre-apply the same "By Students" filter the popover offers, and open it so
+  // it's obvious the calendar is narrowed rather than just empty-looking on a
+  // slow week. Runs once — this is a one-time entry filter, not something that
+  // should re-fire and fight the user's own later edits to the search.
+  useEffect(() => {
+    const studentParam = new URLSearchParams(location.search).get('student');
+    if (studentParam) {
+      setSearchForm(prev =>
+        prev.students.includes(studentParam) ? prev : { ...prev, students: [...prev.students, studentParam] }
+      );
+      setIsSearchOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const addStudent = (studentRaw) => {
     // If it's a group like "Active Students (383)", clean the number off for the visual tag

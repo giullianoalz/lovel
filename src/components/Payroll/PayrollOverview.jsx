@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Wallet, ChevronLeft, ChevronRight, Video, MapPin, AlertTriangle, Pencil, Users, Clock, DollarSign } from 'lucide-react';
+import { Wallet, ChevronLeft, ChevronRight, AlertTriangle, Pencil, Users, Clock, DollarSign, Tags } from 'lucide-react';
+import PayCategoriesPanel from './PayCategoriesPanel';
 import { database } from '../../lib/database';
 import { useAsyncData } from '../../lib/useAsyncData';
 import ErrorBanner from '../Layout/ErrorBanner';
@@ -23,6 +24,7 @@ const PayrollOverview = () => {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [year, setYear] = useState(today.getFullYear());
   const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [showCategories, setShowCategories] = useState(false);
 
   const { data, loading, error, retry } = useAsyncData(
     () => database.fetchPayrollSummary(month, year),
@@ -41,6 +43,16 @@ const PayrollOverview = () => {
   const rows = data?.rows || [];
   const totals = data?.totals;
 
+  // Only the kinds of work that actually happened this month get a column.
+  // Listing every category defined would give August a "Summer camp" column of
+  // zeros and push the money off the side of the screen.
+  const columns = (data?.categories || []).filter(
+    (c) => (totals?.hoursByCategory?.[c.key] || 0) > 0
+  );
+  // Hours booked to a category that no longer exists, or to none at all — they
+  // still cost money, so they get the last column rather than vanishing.
+  const hasUncategorised = (totals?.hoursByCategory?.__none__ || 0) > 0;
+
   // Rates are edited in the modal, and every total on this page is derived from
   // them — so closing it re-reads the month rather than showing stale money.
   const closeModal = () => {
@@ -54,8 +66,13 @@ const PayrollOverview = () => {
         <Wallet size={28} />
         <div>
           <h1>Payroll</h1>
-          <p>What every teacher earned this month, and what the academy owes.</p>
+          <p>What everyone earned this month, and what the academy owes.</p>
         </div>
+        {/* The rates live behind this: set "front desk = $20" once, and every
+            hour scheduled as front desk prices itself. */}
+        <button className="po-categories-btn" onClick={() => setShowCategories(true)}>
+          <Tags size={15} /> Pay categories
+        </button>
       </div>
 
       <div className="month-navigator">
@@ -82,14 +99,17 @@ const PayrollOverview = () => {
               </span>
             </div>
             <div className="po-stat">
-              <span className="po-stat-label"><Users size={14} /> Teachers paid</span>
+              <span className="po-stat-label"><Users size={14} /> Staff paid</span>
               <strong className="po-stat-value">{totals.paidTeachers}</strong>
               <span className="po-stat-sub">of {totals.teachers} on the roster</span>
             </div>
             <div className="po-stat">
-              <span className="po-stat-label"><Clock size={14} /> Hours taught</span>
+              <span className="po-stat-label"><Clock size={14} /> Hours worked</span>
               <strong className="po-stat-value">{totals.totalHours}</strong>
-              <span className="po-stat-sub">across {totals.sessionCount} session{totals.sessionCount === 1 ? '' : 's'}</span>
+              <span className="po-stat-sub">
+                {totals.sessionCount} session{totals.sessionCount === 1 ? '' : 's'}
+                {totals.shiftCount > 0 && <>, {totals.shiftCount} shift{totals.shiftCount === 1 ? '' : 's'}</>}
+              </span>
             </div>
           </div>
 
@@ -97,7 +117,7 @@ const PayrollOverview = () => {
             <div className="po-warning">
               <AlertTriangle size={16} />
               <span>
-                <strong>{totals.unratedHours} h</strong> were taught with no rate set, so they are
+                <strong>{totals.unratedHours} h</strong> were worked with no rate set, so they are
                 counted as $0. The total above is short until those rates exist — the rows
                 below are marked.
               </span>
@@ -105,17 +125,22 @@ const PayrollOverview = () => {
           )}
 
           {rows.length === 0 ? (
-            <p className="po-empty">Nobody taught a paid session in {MONTH_NAMES[month - 1]}.</p>
+            <p className="po-empty">Nobody worked a paid hour in {MONTH_NAMES[month - 1]}.</p>
           ) : (
             <div className="po-table-wrap">
               <table className="po-table">
                 <thead>
                   <tr>
-                    <th>Teacher</th>
-                    <th className="num"><Video size={13} /> Online</th>
-                    <th className="num"><MapPin size={13} /> In-person</th>
+                    <th>Person</th>
+                    {columns.map(c => (
+                      <th className="num" key={c.key}>
+                        <span className="po-cat-dot" style={c.color ? { background: c.color } : undefined} />
+                        {c.label}
+                      </th>
+                    ))}
+                    {hasUncategorised && <th className="num">Uncategorised</th>}
                     <th className="num">Hours</th>
-                    <th className="num">Sessions</th>
+                    <th className="num">Entries</th>
                     <th className="num">Rate</th>
                     <th className="num">Base</th>
                     <th className="num">Earned</th>
@@ -141,31 +166,57 @@ const PayrollOverview = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="num">{row.hoursByCategory.ONLINE || 0}</td>
-                      <td className="num">{row.hoursByCategory.IN_PERSON || 0}</td>
+                      {columns.map(c => (
+                        <td className="num" key={c.key}>
+                          {row.hoursByCategory[c.key] || <span className="po-unset">—</span>}
+                        </td>
+                      ))}
+                      {hasUncategorised && (
+                        <td className="num">{row.hoursByCategory.__none__ || <span className="po-unset">—</span>}</td>
+                      )}
                       <td className="num">{row.totalHours}</td>
-                      <td className="num">{row.sessionCount}</td>
+                      <td className="num">
+                        {row.sessionCount + row.shiftCount}
+                        {row.shiftCount > 0 && (
+                          <span className="po-sub">{row.sessionCount} class, {row.shiftCount} shift</span>
+                        )}
+                      </td>
                       <td className="num">
                         {/* The base hourly rate. Per-category overrides live in
                             the modal — cramming both in here reads as a second
                             rate rather than a replacement for the first. */}
                         {row.hourlyRate != null
-                          ? `${money(row.hourlyRate)}/hr`
+                          ? <>
+                              {money(row.hourlyRate)}/hr
+                              {/* Worth saying on the row: it's the difference
+                                  between "this is the fallback" and "this is
+                                  the only rate that will ever apply". */}
+                              {row.flatRateOnly && <span className="po-sub">flat — all work</span>}
+                            </>
                           : <span className="po-unset">not set</span>}
                       </td>
                       <td className="num">
-                        {row.baseSalary > 0
-                          ? <>
-                              {money(row.baseSalary)}
-                              {/* Every column on this screen is one month, so
-                                  the month's share is the figure. The yearly
-                                  number rides underneath because that is what
-                                  the contract says and what people quote. */}
-                              {row.salaryPeriod === 'ANNUAL' && (
-                                <span className="po-sub">{money(row.salaryAmount)}/yr</span>
-                              )}
-                            </>
-                          : <span className="po-unset">—</span>}
+                        {/* Three states, not two. A dash means nobody has said
+                            what this person earns; $0.00 means somebody said
+                            zero — the owners draw no salary, and that is a
+                            decision worth being able to read off the screen. */}
+                        {row.salaryAmount == null
+                          ? <span className="po-unset">—</span>
+                          : row.baseSalary > 0
+                            ? <>
+                                {money(row.baseSalary)}
+                                {/* Every column on this screen is one month, so
+                                    the month's share is the figure. The yearly
+                                    number rides underneath because that is what
+                                    the contract says and what people quote. */}
+                                {row.salaryPeriod === 'ANNUAL' && (
+                                  <span className="po-sub">{money(row.salaryAmount)}/yr</span>
+                                )}
+                              </>
+                            : <>
+                                {money(0)}
+                                <span className="po-sub">no salary</span>
+                              </>}
                       </td>
                       <td className="num po-earned">{money(row.totalEarnings)}</td>
                       <td className="num">
@@ -183,10 +234,12 @@ const PayrollOverview = () => {
                 <tfoot>
                   <tr>
                     <td>Total</td>
-                    <td className="num">{rows.reduce((n, r) => n + (r.hoursByCategory.ONLINE || 0), 0).toFixed(2)}</td>
-                    <td className="num">{rows.reduce((n, r) => n + (r.hoursByCategory.IN_PERSON || 0), 0).toFixed(2)}</td>
+                    {columns.map(c => (
+                      <td className="num" key={c.key}>{totals.hoursByCategory[c.key] || 0}</td>
+                    ))}
+                    {hasUncategorised && <td className="num">{totals.hoursByCategory.__none__ || 0}</td>}
                     <td className="num">{totals.totalHours}</td>
-                    <td className="num">{totals.sessionCount}</td>
+                    <td className="num">{totals.sessionCount + (totals.shiftCount || 0)}</td>
                     <td className="num" />
                     <td className="num">{money(totals.baseSalary)}</td>
                     <td className="num po-earned">{money(totals.totalEarnings)}</td>
@@ -198,8 +251,10 @@ const PayrollOverview = () => {
           )}
 
           <p className="po-footnote">
-            Only sessions marked complete with at least one student present are paid. Pay is
-            per hour actually taught, at the rate for that kind of session.
+            Class sessions are paid once they're marked complete with at least one student
+            present; shifts once they're marked worked. Pay is per hour, at the rate for that
+            kind of work — set on the calendar entry, so the same person can be at the desk at
+            10 and teaching at 1 on two different rates.
           </p>
         </>
       )}
@@ -216,8 +271,16 @@ const PayrollOverview = () => {
             status: selectedTeacher.status
               ? selectedTeacher.status.charAt(0) + selectedTeacher.status.slice(1).toLowerCase()
               : selectedTeacher.status,
+            role: selectedTeacher.role,
+            secondaryRoles: selectedTeacher.secondaryRoles,
           }}
           onClose={closeModal}
+        />
+      )}
+
+      {showCategories && (
+        <PayCategoriesPanel
+          onClose={() => { setShowCategories(false); retry(); }}
         />
       )}
     </div>

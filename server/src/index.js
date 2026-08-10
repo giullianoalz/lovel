@@ -47,6 +47,8 @@ import paymentsRoutes from './routes/payments.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
 import integrationsRoutes from './routes/integrations.routes.js';
+import payCategoriesRoutes from './routes/payCategories.routes.js';
+import shiftsRoutes from './routes/shifts.routes.js';
 import { startCronJobs } from './jobs/cron.jobs.js';
 
 const app = express();
@@ -242,6 +244,8 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/announcements', announcementsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/integrations', integrationsRoutes);
+app.use('/api/pay-categories', payCategoriesRoutes);
+app.use('/api/shifts', shiftsRoutes);
 
 // ===========================================
 // Socket.IO Connection
@@ -249,6 +253,13 @@ app.use('/api/integrations', integrationsRoutes);
 
 io.on('connection', (socket) => {
   console.log(`[Socket.IO] Client connected: ${socket.id} (user: ${socket.user.id})`);
+
+  // Joined here rather than only on the client's `join_user` below: chat now
+  // delivers per recipient through this room whenever a teacher is in the
+  // thread (each participant gets a different sender name — see
+  // chat.controller.js broadcastMessage), so it has to exist for every socket
+  // from the moment it connects, not once the bell happens to be mounted.
+  socket.join(`user_${socket.user.id}`);
 
   // Clients only ever pass chat thread ids here, so membership is enforced
   // against ChatParticipant. Without this check any signed-in user could join

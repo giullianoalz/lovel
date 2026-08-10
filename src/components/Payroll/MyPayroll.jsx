@@ -87,10 +87,13 @@ const MyPayroll = () => {
               <div className="payroll-card">
                 <h4><Briefcase size={16} /> Earnings Breakdown</h4>
                 {(payroll.breakdown || []).map(b => (
-                  <div className="breakdown-row" key={b.category}>
+                  <div className="breakdown-row" key={b.category || 'none'}>
                     <span>
-                      <Calendar size={14} /> {b.category === 'ONLINE' ? 'Online' : 'In-person'}
-                      {' '}({b.hours} h × ${b.rate.toFixed(2)}/hr)
+                      <Calendar size={14} /> {b.label}
+                      {/* One rate for the whole bucket only holds when every
+                          hour in it was paid the same — an override on a single
+                          entry makes "the rate" a fiction, so it says so. */}
+                      {' '}({b.hours} h {b.mixedRates ? 'at mixed rates' : `× $${Number(b.rate || 0).toFixed(2)}/hr`})
                     </span>
                     <strong>${b.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
                   </div>

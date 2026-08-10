@@ -1,0 +1,208 @@
+/* The kinds of work and what they pay. One row per category, edited in place —
+   the list is short and the whole point is seeing every rate side by side. */
+
+.pay-cat-panel {
+  max-width: 780px;
+  width: 100%;
+  padding: 28px;
+  animation: pay-cat-rise 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pay-cat-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.pay-cat-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 20px;
+  color: var(--primary);
+}
+
+.pay-cat-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  color: var(--text-main);
+}
+
+.pay-cat-header p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 56ch;
+}
+
+.pay-cat-state { padding: 40px; text-align: center; }
+
+.pay-cat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.pay-cat-row {
+  display: grid;
+  grid-template-columns: auto 1fr 140px auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card-bg, #fff);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.pay-cat-row:hover { border-color: var(--primary); }
+
+/* Still listed, visibly out of play: past pay still adds up, it just isn't
+   offered when scheduling any more. */
+.pay-cat-row-retired { opacity: 0.55; }
+
+.pay-cat-row-new {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light, rgba(99, 102, 241, 0.12));
+}
+
+.pay-cat-swatches {
+  display: grid;
+  grid-template-columns: repeat(4, 12px);
+  gap: 4px;
+}
+
+.pay-cat-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pay-cat-swatch:hover { transform: scale(1.25); }
+.pay-cat-swatch.is-selected {
+  box-shadow: 0 0 0 2px var(--card-bg, #fff), 0 0 0 3.5px currentColor;
+  transform: scale(1.15);
+}
+
+.pay-cat-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.pay-cat-label {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+
+.pay-cat-kind {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+
+.pay-cat-kind-toggle { cursor: pointer; }
+.pay-cat-kind-toggle input { accent-color: var(--primary); }
+
+.pay-cat-rate {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pay-cat-rate .form-control {
+  width: 84px;
+  text-align: right;
+  padding: 6px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pay-cat-currency, .pay-cat-per {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.pay-cat-active {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pay-cat-active input { accent-color: var(--primary); }
+
+.pay-cat-actions { display: flex; align-items: center; gap: 6px; }
+
+.pay-cat-delete {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.pay-cat-delete:hover:not(:disabled) {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.pay-cat-delete:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pay-cat-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1.5px dashed var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.pay-cat-add:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-light, rgba(99, 102, 241, 0.06));
+}
+
+.pay-cat-hint {
+  margin: 6px 2px 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+@media (max-width: 700px) {
+  .pay-cat-panel { padding: 20px; }
+  .pay-cat-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "swatches active"
+      "main main"
+      "rate actions";
+    gap: 10px;
+  }
+  .pay-cat-swatches { grid-area: swatches; }
+  .pay-cat-main { grid-area: main; }
+  .pay-cat-rate { grid-area: rate; }
+  .pay-cat-active { grid-area: active; }
+  .pay-cat-actions { grid-area: actions; justify-content: flex-end; }
+}
