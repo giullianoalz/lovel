@@ -8,7 +8,7 @@ import {
   getAdminUserIds,
   getParentUserIdsForStudents,
 } from '../services/notificationConfig.service.js';
-import { academyToday, sessionStartInstant } from '../utils/academyTime.js';
+import { ACADEMY_TIMEZONE, academyToday, academyDayOffset, sessionStartInstant } from '../utils/academyTime.js';
 
 /**
  * Scheduled background jobs for the Academy Management System.
@@ -31,7 +31,9 @@ import { academyToday, sessionStartInstant } from '../utils/academyTime.js';
  * re-running one late is safe.
  */
 
-const TIMEZONE = 'America/New_York';
+// Same constant the session math uses, so the schedule that fires these jobs and
+// the clock they reason about can never drift apart.
+const TIMEZONE = ACADEMY_TIMEZONE;
 
 // ─────────────────────────────────────────────────────────────
 // JOB 1 — Overdue Invoice Alerts
@@ -257,10 +259,16 @@ const sendClassStartingSoonReminders = async () => {
   const now = new Date();
   // The academy's today, not the server's: after 8 PM local the UTC date has
   // already rolled over, and this job would be reading tomorrow's schedule.
+  //
+  // Tomorrow is pulled in as well because minutesBefore is admin-configurable.
+  // At the default 15 minutes a reminder never leaves the day it belongs to,
+  // but widen it to an hour and a 00:30 class needs to be visible at 23:30 the
+  // night before — on today's query alone it would simply never be reminded.
   const todayDateOnly = academyToday(now);
+  const tomorrowDateOnly = academyDayOffset(todayDateOnly, 1);
 
   const sessions = await prisma.session.findMany({
-    where: { date: todayDateOnly, status: 'SCHEDULED' },
+    where: { date: { in: [todayDateOnly, tomorrowDateOnly] }, status: 'SCHEDULED' },
     include: {
       class: {
         select: {
