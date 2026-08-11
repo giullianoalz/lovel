@@ -10,6 +10,11 @@ import {
 } from '../services/notificationConfig.service.js';
 import { loadPayCategories, freezeSessionRates, clearFrozenRates } from '../services/payroll.service.js';
 import { sessionStartInstant } from '../utils/academyTime.js';
+import {
+  CANCELLATION_WINDOW_HOURS,
+  ADVANCE_CANCELLATION_SUGGESTED_PERCENT,
+  LATE_CANCELLATION_SUGGESTED_PERCENT,
+} from '../constants/cancellationPolicy.js';
 
 /**
  * The pay fields on a session, if this request is allowed to set them.
@@ -63,13 +68,10 @@ const readPayFields = async (req) => {
 
 // Every cancellation reaches the admin for a decision — none is ever charged
 // automatically, however much notice was given. What the notice changes is the
-// amount suggested: cancelling at least this many hours ahead suggests half the
-// session, anything later suggests the whole of it, which is what the waiver
-// families sign says ("if I do not cancel before 24 hours of my scheduled time,
-// I will lose that paid session" — see constants/waiverText.js).
-const CANCELLATION_WINDOW_HOURS = 24;
-const ADVANCE_CANCELLATION_SUGGESTED_PERCENT = 50;
-const LATE_CANCELLATION_SUGGESTED_PERCENT = 100;
+// amount suggested; the window and percentages live in
+// constants/cancellationPolicy.js, shared with payroll so that "the family is
+// charged for this hour" and "the teacher is paid for this hour" can never
+// disagree about where the 24-hour line falls.
 
 // A student marked ABSENT with no prior cancellation is a no-show: the teacher
 // held the slot and waited. No notice at all is the extreme of a late
@@ -78,7 +80,7 @@ const LATE_CANCELLATION_SUGGESTED_PERCENT = 100;
 // confirms the amount. The reason string is also the marker used to recognise
 // (and clean up) auto-created no-show items when a mis-marked student is later
 // set present.
-const NO_SHOW_SUGGESTED_PERCENT = 100;
+const NO_SHOW_SUGGESTED_PERCENT = LATE_CANCELLATION_SUGGESTED_PERCENT;
 const NO_SHOW_REASON = 'No-show — marked absent with no prior cancellation';
 
 /**

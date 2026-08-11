@@ -14,6 +14,7 @@
 
 import prisma from '../config/database.js';
 import { resolveMeetingUrl } from '../utils/meetingLink.js';
+import { CANCELLATION_WINDOW_HOURS } from '../constants/cancellationPolicy.js';
 
 /**
  * The categories, if the table is empty or unreachable.
@@ -251,6 +252,7 @@ export const RATE_SOURCE_LABELS = {
   teacher: "This person's rate for this work",
   category: 'Category rate',
   base: 'Base hourly rate',
+  salaried: 'Covered by salary',
   unset: 'No rate set',
 };
 
@@ -262,18 +264,24 @@ export const RATE_SOURCE_LABELS = {
  * three settings pages:
  *
  *   1. a rate typed onto this one calendar entry — somebody deliberately said
- *      "this one is different", which beats everything, including a flat rate;
- *   2. the person's flat rate, if they are paid one number whatever the work;
- *   3. that person's own rate for this category;
- *   4. the category's default rate — the usual answer, and the whole point of
+ *      "this one is different", which beats everything, including a flat rate
+ *      or a salary;
+ *   2. nothing, if this person is salaried — a manager on $63,000/yr doesn't
+ *      also collect the $50/hr in-person rate for the same classes, because
+ *      the salary is what pays for them;
+ *   3. the person's flat rate, if they are paid one number whatever the work;
+ *   4. that person's own rate for this category;
+ *   5. the category's default rate — the usual answer, and the whole point of
  *      categories: set "front desk = $20" once, not once per person;
- *   5. their base hourly rate;
- *   6. nothing, which is priced at $0 and reported as unpriced hours rather
+ *   6. their base hourly rate;
+ *   7. nothing, which is priced at $0 and reported as unpriced hours rather
  *      than quietly swallowed.
  */
 export const resolveRate = (categoryKey, context, entryOverride = null) => {
   if (entryOverride != null) return { rate: entryOverride, source: 'event' };
-  const { hourlyRate, overrides, flatRateOnly, categories } = context;
+  const { hourlyRate, overrides, flatRateOnly, salaried, categories } = context;
+
+  if (salaried) return { rate: 0, source: 'salaried' };
 
   if (flatRateOnly && hourlyRate != null) return { rate: hourlyRate, source: 'flat' };
 
@@ -295,6 +303,9 @@ const toNumber = (value) => (value == null ? null : parseFloat(value));
 const rateContextFor = (person, categories) => ({
   hourlyRate: toNumber(person.hourlyRate),
   flatRateOnly: Boolean(person.flatRateOnly),
+  // Anyone with a base salary is paid for their hours through that salary, not
+  // a second time per hour worked — see resolveRate.
+  salaried: person.baseSalary != null,
   overrides: new Map((person.payRates || []).map((r) => [r.category, parseFloat(r.hourlyRate)])),
   categories,
 });
@@ -327,12 +338,29 @@ const monthRange = (targetMonth, targetYear) => [
  * Which sessions count as worked.
  *
  * Putting a class on the calendar must not create earnings, and neither should
- * a session nobody attended.
+ * a session nobody attended. Two things earn:
+ *
+ *   1. the class ran — COMPLETED with somebody present;
+ *   2. the class died to a late cancellation. A student who cancels inside the
+ *      24-hour window is charged the full session, and the teacher who held
+ *      that slot and turned up is owed it just the same. Without this the
+ *      academy collected on the hour while the person who lost it got nothing.
+ *
+ * Cancelling with a day's notice is the other side of that bargain: the slot
+ * can still be filled, the family is charged half, and the hour is not paid.
+ * A session the academy itself cancelled has no cancellation rows at all, so it
+ * earns nothing — which is right, nobody was kept waiting.
+ *
+ * The two branches can both match one session (a group class where one student
+ * cancelled late and the rest showed up). That is fine: this selects sessions,
+ * and each is priced once, by the hour.
  */
 const paidSessionsWhere = (startDate, endDate) => ({
   date: { gte: startDate, lte: endDate },
-  status: 'COMPLETED',
-  attendance: { some: { status: 'PRESENT' } },
+  OR: [
+    { status: 'COMPLETED', attendance: { some: { status: 'PRESENT' } } },
+    { cancellations: { some: { hoursBeforeClass: { lt: CANCELLATION_WINDOW_HOURS } } } },
+  ],
 });
 
 /**
@@ -348,13 +376,36 @@ const paidShiftsWhere = (startDate, endDate) => ({
 });
 
 /**
+ * The session fields payroll prices an hour from.
+ *
+ * The last two are counts, not data: whether anybody actually turned up, and
+ * whether a late cancellation is what put this session on the payslip. Together
+ * they let a line say "paid, nobody came, here is why" instead of leaving an
+ * admin to work it out from the class roster.
+ */
+const PAID_SESSION_SELECT = {
+  id: true, date: true, startTime: true, endTime: true, status: true,
+  meetingUrl: true, payCategoryKey: true, payRateOverride: true,
+  paidRate: true, paidRateSource: true,
+  attendance: { where: { status: 'PRESENT' }, select: { id: true } },
+  cancellations: {
+    where: { hoursBeforeClass: { lt: CANCELLATION_WINDOW_HOURS } },
+    select: { id: true },
+  },
+};
+
+/** True when this session is on the payslip only because it was cancelled too late. */
+const wasLateCancelled = (session) =>
+  (session.cancellations?.length ?? 0) > 0 && (session.attendance?.length ?? 0) === 0;
+
+/**
  * Turns one worked entry into a payslip line.
  *
  * Sessions and shifts differ in almost everything except the four numbers that
  * matter here — when, how long, at what rate, for how much — so they are
  * flattened into one shape and the screen renders a single list.
  */
-const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource }, context, categories) => {
+const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled }, context, categories) => {
   const hours = sessionHours({ startTime, endTime });
   // A frozen rate wins outright: this hour was confirmed under a contract that
   // may since have changed, and re-resolving it would rewrite history.
@@ -371,6 +422,10 @@ const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categor
     endTime,
     title,
     subtitle: subtitle || null,
+    // Paid because a student cancelled too late to free the slot, not because
+    // the class ran. Says so on the payslip so nobody reading it later has to
+    // guess why an hour with no attendance was paid.
+    lateCancelled: Boolean(lateCancelled),
     category: categoryKey,
     categoryLabel: categories.get(categoryKey)?.label || (categoryKey ? categoryKey : 'Uncategorised'),
     categoryColor: categories.get(categoryKey)?.color || null,
@@ -464,10 +519,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
             meetingUrl: true,
             sessions: {
               where: paidSessions,
-              select: {
-                id: true, date: true, startTime: true, endTime: true, status: true,
-                meetingUrl: true, payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true,
-              },
+              select: PAID_SESSION_SELECT,
               orderBy: { date: 'desc' },
             },
           },
@@ -484,10 +536,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
             meetingUrl: true,
             sessions: {
               where: paidSessions,
-              select: {
-                id: true, date: true, startTime: true, endTime: true, status: true,
-                meetingUrl: true, payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true,
-              },
+              select: PAID_SESSION_SELECT,
               orderBy: { date: 'desc' },
             },
           },
@@ -538,6 +587,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
           subtitle: cls.subject,
           categoryKey: sessionCategory(s, cls),
           override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
+          lateCancelled: wasLateCancelled(s),
         },
         context,
         categories
@@ -729,10 +779,7 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
             meetingUrl: true,
             sessions: {
               where: paidSessions,
-              select: {
-                id: true, date: true, startTime: true, endTime: true,
-                meetingUrl: true, payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true,
-              },
+              select: PAID_SESSION_SELECT,
             },
           },
         },
@@ -746,10 +793,7 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
             meetingUrl: true,
             sessions: {
               where: paidSessions,
-              select: {
-                id: true, date: true, startTime: true, endTime: true,
-                meetingUrl: true, payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true,
-              },
+              select: PAID_SESSION_SELECT,
             },
           },
         },
@@ -775,6 +819,7 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
         lines.push(lineItem({
           id: s.id, kind: 'session', date: s.date, startTime: s.startTime, endTime: s.endTime,
           title: cls.name, categoryKey: sessionCategory(s, cls), override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
+          lateCancelled: wasLateCancelled(s),
         }, context, categories));
       }
     }
