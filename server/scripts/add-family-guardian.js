@@ -11,9 +11,15 @@
  * sends the invite from Directory, through the editable preview, same as
  * every other invite.
  *
+ * Also relocates a guardian who was filed under the wrong family, which needs
+ * --move on top of --apply: moving somebody changes which children and which
+ * invoices they can see, so it is not something to do as a side effect of a
+ * command that reads like "add".
+ *
  * Usage:
  *   node scripts/add-family-guardian.js --family "Celli Family" --email a@b.com --name "Ana Ruiz"
  *   node scripts/add-family-guardian.js --family "Celli Family" --email a@b.com --name "Ana Ruiz" --apply
+ *   node scripts/add-family-guardian.js --family "Richardson Family" --email a@b.com --name "Ana Ruiz" --move --apply
  */
 
 import 'dotenv/config';
@@ -27,6 +33,7 @@ const arg = (name) => {
 
 const main = async () => {
   const apply = process.argv.includes('--apply');
+  const move = process.argv.includes('--move');
   const familyName = arg('family')?.trim();
   const email = arg('email')?.trim().toLowerCase();
   const fullName = arg('name')?.trim();
@@ -57,6 +64,37 @@ const main = async () => {
       console.log('Already a member of this family. Nothing to do.');
       return;
     }
+
+    // Filed under a different family already. Adding a second membership would
+    // silently give them both households' children and invoices, so this is a
+    // move, and the caller has to say so.
+    const elsewhere = await prisma.familyMember.findMany({
+      where: { userId: existingUser.id },
+      include: { family: { select: { name: true } } },
+    });
+    if (elsewhere.length > 0) {
+      console.log(`Currently in: ${elsewhere.map((m) => m.family.name).join(', ')}.`);
+      if (!move) {
+        console.log('\nThat is a different family. Re-run with --move (plus --apply) to relocate them,');
+        console.log('or drop --family if they genuinely belong to both.');
+        return;
+      }
+      console.log(`Would REMOVE them from ${elsewhere.map((m) => m.family.name).join(', ')} and add them to ${family.name} as a parent.`);
+      if (elsewhere.some((m) => m.isInvoiceRecipient)) {
+        console.log('⚠ They are the invoice recipient on a family they are leaving — check who bills that family afterwards.');
+      }
+      if (!apply) return console.log('\nDry run — re-run with --apply to write.');
+
+      const [, member] = await prisma.$transaction([
+        prisma.familyMember.deleteMany({ where: { userId: existingUser.id } }),
+        prisma.familyMember.create({
+          data: { familyId: family.id, userId: existingUser.id, role: 'parent', isInvoiceRecipient: false },
+        }),
+      ]);
+      console.log(`Moved to ${family.name}. family_members id ${member.id}.`);
+      return;
+    }
+
     console.log(`Would link this existing user to ${family.name} as a parent.`);
     if (!apply) return console.log('\nDry run — re-run with --apply to write.');
 
