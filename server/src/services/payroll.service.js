@@ -14,6 +14,7 @@
 
 import prisma from '../config/database.js';
 import { resolveMeetingUrl } from '../utils/meetingLink.js';
+import { academyToday } from '../utils/academyTime.js';
 import { CANCELLATION_WINDOW_HOURS } from '../constants/cancellationPolicy.js';
 
 /**
@@ -355,13 +356,51 @@ const monthRange = (targetMonth, targetYear) => [
  * cancelled late and the rest showed up). That is fine: this selects sessions,
  * and each is priced once, by the hour.
  */
-const paidSessionsWhere = (startDate, endDate) => ({
-  date: { gte: startDate, lte: endDate },
+const PAYABLE_SESSION = {
   OR: [
     { status: 'COMPLETED', attendance: { some: { status: 'PRESENT' } } },
     { cancellations: { some: { hoursBeforeClass: { lt: CANCELLATION_WINDOW_HOURS } } } },
   ],
+};
+
+const paidSessionsWhere = (startDate, endDate) => ({
+  date: { gte: startDate, lte: endDate },
+  ...PAYABLE_SESSION,
 });
+
+/**
+ * Sessions that have already happened but that payroll cannot pay for.
+ *
+ * Payroll can only price what somebody confirmed, and the two ways to confirm a
+ * class both go through a human: marking it COMPLETED, and saving the register.
+ * When neither happened the hour isn't unpaid on purpose — it's unpaid because
+ * nobody closed it out, and the old behaviour was to drop it from the query
+ * entirely. That is the one failure mode a payroll screen must not have: an
+ * hour that is missing and silent looks exactly like an hour that was never
+ * worked, so the person it belongs to is the only one who will ever notice.
+ *
+ * Deliberately not paid, only counted. A class with no register is a class
+ * nobody can say happened, and inventing earnings from a calendar entry is how
+ * you pay for lessons that were quietly dropped. The number exists so an admin
+ * sees the hole before releasing payroll, not so the system fills it in.
+ *
+ * Only past sessions: this month's remaining classes are unconfirmed because
+ * they haven't happened yet, which is not a problem to flag.
+ */
+const unconfirmedSessionsWhere = (startDate, endDate, today) => ({
+  date: { gte: startDate, lte: endDate, lt: today },
+  status: { not: 'CANCELLED' },
+  NOT: PAYABLE_SESSION,
+});
+
+/** Why an already-past session could not be paid. */
+const unconfirmedReason = (session) =>
+  session.status === 'COMPLETED' ? 'no_attendance' : 'not_completed';
+
+export const UNCONFIRMED_REASON_LABELS = {
+  no_attendance: 'Marked complete, but no register was saved',
+  not_completed: 'Never marked complete',
+};
 
 /**
  * Which shifts count as worked.
@@ -494,7 +533,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
   const [startDate, endDate] = monthRange(targetMonth, targetYear);
   const paidSessions = paidSessionsWhere(startDate, endDate);
 
-  const [categoryList, teacher] = await Promise.all([
+  const [categoryList, teacher, unconfirmed] = await Promise.all([
     loadPayCategories(),
     prisma.user.findUniqueOrThrow({
       where: { id: teacherId },
@@ -557,10 +596,34 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
         },
       },
     }),
+    // Their own past sessions that nobody closed out. Queried from the session
+    // side rather than nested under the class lists, because "this person's
+    // hours" spans both the classes they own and the ones they cover.
+    prisma.session.findMany({
+      where: {
+        ...unconfirmedSessionsWhere(startDate, endDate, academyToday()),
+        class: {
+          OR: [{ teacherId }, { coTeachers: { some: { id: teacherId } } }],
+        },
+      },
+      select: {
+        id: true, date: true, startTime: true, endTime: true, status: true,
+        class: { select: { name: true } },
+      },
+      orderBy: { date: 'desc' },
+    }),
   ]);
 
   const categories = categoryMap(categoryList);
   const context = rateContextFor(teacher, categories);
+
+  const unconfirmedSessions = unconfirmed.map((s) => ({
+    id: s.id,
+    date: s.date,
+    title: s.class?.name || 'Session',
+    hours: round2(sessionHours(s)),
+    reason: unconfirmedReason(s),
+  }));
 
   const lines = [];
   const classSummaries = [];
@@ -693,6 +756,10 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
       // Surfaced rather than buried: a $0 total on a month with real work is
       // almost always a missing rate, not somebody who did nothing.
       unratedHours: round2(unratedHours),
+      // Past classes nobody closed out, so payroll can't pay them. Listed, not
+      // counted into any total — see unconfirmedSessionsWhere.
+      unconfirmedSessions,
+      unconfirmedHours: round2(unconfirmedSessions.reduce((n, s) => n + s.hours, 0)),
       usedSickDays,
       totalSickDays: 8,
       usedPTODays,
@@ -718,8 +785,9 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
   const [startDate, endDate] = monthRange(targetMonth, targetYear);
   const paidSessions = paidSessionsWhere(startDate, endDate);
   const paidShifts = paidShiftsWhere(startDate, endDate);
+  const unconfirmedSessions = unconfirmedSessionsWhere(startDate, endDate, academyToday());
 
-  const [categoryList, staff] = await Promise.all([
+  const [categoryList, staff, unconfirmed] = await Promise.all([
     loadPayCategories(),
     prisma.user.findMany({
       where: {
@@ -748,6 +816,12 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
           // put the person on the screen before anyone gets round to marking it
           // worked, so a missing rate surfaces while it is still cheap to fix.
           { workShifts: { some: { date: { gte: startDate, lte: endDate }, status: { not: 'CANCELLED' } } } },
+          // Somebody whose only hours this month are ones nobody closed out.
+          // They earn nothing yet, which is exactly why they have to be on the
+          // screen: a warning about a person the roster omits is a warning
+          // nobody can see.
+          { taughtClasses: { some: { sessions: { some: unconfirmedSessions } } } },
+          { coTaughtClasses: { some: { sessions: { some: unconfirmedSessions } } } },
         ],
       },
       orderBy: { fullName: 'asc' },
@@ -806,12 +880,43 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
         },
       },
     }),
+    // One flat query for the whole roster's unclosed sessions, grouped in
+    // memory below — the same reason the roster itself is one query rather
+    // than computeTeacherPayroll in a loop.
+    prisma.session.findMany({
+      where: unconfirmedSessions,
+      select: {
+        id: true, date: true, startTime: true, endTime: true, status: true,
+        class: { select: { name: true, teacherId: true, coTeachers: { select: { id: true } } } },
+      },
+      orderBy: { date: 'desc' },
+    }),
   ]);
 
   const categories = categoryMap(categoryList);
 
+  // Keyed by person, because one session belongs to its teacher and to every
+  // co-teacher on it — each of them has an hour nobody closed out.
+  const unconfirmedByPerson = new Map();
+  for (const s of unconfirmed) {
+    const entry = {
+      id: s.id,
+      date: s.date,
+      title: s.class?.name || 'Session',
+      hours: round2(sessionHours(s)),
+      reason: unconfirmedReason(s),
+    };
+    const owners = [s.class?.teacherId, ...(s.class?.coTeachers || []).map((t) => t.id)];
+    for (const id of owners) {
+      if (!id) continue;
+      if (!unconfirmedByPerson.has(id)) unconfirmedByPerson.set(id, []);
+      unconfirmedByPerson.get(id).push(entry);
+    }
+  }
+
   const rows = staff.map((person) => {
     const context = rateContextFor(person, categories);
+    const personUnconfirmed = unconfirmedByPerson.get(person.id) || [];
 
     const lines = [];
     for (const cls of [...person.taughtClasses, ...person.coTaughtClasses]) {
@@ -876,6 +981,11 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
       // Hours worked at no rate. Carried per row so the screen can point at the
       // person to fix, not just warn that something somewhere is unpriced.
       unratedHours: round2(lines.filter((l) => l.rateSource === 'unset').reduce((n, l) => n + l.hours, 0)),
+      // Past classes of theirs that nobody closed out. Not earnings — a list of
+      // what to chase before this month's total can be trusted.
+      unconfirmedSessions: personUnconfirmed,
+      unconfirmedCount: personUnconfirmed.length,
+      unconfirmedHours: round2(personUnconfirmed.reduce((n, s) => n + s.hours, 0)),
     };
   });
 
@@ -908,6 +1018,10 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
       hourlyEarnings: sum((r) => r.hourlyEarnings),
       totalEarnings: sum((r) => r.totalEarnings),
       unratedHours: sum((r) => r.unratedHours),
+      // Counted off the sessions, not summed across rows: a co-taught class
+      // appears on two people's rows and is still one class to go and close.
+      unconfirmedCount: unconfirmed.length,
+      unconfirmedHours: round2(unconfirmed.reduce((n, s) => n + sessionHours(s), 0)),
     },
   };
 };

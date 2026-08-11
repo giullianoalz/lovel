@@ -11,6 +11,13 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 
 const money = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Mirrors UNCONFIRMED_REASON_LABELS on the server — why a past class could not
+// be paid, worded for the person who has to go and fix it.
+const UNCONFIRMED_REASONS = {
+  no_attendance: 'marked complete, but no register was saved',
+  not_completed: 'never marked complete',
+};
+
 /**
  * The whole roster's pay for one month.
  *
@@ -124,6 +131,19 @@ const PayrollOverview = () => {
             </div>
           )}
 
+          {totals.unconfirmedCount > 0 && (
+            <div className="po-warning">
+              <AlertTriangle size={16} />
+              <span>
+                <strong>{totals.unconfirmedCount} past class{totals.unconfirmedCount === 1 ? '' : 'es'}</strong>
+                {' '}({totals.unconfirmedHours} h) {totals.unconfirmedCount === 1 ? 'was' : 'were'} never
+                closed out — not marked complete, or complete with no register saved. Payroll can't
+                pay an hour nobody confirmed, so the total above excludes them. Close them on the
+                calendar and they will price themselves.
+              </span>
+            </div>
+          )}
+
           {rows.length === 0 ? (
             <p className="po-empty">Nobody worked a paid hour in {MONTH_NAMES[month - 1]}.</p>
           ) : (
@@ -149,7 +169,7 @@ const PayrollOverview = () => {
                 </thead>
                 <tbody>
                   {rows.map(row => (
-                    <tr key={row.teacher.id} className={row.unratedHours > 0 ? 'po-row-flagged' : ''}>
+                    <tr key={row.teacher.id} className={row.unratedHours > 0 || row.unconfirmedCount > 0 ? 'po-row-flagged' : ''}>
                       <td>
                         <div className="po-teacher">
                           <span className="po-avatar">{row.teacher.fullName?.[0] || '?'}</span>
@@ -161,6 +181,16 @@ const PayrollOverview = () => {
                             {row.unratedHours > 0 && (
                               <span className="po-flag" title={`${row.unratedHours} h with no rate set`}>
                                 <AlertTriangle size={11} /> {row.unratedHours} h unpriced
+                              </span>
+                            )}
+                            {row.unconfirmedCount > 0 && (
+                              <span
+                                className="po-flag"
+                                title={row.unconfirmedSessions
+                                  .map((s) => `${new Date(s.date).toLocaleDateString()} · ${s.title} · ${s.hours} h · ${UNCONFIRMED_REASONS[s.reason]}`)
+                                  .join('\n')}
+                              >
+                                <AlertTriangle size={11} /> {row.unconfirmedHours} h not closed out
                               </span>
                             )}
                           </div>
