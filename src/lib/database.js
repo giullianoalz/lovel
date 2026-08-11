@@ -217,6 +217,7 @@ export const database = {
         phone: t.phone || 'N/A',
         status: t.status.charAt(0).toUpperCase() + t.status.slice(1).toLowerCase(),
         baseSalary: parseFloat(t.baseSalary || 0),
+        salaryPeriod: t.salaryPeriod || 'MONTHLY',
         // Null means "no rate set", which the card shows as "—". Coercing it to
         // 0 would render a confident "$0.00/hr" for someone simply not
         // configured yet — the two need to look different on a payroll screen.

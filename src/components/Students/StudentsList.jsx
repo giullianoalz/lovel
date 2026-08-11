@@ -551,7 +551,7 @@ const StudentsList = () => {
                       <span className="detail-label">Salary:</span>
                       <span className="salary-badge">
                         <DollarSign size={14} />
-                        ${teacher.baseSalary?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'} /mo
+                        ${teacher.baseSalary?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'} /{teacher.salaryPeriod === 'ANNUAL' ? 'yr' : 'mo'}
                       </span>
                     </div>
                     <div className="detail-item">
