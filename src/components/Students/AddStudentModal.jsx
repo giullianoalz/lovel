@@ -63,12 +63,16 @@ const INITIAL_BILLING_PROFILE = {
   price: ''
 };
 
-const AddStudentModal = ({ onClose, onSaved, families = [] }) => {
+const AddStudentModal = ({ onClose, onSaved, families = [], preselectedFamilyId = null }) => {
   const toast = useToast();
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [student, setStudent] = useState(INITIAL_STUDENT);
-  const [family, setFamily] = useState(INITIAL_FAMILY);
+  const [family, setFamily] = useState(() =>
+    preselectedFamilyId
+      ? { ...INITIAL_FAMILY, familyType: 'existing', existingFamilyId: preselectedFamilyId }
+      : INITIAL_FAMILY
+  );
   const [billingProfiles, setBillingProfiles] = useState([]);
   const [showStudentExtra, setShowStudentExtra] = useState(false);
   const [showFamilyExtra, setShowFamilyExtra] = useState(false);
@@ -193,7 +197,7 @@ const AddStudentModal = ({ onClose, onSaved, families = [] }) => {
       <div className="modal-content add-student-modal" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="asm-header">
-          <h2>Add New Student</h2>
+          <h2>{preselectedFamilyId ? 'Add Student to Family' : 'Add New Student'}</h2>
           <button className="icon-btn" onClick={onClose}><X size={22} /></button>
         </div>
 
@@ -363,27 +367,29 @@ const AddStudentModal = ({ onClose, onSaved, families = [] }) => {
                   <span>Family / Guardian</span>
                 </div>
 
-                <div className="asm-radio-group" style={{ marginBottom: '16px' }}>
-                  <label className="asm-radio-card">
-                    <input type="radio" name="familyType" value="new" checked={family.familyType === 'new'} onChange={() => updateFamily('familyType', 'new')} />
-                    <div>
-                      <strong>New Family</strong>
-                      <span>Create a new account in Families & Invoices</span>
-                    </div>
-                  </label>
-                  <label className="asm-radio-card">
-                    <input type="radio" name="familyType" value="existing" checked={family.familyType === 'existing'} onChange={() => updateFamily('familyType', 'existing')} />
-                    <div>
-                      <strong>Existing Family</strong>
-                      <span>Link to a family already in the system</span>
-                    </div>
-                  </label>
-                </div>
+                {!preselectedFamilyId && (
+                  <div className="asm-radio-group" style={{ marginBottom: '16px' }}>
+                    <label className="asm-radio-card">
+                      <input type="radio" name="familyType" value="new" checked={family.familyType === 'new'} onChange={() => updateFamily('familyType', 'new')} />
+                      <div>
+                        <strong>New Family</strong>
+                        <span>Create a new account in Families & Invoices</span>
+                      </div>
+                    </label>
+                    <label className="asm-radio-card">
+                      <input type="radio" name="familyType" value="existing" checked={family.familyType === 'existing'} onChange={() => updateFamily('familyType', 'existing')} />
+                      <div>
+                        <strong>Existing Family</strong>
+                        <span>Link to a family already in the system</span>
+                      </div>
+                    </label>
+                  </div>
+                )}
 
                 {family.familyType === 'existing' ? (
                   <div className="asm-field">
                     <label>Select Family <span className="required">*</span></label>
-                    <select value={family.existingFamilyId} onChange={e => updateFamily('existingFamilyId', e.target.value)}>
+                    <select disabled={!!preselectedFamilyId} value={family.existingFamilyId} onChange={e => updateFamily('existingFamilyId', e.target.value)}>
                       <option value="">Choose a family...</option>
                       {families.map(f => (
                         <option key={f.id} value={f.id}>{f.name}</option>

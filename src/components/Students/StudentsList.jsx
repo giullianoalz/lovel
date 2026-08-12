@@ -9,6 +9,7 @@ import StudentProfileModal from './StudentProfileModal';
 import TeacherProfileModal from './TeacherProfileModal';
 import SnackCabinetModal from './SnackCabinetModal';
 import AddStudentModal from './AddStudentModal';
+import AddFamilyMemberModal from './AddFamilyMemberModal';
 import ImportStudentsModal from './ImportStudentsModal';
 import BulkInviteModal from './BulkInviteModal';
 import EmailPreviewModal from '../Layout/EmailPreviewModal';
@@ -32,6 +33,11 @@ const StudentsList = () => {
   const [isSnackManagerOpen, setIsSnackManagerOpen] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  // Family the "Add family member" chooser is open for, and the family a
+  // student is being added to (set when the guardian modal hands off to
+  // AddStudentModal instead) — both scoped to one family, unlike showAddModal.
+  const [addMemberFamily, setAddMemberFamily] = useState(null);
+  const [addStudentFamilyId, setAddStudentFamilyId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('All');
   const [families, setFamilies] = useState([]);
   const [parents, setParents] = useState([]);
@@ -633,7 +639,8 @@ const StudentsList = () => {
           ) : (
             <div className="students-grid">
               {filteredParents.map(parent => {
-                const familyName = parent.familyMembers?.[0]?.family?.name;
+                const parentFamily = parent.familyMembers?.[0]?.family;
+                const familyName = parentFamily?.name;
                 const children = parent.children || [];
                 return (
                   <div key={parent.id} className="premium-card student-card">
@@ -693,6 +700,16 @@ const StudentsList = () => {
                     </div>
 
                     <div className="card-actions">
+                      {hasRole('ADMIN') && parentFamily && (
+                        <button
+                          className="icon-btn"
+                          title={`Add a guardian or student to ${familyName}`}
+                          aria-label={`Add a family member to ${familyName}`}
+                          onClick={() => setAddMemberFamily(parentFamily)}
+                        >
+                          <UserPlus size={18} />
+                        </button>
+                      )}
                       {parent.emailUsable ? (
                         <button
                           className="action-btn primary"
@@ -745,6 +762,24 @@ const StudentsList = () => {
           onClose={() => setShowAddModal(false)}
           onSaved={loadData}
           families={families}
+        />
+      )}
+
+      {addMemberFamily && (
+        <AddFamilyMemberModal
+          family={addMemberFamily}
+          onClose={() => setAddMemberFamily(null)}
+          onSaved={loadParents}
+          onAddStudent={(familyId) => setAddStudentFamilyId(familyId)}
+        />
+      )}
+
+      {addStudentFamilyId && (
+        <AddStudentModal
+          preselectedFamilyId={addStudentFamilyId}
+          families={families}
+          onClose={() => setAddStudentFamilyId(null)}
+          onSaved={async () => { await loadData(); await loadParents(); }}
         />
       )}
 

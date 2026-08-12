@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { placeholderUid } from '../services/invite.service.js';
 
 /**
  * GET /api/families
@@ -178,24 +179,62 @@ export const updateFamily = async (req, res, next) => {
 
 /**
  * POST /api/families/:id/members
- * Add a member to a family
+ * Add a member to a family. Either link an existing account (`userId`), or
+ * hand `email` + `fullName` to create one on the spot — same shape as
+ * scripts/add-family-guardian.js, just reachable from the Directory instead
+ * of the command line. New accounts get a placeholder Firebase uid, so they
+ * show up as "never invited" until an admin sends the real invite.
  */
 export const addFamilyMember = async (req, res, next) => {
   try {
-    const { userId, role, isInvoiceRecipient = false } = req.body;
+    const { role, isInvoiceRecipient = false } = req.body;
+    let { userId } = req.body;
 
     if (!userId) {
-      return res.status(400).json({
-        error: 'Validation Error',
-        message: 'userId is required.',
-      });
+      const email = req.body.email?.trim().toLowerCase();
+      const fullName = req.body.fullName?.trim();
+      if (!email || !fullName) {
+        return res.status(400).json({
+          error: 'Validation Error',
+          message: 'userId, or email and fullName, is required.',
+        });
+      }
+
+      let user = await prisma.user.findUnique({ where: { email } });
+      if (user) {
+        // A second membership would silently hand them another household's
+        // children and invoices — that's a move, not an add, so it needs a
+        // deliberate step this endpoint doesn't take on its own.
+        const elsewhere = await prisma.familyMember.findFirst({
+          where: { userId: user.id, familyId: { not: req.params.id } },
+          include: { family: { select: { name: true } } },
+        });
+        if (elsewhere) {
+          return res.status(409).json({
+            error: 'Conflict',
+            message: `${user.fullName} already belongs to ${elsewhere.family.name}. Remove them from that family first if they should move here instead.`,
+          });
+        }
+      } else {
+        user = await prisma.user.create({
+          data: {
+            firebaseUid: placeholderUid('import'),
+            email,
+            fullName,
+            phone: req.body.phone?.trim() || null,
+            role: 'PARENT',
+            status: 'ACTIVE',
+          },
+        });
+      }
+      userId = user.id;
     }
 
     const member = await prisma.familyMember.create({
       data: {
         familyId: req.params.id,
         userId,
-        role,
+        role: role || 'parent',
         isInvoiceRecipient,
       },
       include: {
@@ -208,6 +247,12 @@ export const addFamilyMember = async (req, res, next) => {
 
     res.status(201).json({ message: 'Member added to family.', member });
   } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'This person is already a member of this family.',
+      });
+    }
     next(error);
   }
 };
