@@ -161,13 +161,24 @@ const extractEmaId = (note) => {
 };
 
 /**
- * Notes go onto the student as accommodation notes, minus anything that looks
- * like a credential. Two rows carry a child's school login: one labels it
- * "Password:", the other is a bare portal URL, the student's school email and a
- * loose token underneath — unlabelled, but the same thing. Copying either into a
- * second system isn't a call an import should make quietly, so both are withheld
- * and reported.
+ * `accommodationNotes` is teacher-facing: it drives an "accommodation" badge on
+ * the class roster and shows in full on the student profile. Almost nothing in
+ * TutorBird's Note column belongs there — it's overwhelmingly staff billing
+ * shorthand ("Flex 16", "Indiv 8") and Step Up IDs, which this script already
+ * extracts into `emaStudentId`. Importing all of it flagged 37 students as
+ * having accommodations they don't have, which teachers read as signal.
+ *
+ * So only a note that actually reads as an accommodation is carried over. The
+ * rest is left in the export rather than guessed at — a staff-only home for
+ * billing notes doesn't exist in the schema yet, and inventing one here would
+ * put it right back in front of teachers.
+ *
+ * Credentials are refused outright: two rows carry a child's school login (one
+ * labelled "Password:", one a bare portal URL + email + token). Copying those
+ * into a second system isn't a call an import should make quietly.
  */
+const ACCOMMODATION_LANGUAGE = /\biep\b|\b504\b|adhd|autis|dyslex|anxiet|speech|therap|sensory|accommodat/i;
+
 const sanitizeNote = (note) => {
   const s = clean(note);
   if (!s) return { text: null, warning: null };
@@ -175,6 +186,9 @@ const sanitizeNote = (note) => {
   const portalDump = /https?:\/\//i.test(s) && /[^\s@]+@[^\s@]+\.[^\s@]+/.test(s);
   if (labelled || portalDump) {
     return { text: null, warning: 'note withheld — looks like a login/password; copy it by hand if you want it kept' };
+  }
+  if (!ACCOMMODATION_LANGUAGE.test(s)) {
+    return { text: null, warning: `note not imported (staff/billing note, not an accommodation): "${s.replace(/\s*\n\s*/g, ' / ')}"` };
   }
   return { text: s.replace(/\s*\n\s*/g, ' / '), warning: null };
 };
