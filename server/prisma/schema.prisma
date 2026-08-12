@@ -73,6 +73,15 @@ model User {
   flatRateOnly           Boolean                   @default(false) @map("flat_rate_only")
   accommodationNotes     String?                   @map("accommodation_notes")
   medicalNotes           String?                   @map("medical_notes")
+  // Back-office jottings about this student: scholarship paperwork, the shape
+  // of what the family bought ("Flex 16", "Indiv 8"), anything staff need to
+  // remember while invoicing.
+  //
+  // Separate from `accommodationNotes` because that field is teacher-facing —
+  // it badges the class roster — and billing shorthand landing there reads to a
+  // teacher as "this child has an accommodation". ADMIN only; every student
+  // response strips it for anyone else (see students.controller.js).
+  staffNotes             String?                   @map("staff_notes")
   authoredAnnouncements  Announcement[]
   attendance             Attendance[]
   behaviorLogsAsStudent  BehaviorLog[]             @relation("StudentBehaviors")

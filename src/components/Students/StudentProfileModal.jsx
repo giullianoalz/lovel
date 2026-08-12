@@ -27,6 +27,32 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const [redeemCost, setRedeemCost] = useState('');
   const [redeeming, setRedeeming] = useState(false);
 
+  /* ── Staff notes (admin only) ── */
+  const [editingStaffNotes, setEditingStaffNotes] = useState(false);
+  const [staffNotesDraft, setStaffNotesDraft] = useState('');
+  const [savingStaffNotes, setSavingStaffNotes] = useState(false);
+
+  const startEditStaffNotes = () => {
+    setStaffNotesDraft(student.staffNotes || '');
+    setEditingStaffNotes(true);
+  };
+
+  const handleSaveStaffNotes = async () => {
+    setSavingStaffNotes(true);
+    try {
+      const res = await api.put(`/students/${student.id}/staff-notes`, { staffNotes: staffNotesDraft });
+      const saved = res.data.student.staffNotes;
+      setStudent(prev => ({ ...prev, staffNotes: saved }));
+      setEditingStaffNotes(false);
+      toast.success('Staff notes saved.');
+      onUpdate?.();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not save staff notes.');
+    } finally {
+      setSavingStaffNotes(false);
+    }
+  };
+
   /* ── Report (medical / behavior) ── */
   const [reportType, setReportType] = useState(null); // 'medical' | 'behavior' | null
   const [reportSubmitting, setReportSubmitting] = useState(false);
@@ -395,8 +421,9 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               )}
             </div>
 
-            {/* Notes panel — right side */}
-            {(student.medicalNotes || student.accommodationNotes) && (
+            {/* Notes panel — right side. The staff block is admin-only and
+                always rendered for them, since it's the one note they write. */}
+            {(student.medicalNotes || student.accommodationNotes || !isTeacher) && (
               <div className="info-card notes-panel-card">
                 <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📋 Notes</h3>
                 {student.medicalNotes && (
@@ -409,6 +436,43 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                   <div className="note-block accommodation-note">
                     <span className="note-block-label">Accommodation</span>
                     <p>{student.accommodationNotes}</p>
+                  </div>
+                )}
+                {!isTeacher && (
+                  <div className="note-block staff-note">
+                    <div className="staff-note-head">
+                      <span className="note-block-label">Staff / Billing</span>
+                      {!editingStaffNotes && (
+                        <button className="staff-note-edit" onClick={startEditStaffNotes}>
+                          {student.staffNotes ? 'Edit' : 'Add'}
+                        </button>
+                      )}
+                    </div>
+                    <span className="staff-note-hint">Only admins see this. Teachers never do.</span>
+                    {editingStaffNotes ? (
+                      <>
+                        <textarea
+                          className="staff-note-input"
+                          value={staffNotesDraft}
+                          maxLength={2000}
+                          rows={4}
+                          placeholder="e.g. Flex 16 — invoiced quarterly"
+                          onChange={e => setStaffNotesDraft(e.target.value)}
+                        />
+                        <div className="staff-note-actions">
+                          <button className="action-btn primary" onClick={handleSaveStaffNotes} disabled={savingStaffNotes}>
+                            {savingStaffNotes ? 'Saving…' : <><Check size={14} /> Save</>}
+                          </button>
+                          <button className="action-btn" onClick={() => setEditingStaffNotes(false)} disabled={savingStaffNotes}>
+                            Cancel
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className={student.staffNotes ? '' : 'staff-note-empty'}>
+                        {student.staffNotes || 'No staff notes yet.'}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

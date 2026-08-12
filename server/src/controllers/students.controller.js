@@ -75,6 +75,21 @@ const parentContactLevel = (user) => {
 };
 
 /**
+ * Drops `staffNotes` unless the caller is an admin.
+ *
+ * The student queries below return the whole user row rather than a `select`,
+ * so a new column is visible to every caller the moment it exists — which is
+ * how billing shorthand ended up in front of teachers in the first place. This
+ * is applied on the way out of every student response instead of trusting each
+ * query to remember.
+ */
+const stripStaffNotes = (student, user) => {
+  if (hasRole(user, 'ADMIN')) return student;
+  const { staffNotes, ...rest } = student;
+  return rest;
+};
+
+/**
  * Flattens a student's guardian onto `parentName` / `parentEmail` / `parentPhone`,
  * which is the shape the directory and profile modal read.
  *
@@ -239,9 +254,10 @@ export const listStudents = async (req, res, next) => {
     ]);
 
     res.json({
-      students: hideParentContact
+      students: (hideParentContact
         ? students
-        : students.map(s => withParentContact(s, { includeEmail: contactLevel === 'full' })),
+        : students.map(s => withParentContact(s, { includeEmail: contactLevel === 'full' }))
+      ).map(s => stripStaffNotes(s, req.user)),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -305,10 +321,10 @@ export const getStudent = async (req, res, next) => {
 
     if (hasRole(req.user, 'TEACHER') && !hasRole(req.user, 'ADMIN') && !ownChild) {
       delete student.familyMembers;
-      return res.json({ student });
+      return res.json({ student: stripStaffNotes(student, req.user) });
     }
 
-    res.json({ student: withParentContact(student) });
+    res.json({ student: stripStaffNotes(withParentContact(student), req.user) });
   } catch (error) {
     next(error);
   }
@@ -331,6 +347,42 @@ export const updateStudentHealth = async (req, res, next) => {
     });
 
     res.json({ message: 'Student health info updated.', student });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/students/:id/staff-notes
+ * Back-office notes about a student. ADMIN only, both to write and to read
+ * back — the route is gated, and every other student response strips the field.
+ */
+export const updateStaffNotes = async (req, res, next) => {
+  try {
+    const { staffNotes } = req.body;
+
+    if (staffNotes !== null && typeof staffNotes !== 'string') {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'staffNotes must be a string, or null to clear it.',
+      });
+    }
+
+    const trimmed = typeof staffNotes === 'string' ? staffNotes.trim() : null;
+    if (trimmed && trimmed.length > 2000) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'staffNotes is limited to 2000 characters.',
+      });
+    }
+
+    const student = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { staffNotes: trimmed || null },
+      select: { id: true, fullName: true, staffNotes: true },
+    });
+
+    res.json({ message: 'Staff notes updated.', student });
   } catch (error) {
     next(error);
   }

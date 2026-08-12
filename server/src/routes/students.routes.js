@@ -5,6 +5,7 @@ import {
   listStudents,
   getStudent,
   updateStudentHealth,
+  updateStaffNotes,
   updateSnackPunches,
   getAttendanceSummary,
   exportStudentsCsv,
@@ -27,6 +28,11 @@ router.get('/:id', authenticate, requireSelfOrRole('ADMIN', 'TEACHER'), getStude
 
 // PUT /api/students/:id/health — Update health info (Admin)
 router.put('/:id/health', authenticate, requireRole('ADMIN'), updateStudentHealth);
+
+// PUT /api/students/:id/staff-notes — Back-office notes (Admin)
+// Deliberately not open to TEACHER: the whole point of the field is that it
+// holds billing shorthand teachers shouldn't be reading as accommodations.
+router.put('/:id/staff-notes', authenticate, requireRole('ADMIN'), updateStaffNotes);
 
 // PUT /api/students/:id/snack-punches — Update snack punches (Admin/Teacher)
 router.put('/:id/snack-punches', authenticate, requireRole('ADMIN', 'TEACHER'), updateSnackPunches);
