@@ -309,10 +309,21 @@ for (const [n, r] of dataRows.entries()) {
   const studentPhone = normalizePhone(r[IDX.studentPhone]);
   if (studentPhone.warning) warnings.push(`Row ${rowNum} (${studentName}): ${studentPhone.warning}`);
 
+  // TutorBird's export sometimes has the guardian's own email typed into the
+  // student's Email column (a data-entry slip upstream, not a real shared
+  // inbox). Matching a student on it would find and silently overwrite the
+  // guardian's account instead of creating the child — so it's dropped, and
+  // the student falls back to a placeholder email like any other blank.
+  let studentEmail = clean(r[IDX.studentEmail]).toLowerCase() || null;
+  if (studentEmail && [...hh.guardians.values()].some(g => g.email === studentEmail)) {
+    warnings.push(`Row ${rowNum} (${studentName}): student email "${studentEmail}" is the same as a guardian's — dropped, using a placeholder instead`);
+    studentEmail = null;
+  }
+
   hh.students.push({
     rowNum,
     name: studentName,
-    email: clean(r[IDX.studentEmail]).toLowerCase() || null,
+    email: studentEmail,
     phone: studentPhone.phone,
     birthday,
     age: Number.isInteger(ageRaw) ? ageRaw : null,
@@ -434,7 +445,17 @@ for (const hh of households.values()) {
     if (known) plan.guardExisting++; else plan.guardNew++;
   }
   for (const s of hh.students) {
-    const found = existingByEmail.get(s.email || s.placeholder || '') || studentByName.get(s.name.toLowerCase());
+    // Only a STUDENT account counts as "this student already exists" — an
+    // email collision with a guardian or staff account must never be adopted
+    // and overwritten. (Belt and suspenders: the household-local guardian
+    // check above already clears the obvious case; this catches the same
+    // email showing up on an unrelated non-student account anywhere.)
+    const byEmail = existingByEmail.get(s.email || s.placeholder || '');
+    const found = (byEmail && byEmail.role === 'STUDENT' ? byEmail : null) || studentByName.get(s.name.toLowerCase());
+    if (byEmail && byEmail.role !== 'STUDENT' && !studentByName.has(s.name.toLowerCase())) {
+      warnings.push(`Row ${s.rowNum} (${s.name}): email matches an existing ${byEmail.role} account (${byEmail.fullName}) — not adopted, will use a placeholder email instead`);
+      s.email = null;
+    }
     if (found) {
       plan.stuExisting++;
       s.existingId = found.id;
