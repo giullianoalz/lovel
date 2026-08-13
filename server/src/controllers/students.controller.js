@@ -21,7 +21,13 @@ import { hasRole, isOnly, isFrontDeskOnly } from '../utils/roles.js';
 const rosterScope = (user) => {
   if (!isOnly(user, 'TEACHER')) return {};
 
-  const taught = { enrollments: { some: { status: 'active', class: { teacherId: user.id } } } };
+  // Co-teaching a class puts those students on your roster exactly as teaching
+  // it does — otherwise a co-teacher can see the class on their portal but not
+  // open a single one of its students.
+  const taughtClass = {
+    OR: [{ teacherId: user.id }, { coTeachers: { some: { id: user.id } } }],
+  };
+  const taught = { enrollments: { some: { status: 'active', class: taughtClass } } };
   if (!hasRole(user, 'PARENT')) return taught;
 
   return {

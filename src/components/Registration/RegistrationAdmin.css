@@ -737,6 +737,26 @@
 .reg-form-hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 .reg-input-full { width: 100%; }
 .reg-form-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px; }
+
+/* Co-teacher picker — one toggle per teacher, rather than a multi-select
+   nobody can operate without knowing to hold Ctrl. */
+.reg-coteacher-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.reg-coteacher-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; font-size: 13px; font-weight: 500;
+  color: var(--text-secondary, var(--text-muted));
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.12));
+  border-radius: 999px; cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+.reg-coteacher-chip:hover { background: rgba(255, 255, 255, 0.09); transform: translateY(-1px); }
+.reg-coteacher-chip.picked {
+  color: var(--primary);
+  background: rgba(14, 165, 233, 0.14);
+  border-color: rgba(14, 165, 233, 0.45);
+}
+.reg-coteacher-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .reg-modal-body { margin-top: 16px; }
 .reg-modal-text { color: var(--text-muted); margin-bottom: 24px; line-height: 1.5; }
 

@@ -67,7 +67,11 @@ const RegistrationAdmin = () => {
     groupType: 'REGULAR',
     priceOverride: '',
     // '' means unassigned — a class with no teacher shows on nobody's portal.
-    teacherId: ''
+    teacherId: '',
+    // Everyone else who runs this class. They get the same portal, roster and
+    // attendance as the primary teacher; the split only decides whose name
+    // leads. Empty is the normal case.
+    coTeacherIds: []
   });
   
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -986,10 +990,14 @@ const RegistrationAdmin = () => {
         // and saving an untouched form doesn't write 0.
         priceOverride: cove.priceOverride === null || cove.priceOverride === undefined ? '' : String(cove.priceOverride),
         teacherId: cove.teacherId || '',
+        coTeacherIds: cove.coTeacherIds || [],
       });
     } else {
       setEditingCove(null);
-      setCoveForm({ name: '', capacity: 15, meetingUrl: '', groupType: 'REGULAR', priceOverride: '' });
+      // teacherId and coTeacherIds are reset explicitly: leaving them off made
+      // the pickers uncontrolled, so opening "New Class" straight after editing
+      // one kept the previous class's staff on screen.
+      setCoveForm({ name: '', capacity: 15, meetingUrl: '', groupType: 'REGULAR', priceOverride: '', teacherId: '', coTeacherIds: [] });
     }
     setShowCoveModal(true);
   };
@@ -1003,12 +1011,22 @@ const RegistrationAdmin = () => {
         groupType: coveForm.groupType,
         priceOverride: String(coveForm.priceOverride).trim(),
       };
+      // Always sent, including as []: the API reads an array as "this is the
+      // whole list now", which is the only way removing the last co-teacher
+      // can actually take effect.
+      // The primary is dropped here as well as server-side: promoting a
+      // co-teacher to lead hides their chip but leaves the id in state, and
+      // being on a class twice pays them for it twice.
+      const staffing = {
+        teacherId: coveForm.teacherId,
+        coTeacherIds: (coveForm.coTeacherIds || []).filter(id => id && id !== coveForm.teacherId),
+      };
       if (editingCove) {
         await api.put(`/classes/${editingCove}`, {
           name: coveForm.name,
           maxStudents: parseInt(coveForm.capacity),
           meetingUrl: coveForm.meetingUrl,
-          teacherId: coveForm.teacherId,
+          ...staffing,
           ...pricing
         });
       } else {
@@ -1016,8 +1034,8 @@ const RegistrationAdmin = () => {
           name: coveForm.name,
           maxStudents: parseInt(coveForm.capacity),
           meetingUrl: coveForm.meetingUrl,
-          teacherId: coveForm.teacherId,
           termId: selectedTermForRoster,
+          ...staffing,
           ...pricing
         });
       }
@@ -1731,6 +1749,11 @@ const RegistrationAdmin = () => {
                           {cove.teacherName
                             ? <span className="text-sm">{cove.teacherName}</span>
                             : <span className="badge pending">Unassigned</span>}
+                          {(cove.coTeacherNames || []).length > 0 && (
+                            <span className="text-xs text-muted block" title={cove.coTeacherNames.join(', ')}>
+                              with {cove.coTeacherNames.join(', ')}
+                            </span>
+                          )}
                         </td>
                         <td>
                           <div className="progress-bar-container">
@@ -2748,6 +2771,41 @@ const RegistrationAdmin = () => {
                 <p className="reg-form-hint">
                   The class only appears on this teacher&apos;s portal and calendar. Left
                   unassigned, it shows on nobody&apos;s.
+                </p>
+              </div>
+
+              <div>
+                <label className="reg-form-label">Co-teachers</label>
+                {teachers.filter(t => t.id !== coveForm.teacherId).length === 0 ? (
+                  <p className="reg-form-hint">No other teacher accounts to add yet.</p>
+                ) : (
+                  <div className="reg-coteacher-picker">
+                    {teachers.filter(t => t.id !== coveForm.teacherId).map(t => {
+                      const picked = (coveForm.coTeacherIds || []).includes(t.id);
+                      return (
+                        <button
+                          type="button"
+                          key={t.id}
+                          className={`reg-coteacher-chip${picked ? ' picked' : ''}`}
+                          aria-pressed={picked}
+                          onClick={() => setCoveForm(prev => ({
+                            ...prev,
+                            coTeacherIds: picked
+                              ? (prev.coTeacherIds || []).filter(id => id !== t.id)
+                              : [...(prev.coTeacherIds || []), t.id],
+                          }))}
+                        >
+                          {picked && <Check size={13} />}
+                          {t.fullName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="reg-form-hint">
+                  Co-teachers get the same portal, roster and attendance as the teacher above,
+                  and their hours on this class are paid the same way. The primary teacher is
+                  left out of the list — pick a different one above to swap who leads.
                 </p>
               </div>
 

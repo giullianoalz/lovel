@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DOMPurify from 'dompurify';
+import { startOfWeek, isEqual } from 'date-fns';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ShieldAlert, Siren, HeartPulse, DoorOpen, HandHelping, MessageSquare, Calendar as CalendarIcon,
@@ -60,6 +61,7 @@ const TeacherPortal = () => {
   const [selectedClassIdx, setSelectedClassIdx] = useState(null);
   const [myClasses, setMyClasses] = useState([]); // all of the teacher's classes, not just today's schedule
   const [viewingTeacher, setViewingTeacher] = useState(null); // set when an admin is browsing another teacher's day
+  const [allTeachers, setAllTeachers] = useState([]); // populated only while an admin is viewing, for the switcher
 
   /* ── Emergency ── */
   const [emergencyOpen, setEmergencyOpen] = useState(false);
@@ -163,7 +165,7 @@ const TeacherPortal = () => {
       setDayLoading(false);
     }
     api.get('/announcements').then(r => setAnnouncements(r.data.announcements || [])).catch(() => {});
-    api.get('/lesson-plans').then(r => setLessonPlans(r.data.lessonPlans || [])).catch(() => {});
+    api.get('/lesson-plans', { params: { archived: false } }).then(r => setLessonPlans(r.data.lessonPlans || [])).catch(() => {});
   }, [selectedDate, viewTeacherId, jumpToSessionId]);
 
   useEffect(() => {
@@ -172,6 +174,26 @@ const TeacherPortal = () => {
       .then(r => setMyClasses(r.data.classes || []))
       .catch(() => {});
   }, [user?.id, viewTeacherId]);
+
+  // The switcher's options. Only fetched once an admin is actually viewing
+  // somebody — a teacher on their own portal never sees the banner, and the
+  // list would be a directory request they aren't entitled to make.
+  useEffect(() => {
+    if (!viewingTeacher || allTeachers.length > 0) return;
+    database.fetchTeachers()
+      .then((list) => setAllTeachers(list || []))
+      .catch(() => {});
+  }, [viewingTeacher, allTeachers.length]);
+
+  // Hop straight from one teacher's day to another's, keeping the date. The
+  // session deep-link is dropped: it points at a session on the roster we are
+  // leaving. Selecting your own name exits the view rather than asking the
+  // server to "view" yourself.
+  const switchToTeacher = (teacherId) => {
+    const params = new URLSearchParams({ date: selectedDate });
+    if (teacherId && teacherId !== user.id) params.set('teacherId', teacherId);
+    navigate(`/portal/teacher?${params.toString()}`);
+  };
 
   useEffect(() => { loadPortalData(); }, [loadPortalData]);
 
@@ -282,6 +304,20 @@ const TeacherPortal = () => {
 
   const currentClass = schedule[selectedClassIdx];
   const roster = currentClass?.roster || [];
+  // The lesson plan the teacher wrote for this class's week, surfaced inline
+  // so they don't have to leave the session to go re-read the Lesson Plans tab.
+  const sessionLessonPlan = (() => {
+    if (!currentClass) return null;
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const sessionWeek = startOfWeek(new Date(y, m - 1, d), { weekStartsOn: 1 });
+    const matches = lessonPlans.filter(p =>
+      p.classId === currentClass.classId &&
+      isEqual(startOfWeek(new Date(p.weekOf), { weekStartsOn: 1 }), sessionWeek)
+    );
+    return matches.find(p => p.status === 'APPROVED')
+      || matches.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+      || null;
+  })();
   const allStudents = schedule.flatMap((c) => c.roster);
   // "Student out" has to work even when the teacher isn't sitting on a class —
   // between periods, or when today's schedule is empty. Fall back to everyone on
@@ -540,8 +576,27 @@ const TeacherPortal = () => {
         <div className="admin-viewing-banner">
           <ShieldCheck size={14} />
           <span>Viewing {viewingTeacher.fullName}'s classes as admin</span>
-          <button className="admin-viewing-exit" onClick={() => navigate('/calendar')}>
-            <X size={14} /> Back to calendar
+          {allTeachers.length > 1 && (
+            <select
+              className="admin-viewing-switch"
+              value={viewingTeacher.id}
+              onChange={(e) => switchToTeacher(e.target.value)}
+              aria-label="Switch to another teacher's portal"
+            >
+              {/* The person being viewed has to be an option or the select
+                  would render somebody else's name as the current value —
+                  they can be missing from the list if they were reached by
+                  URL, or if their account is no longer listed as staff. */}
+              {!allTeachers.some(t => t.id === viewingTeacher.id) && (
+                <option value={viewingTeacher.id}>{viewingTeacher.fullName}</option>
+              )}
+              {allTeachers.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+          <button className="admin-viewing-exit" onClick={() => switchToTeacher(user.id)}>
+            <X size={14} /> Back to my portal
           </button>
         </div>
       )}
@@ -700,6 +755,25 @@ const TeacherPortal = () => {
                   {completeLoading ? 'Saving...' : '✓ Complete Session'}
                 </button>
               </div>
+
+              {sessionLessonPlan && (
+                <div className="session-lesson-plan-panel">
+                  <div className="session-lesson-plan-header">
+                    <BookOpen size={16} />
+                    <strong>Lesson Plan for This Week</strong>
+                    {sessionLessonPlan.status !== 'APPROVED' && (
+                      <span className={`lp-status-badge ${sessionLessonPlan.status.toLowerCase()}`}>
+                        {sessionLessonPlan.status.replace('_', ' ')}
+                      </span>
+                    )}
+                  </div>
+                  <p><strong>Main Activity:</strong> {sessionLessonPlan.mainActivity}</p>
+                  {sessionLessonPlan.materials && <p><strong>Materials:</strong> {sessionLessonPlan.materials}</p>}
+                  {sessionLessonPlan.safetyNotes && <p><strong>Safety Notes:</strong> {sessionLessonPlan.safetyNotes}</p>}
+                  {sessionLessonPlan.skillConnection && <p><strong>Skill Connection:</strong> {sessionLessonPlan.skillConnection}</p>}
+                  {sessionLessonPlan.differentiation && <p><strong>Differentiation:</strong> {sessionLessonPlan.differentiation}</p>}
+                </div>
+              )}
 
             {/* Prize bar */}
             <div className="prize-quick-bar">

@@ -44,7 +44,7 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     // Check if dev bypass email exists in localStorage
     const savedDevEmail = localStorage.getItem('devUserEmail');
-    
+
     if (savedDevEmail) {
       setIsDevBypass(true);
       syncProfile(savedDevEmail)
@@ -53,15 +53,25 @@ export const AuthProvider = ({ children }) => {
           setIsDevBypass(false);
         })
         .finally(() => setLoading(false));
-      return;
     }
 
-    // Otherwise, listen to Firebase Auth state
+    // Subscribe unconditionally. This used to be skipped whenever a dev bypass
+    // was active — and since the listener is the only thing that clears
+    // `loading` after a Firebase sign-in, logging out of a bypass session and
+    // then signing in for real parked the app on the loading screen until a
+    // manual refresh re-ran this effect. The callback steps aside on its own
+    // while a bypass owns the session instead.
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       // Creating the Firebase account fires this listener before the academy
       // profile exists. Letting it run would race signUpFamily's own sync and
       // could resolve after it, blanking a user we had just loaded.
       if (isSignupInFlight()) return;
+
+      // Read localStorage rather than the isDevBypass state: this closure is
+      // built once at mount and would keep seeing the value from back then.
+      // A bypass has no Firebase user, so every callback here arrives as null
+      // and would blank the profile the bypass just loaded.
+      if (localStorage.getItem('devUserEmail')) return;
 
       setLoading(true);
       if (firebaseUser) {
@@ -96,9 +106,11 @@ export const AuthProvider = ({ children }) => {
       // Wait for onAuthStateChanged to sync, or sync immediately
       await syncProfile();
       return userCredential.user;
-    } catch (error) {
+    } finally {
+      // The listener clears this too, but only once it has finished its own
+      // sync. Owning it here means a successful sign-in can never leave the
+      // app on the loading screen because of how the two races resolved.
       setLoading(false);
-      throw error;
     }
   };
 

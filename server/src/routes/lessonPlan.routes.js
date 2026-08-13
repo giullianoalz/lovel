@@ -6,6 +6,8 @@ import {
   listLessonPlans,
   getLessonPlan,
   reviewLessonPlan,
+  archiveLessonPlan,
+  archiveLessonPlansByWeek,
   getSupplyList,
   markSupplyPurchased,
 } from '../controllers/lessonPlan.controller.js';
@@ -16,7 +18,9 @@ router.post('/', authenticate, requireRole('ADMIN', 'TEACHER'), createLessonPlan
 router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listLessonPlans);
 router.get('/supply-list', authenticate, requireRole('ADMIN'), getSupplyList);
 router.patch('/supply-list/:id/purchased', authenticate, requireRole('ADMIN'), markSupplyPurchased);
+router.patch('/archive-week', authenticate, requireRole('ADMIN'), archiveLessonPlansByWeek);
 router.get('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), getLessonPlan);
 router.patch('/:id/review', authenticate, requireRole('ADMIN'), reviewLessonPlan);
+router.patch('/:id/archive', authenticate, requireRole('ADMIN'), archiveLessonPlan);
 
 export default router;

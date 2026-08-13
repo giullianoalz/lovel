@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import DOMPurify from 'dompurify';
+import { startOfWeek, isEqual } from 'date-fns';
 import { database } from '../../lib/database';
-import { Check, X, AlertTriangle, FileWarning, Clock, Users, Star, Gift, TrendingUp, FileText, Image, Paperclip, Video, History, Eye, EyeOff, ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List, Link2, Type, Activity, Wind, LogOut, LifeBuoy, AlertCircle } from 'lucide-react';
+import { Check, X, AlertTriangle, FileWarning, Clock, Users, Star, Gift, TrendingUp, FileText, Image, Paperclip, Video, History, Eye, EyeOff, ShieldCheck, ChevronDown, Download, Bold, Italic, Underline, List, Link2, Type, Activity, Wind, LogOut, LifeBuoy, AlertCircle, ClipboardList } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -24,6 +25,8 @@ const ClassSession = () => {
   const [recordingUrl, setRecordingUrl] = useState('');
   const [noteVisibility, setNoteVisibility] = useState(['students_parents', 'me']);
   const [sessionHistory, setSessionHistory] = useState([]);
+  const [sessionLessonPlan, setSessionLessonPlan] = useState(null);
+  const [loadingLessonPlan, setLoadingLessonPlan] = useState(false);
   const [historyFilter, setHistoryFilter] = useState('30days');
   const [expandedNotes, setExpandedNotes] = useState({});
   const [previewFile, setPreviewFile] = useState(null);
@@ -155,6 +158,29 @@ const ClassSession = () => {
       setSessionHistory([]);
     }
   }, [activeSessionId]);
+
+  // Surface the lesson plan the teacher wrote for this class's week, so it's
+  // visible without leaving the session while they take attendance/notes.
+  useEffect(() => {
+    const activeSession = dailySessions.find(s => s.id === activeSessionId);
+    if (activeSession?.classId && activeSession?.date) {
+      const loadLessonPlan = async () => {
+        setLoadingLessonPlan(true);
+        const plans = await database.fetchLessonPlansForClass(activeSession.classId);
+        const sessionWeek = startOfWeek(new Date(activeSession.date), { weekStartsOn: 1 });
+        const matches = plans.filter(p => isEqual(startOfWeek(new Date(p.weekOf), { weekStartsOn: 1 }), sessionWeek));
+        // Prefer an approved plan; otherwise take the most recently submitted one.
+        const best = matches.find(p => p.status === 'APPROVED')
+          || matches.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+          || null;
+        setSessionLessonPlan(best);
+        setLoadingLessonPlan(false);
+      };
+      loadLessonPlan();
+    } else {
+      setSessionLessonPlan(null);
+    }
+  }, [activeSessionId, dailySessions]);
 
   useEffect(() => {
     const loadStudentsAndSessions = async () => {
@@ -366,6 +392,32 @@ const ClassSession = () => {
                     {completeLoading ? 'Processing...' : 'Complete Session'}
                   </button>
                 </div>
+
+      {/* Lesson Plan Reference */}
+      {(loadingLessonPlan || sessionLessonPlan) && (
+        <div className="lesson-plan-reference-panel" style={{ background: '#f5f3ff', border: '1px dashed #c4b5fd', borderRadius: '12px', padding: '14px 16px', margin: '16px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: sessionLessonPlan ? '8px' : 0 }}>
+            <ClipboardList size={18} color="#7c3aed" />
+            <strong style={{ fontSize: '14px', color: '#5b21b6' }}>Lesson Plan for This Week</strong>
+            {sessionLessonPlan && sessionLessonPlan.status !== 'APPROVED' && (
+              <span className="status-badge" style={{ fontSize: '10px', textTransform: 'uppercase', background: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: '10px' }}>
+                {sessionLessonPlan.status.replace('_', ' ')}
+              </span>
+            )}
+          </div>
+          {loadingLessonPlan ? (
+            <span className="app-inline-loader"><span className="app-spinner-sm" />Loading lesson plan…</span>
+          ) : (
+            <div style={{ fontSize: '13px', color: '#4c1d95', lineHeight: 1.6 }}>
+              <p style={{ margin: '0 0 6px' }}><strong>Main Activity:</strong> {sessionLessonPlan.mainActivity}</p>
+              {sessionLessonPlan.materials && <p style={{ margin: '0 0 6px' }}><strong>Materials:</strong> {sessionLessonPlan.materials}</p>}
+              {sessionLessonPlan.safetyNotes && <p style={{ margin: '0 0 6px' }}><strong>Safety Notes:</strong> {sessionLessonPlan.safetyNotes}</p>}
+              {sessionLessonPlan.skillConnection && <p style={{ margin: '0 0 6px' }}><strong>Skill Connection:</strong> {sessionLessonPlan.skillConnection}</p>}
+              {sessionLessonPlan.differentiation && <p style={{ margin: 0 }}><strong>Differentiation:</strong> {sessionLessonPlan.differentiation}</p>}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Integrated Prize Bar */}
       <div className="prize-quick-bar">

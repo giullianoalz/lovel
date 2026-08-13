@@ -1350,12 +1350,15 @@ model LessonPlan {
   differentiation String?
   status          LessonPlanStatus @default(SUBMITTED)
   managerFeedback String?          @map("manager_feedback")
+  archived        Boolean          @default(false)
+  archivedAt      DateTime?        @map("archived_at") @db.Timestamptz(6)
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   teacher         User             @relation("TeacherLessonPlans", fields: [teacherId], references: [id])
   class           Class?           @relation(fields: [classId], references: [id])
   supplyItems     SupplyItem[]
 
   @@index([teacherId])
+  @@index([archived])
   @@map("lesson_plans")
 }
 

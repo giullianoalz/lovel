@@ -4,6 +4,24 @@ import { invalidate } from '../middleware/cache.js';
 
 const MAX_STUDENTS_CAP = 100;
 
+// The co-teacher list as it should be stored: de-duplicated, and never
+// containing the primary teacher.
+//
+// Both matter for money. Payroll walks `taughtClasses` and `coTaughtClasses`
+// back to back, so somebody listed as both the teacher and a co-teacher of the
+// same class is paid twice for every session on it; a name repeated inside the
+// list is the same double count one level down. The picker can produce either
+// — the primary is chosen in a separate control, and nothing stops it being
+// re-picked below.
+//
+// Returns null when there was nothing to normalise (the key was absent), which
+// the callers read as "leave the co-teachers alone".
+const normalizeCoTeacherIds = (coTeacherIds, teacherId) => {
+  if (!Array.isArray(coTeacherIds)) return null;
+  const primary = teacherId === '' ? null : teacherId;
+  return [...new Set(coTeacherIds.filter((id) => id && id !== primary))];
+};
+
 // Shared by createClass/updateClass — returns an error message string, or
 // null if the input is valid. Catches typos (maxStudents=0, a stray letter)
 // and a teacherId that doesn't point to an actual active-ish teacher before
@@ -41,16 +59,20 @@ const validateClassInput = async ({ maxStudents, teacherId, coTeacherIds, priceO
     }
   }
 
-  if (coTeacherIds && Array.isArray(coTeacherIds) && coTeacherIds.length > 0) {
+  // Normalised first, so a list that only *looks* wrong — the primary teacher
+  // picked again below, or one name selected twice — is quietly corrected
+  // instead of rejected. The counts below then compare like with like.
+  const wantedCoTeacherIds = normalizeCoTeacherIds(coTeacherIds, teacherId) || [];
+  if (wantedCoTeacherIds.length > 0) {
     const coTeachers = await prisma.user.findMany({
-      where: { id: { in: coTeacherIds } },
+      where: { id: { in: wantedCoTeacherIds } },
       select: { id: true, role: true, secondaryRoles: true, status: true },
     });
-    
-    if (coTeachers.length !== coTeacherIds.length) {
+
+    if (coTeachers.length !== wantedCoTeacherIds.length) {
       return 'One or more co-teachers do not exist.';
     }
-    
+
     for (const t of coTeachers) {
       if (!hasRole(t, 'TEACHER')) {
         return 'All co-teachers must reference an existing teacher account.';
@@ -153,6 +175,9 @@ export const getClass = async (req, res, next) => {
         teacher: {
           select: { id: true, fullName: true, email: true },
         },
+        coTeachers: {
+          select: { id: true, fullName: true, email: true },
+        },
         enrollments: {
           where: { status: 'active' },
           include: {
@@ -171,8 +196,12 @@ export const getClass = async (req, res, next) => {
 
     // Same rule as listClasses: a teacher-only account can't fetch another
     // teacher's class by guessing/enumerating IDs. 404 rather than 403 so the
-    // response doesn't confirm the class exists.
-    if (isOnly(req.user, 'TEACHER') && classData.teacherId !== req.user.id) {
+    // response doesn't confirm the class exists. A co-teacher is assigned to
+    // this class as much as the primary is, so the roster is theirs to open.
+    const isAssigned =
+      classData.teacherId === req.user.id ||
+      classData.coTeachers.some((t) => t.id === req.user.id);
+    if (isOnly(req.user, 'TEACHER') && !isAssigned) {
       return res.status(404).json({ error: 'Not Found', message: 'Class not found.' });
     }
 
@@ -199,6 +228,8 @@ export const createClass = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: validationError });
     }
 
+    const nextCoTeacherIds = normalizeCoTeacherIds(coTeacherIds, teacherId) || [];
+
     const newClass = await prisma.class.create({
       data: {
         name,
@@ -218,13 +249,13 @@ export const createClass = async (req, res, next) => {
         ...(priceOverride !== undefined && priceOverride !== null && priceOverride !== ''
           ? { priceOverride: Number(priceOverride) }
           : {}),
-        ...(coTeacherIds && Array.isArray(coTeacherIds) && coTeacherIds.length > 0
-          ? { coTeachers: { connect: coTeacherIds.map(id => ({ id })) } }
+        ...(nextCoTeacherIds.length > 0
+          ? { coTeachers: { connect: nextCoTeacherIds.map(id => ({ id })) } }
           : {}),
       },
       include: {
-        teacher: { select: { fullName: true } },
-        coTeachers: { select: { fullName: true } },
+        teacher: { select: { id: true, fullName: true } },
+        coTeachers: { select: { id: true, fullName: true } },
       },
     });
 
@@ -258,6 +289,21 @@ export const updateClass = async (req, res, next) => {
     // the foreign key as a literal ''. Null is how a class goes unassigned.
     const nextTeacherId = teacherId === '' ? null : teacherId;
 
+    // Who the primary teacher will be once this update lands. A caller editing
+    // only the co-teachers omits `teacherId` entirely, and stripping the
+    // primary out of the list needs to know who that is — so fall back to the
+    // teacher the class already has rather than to undefined, which would let
+    // them be stored as their own co-teacher and paid twice.
+    let effectivePrimaryId = nextTeacherId;
+    if (teacherId === undefined && Array.isArray(coTeacherIds)) {
+      const existing = await prisma.class.findUnique({
+        where: { id: req.params.id },
+        select: { teacherId: true },
+      });
+      effectivePrimaryId = existing?.teacherId ?? null;
+    }
+    const nextCoTeacherIds = normalizeCoTeacherIds(coTeacherIds, effectivePrimaryId);
+
     const updatedClass = await prisma.class.update({
       where: { id: req.params.id },
       data: {
@@ -271,11 +317,17 @@ export const updateClass = async (req, res, next) => {
         ...(groupType && { groupType }),
         ...(clearsPrice ? { priceOverride: null } : {}),
         ...(setsPrice ? { priceOverride: Number(priceOverride) } : {}),
-        ...(Array.isArray(coTeacherIds) ? { coTeachers: { set: coTeacherIds.map(id => ({ id })) } } : {}),
+        ...(nextCoTeacherIds
+          ? { coTeachers: { set: nextCoTeacherIds.map(id => ({ id })) } }
+          // Promoting an existing co-teacher to primary without touching the
+          // co-teacher list would leave them on both — the same double count
+          // normalizeCoTeacherIds prevents on the other path. Disconnecting is
+          // a no-op when they weren't a co-teacher to begin with.
+          : (nextTeacherId ? { coTeachers: { disconnect: { id: nextTeacherId } } } : {})),
       },
       include: {
-        teacher: { select: { fullName: true } },
-        coTeachers: { select: { fullName: true } },
+        teacher: { select: { id: true, fullName: true } },
+        coTeachers: { select: { id: true, fullName: true } },
       }
     });
 

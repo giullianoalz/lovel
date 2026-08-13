@@ -77,6 +77,50 @@
 
 .lpr-filter {
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.lpr-archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.lpr-archive-week-btn,
+.lpr-archive-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.lpr-archive-week-btn:hover,
+.lpr-archive-btn:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+  color: var(--text-main);
+}
+
+.lpr-archive-btn {
+  padding: 6px 8px;
+}
+
+.lpr-archive-week-btn:disabled,
+.lpr-archive-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .lpr-filter select {

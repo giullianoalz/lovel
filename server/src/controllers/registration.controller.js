@@ -828,6 +828,7 @@ export const getRegistrationClasses = async (req, res, next) => {
       where: whereClause,
       include: {
         teacher: { select: { id: true, fullName: true } },
+        coTeachers: { select: { id: true, fullName: true } },
         _count: {
           select: {
             enrollments: { where: { status: 'active' } },
@@ -850,6 +851,11 @@ export const getRegistrationClasses = async (req, res, next) => {
       // matches, and the name so the roster list can show it without a lookup.
       teacherId: c.teacherId || '',
       teacherName: c.teacher?.fullName || null,
+      // Everyone else assigned to the class. Ids so the edit form can prefill
+      // its picker, names so the roster list can show who else is in the room
+      // without a second call.
+      coTeacherIds: c.coTeachers.map(t => t.id),
+      coTeacherNames: c.coTeachers.map(t => t.fullName),
       groupType: c.groupType || 'REGULAR',  // needed by billing preview
       // Also for the preview: when set, this is the price, not the term rate.
       // Number() so the client compares an amount rather than Prisma's Decimal.

@@ -68,12 +68,16 @@ export const createLessonPlan = async (req, res, next) => {
 
 export const listLessonPlans = async (req, res, next) => {
   try {
-    const { classId, teacherId, weekOf, status } = req.query;
+    const { classId, teacherId, weekOf, status, archived } = req.query;
     const where = {};
     if (classId) where.classId = classId;
     if (teacherId) where.teacherId = teacherId;
     if (status) where.status = status;
     if (weekOf) where.weekOf = new Date(weekOf);
+    // Omitted entirely: callers referencing a plan by class/week (e.g. the
+    // in-session lesson plan lookup) need it whether or not an admin has since
+    // archived it. Only the review screens pass this explicitly to hide clutter.
+    if (archived !== undefined) where.archived = archived === 'true';
     if (isOnly(req.user, 'TEACHER')) where.teacherId = req.user.id;
 
     const lessonPlans = await prisma.lessonPlan.findMany({
@@ -127,6 +131,44 @@ export const reviewLessonPlan = async (req, res, next) => {
     });
 
     res.json({ lessonPlan });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const archiveLessonPlan = async (req, res, next) => {
+  try {
+    const { archived = true } = req.body;
+
+    const lessonPlan = await prisma.lessonPlan.update({
+      where: { id: req.params.id },
+      data: { archived, archivedAt: archived ? new Date() : null },
+      include: {
+        teacher: { select: { id: true, fullName: true } },
+        class: { select: { id: true, name: true } },
+        supplyItems: true,
+      },
+    });
+
+    res.json({ lessonPlan });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const archiveLessonPlansByWeek = async (req, res, next) => {
+  try {
+    const { weekOf } = req.body;
+    if (!weekOf) {
+      return res.status(400).json({ error: 'Validation Error', message: 'weekOf is required.' });
+    }
+
+    const result = await prisma.lessonPlan.updateMany({
+      where: { weekOf: new Date(weekOf), archived: false },
+      data: { archived: true, archivedAt: new Date() },
+    });
+
+    res.json({ archivedCount: result.count });
   } catch (error) {
     next(error);
   }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, DollarSign, Info } from 'lucide-react';
+import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, DollarSign, Info, Archive, ArchiveRestore } from 'lucide-react';
 import { startOfWeek } from 'date-fns';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -17,9 +17,11 @@ const LessonPlanReview = () => {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [reviewPlan, setReviewPlan] = useState(null);
   const [feedback, setFeedback] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [archivingKey, setArchivingKey] = useState(null);
 
   const [supplyItems, setSupplyItems] = useState([]);
   const [supplyLoading, setSupplyLoading] = useState(true);
@@ -29,7 +31,7 @@ const LessonPlanReview = () => {
   const loadPlans = async () => {
     setLoading(true);
     try {
-      const params = {};
+      const params = { archived: showArchived };
       if (filterStatus) params.status = filterStatus;
       const res = await api.get('/lesson-plans', { params });
       setPlans(res.data.lessonPlans || []);
@@ -50,7 +52,7 @@ const LessonPlanReview = () => {
     setSupplyLoading(false);
   };
 
-  useEffect(() => { loadPlans(); }, [filterStatus]);
+  useEffect(() => { loadPlans(); }, [filterStatus, showArchived]);
   useEffect(() => { if (tab === 'supplies') loadSupplyList(); }, [tab]);
 
   const openReview = (plan) => {
@@ -90,7 +92,42 @@ const LessonPlanReview = () => {
     setPurchasingId(null);
   };
 
+  const handleArchivePlan = async (plan, e) => {
+    e.stopPropagation();
+    setArchivingKey(plan.id);
+    try {
+      await api.patch(`/lesson-plans/${plan.id}/archive`, { archived: !showArchived });
+      toast.success(showArchived ? 'Lesson plan restored.' : 'Lesson plan archived.');
+      await loadPlans();
+    } catch {
+      toast.error('Could not update the lesson plan.');
+    }
+    setArchivingKey(null);
+  };
+
+  const handleArchiveWeek = async (weekOf, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`Archive all lesson plans for the week of ${new Date(weekOf).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}?`)) return;
+    setArchivingKey(weekOf);
+    try {
+      const res = await api.patch('/lesson-plans/archive-week', { weekOf });
+      toast.success(`Archived ${res.data.archivedCount} lesson plan${res.data.archivedCount === 1 ? '' : 's'}.`);
+      await loadPlans();
+    } catch {
+      toast.error('Could not archive that week.');
+    }
+    setArchivingKey(null);
+  };
+
   const pendingCount = plans.filter(p => p.status === 'SUBMITTED').length;
+
+  const plansByWeek = plans.reduce((acc, plan) => {
+    const key = new Date(plan.weekOf).toISOString();
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(plan);
+    return acc;
+  }, {});
+  const sortedPlanWeeks = Object.keys(plansByWeek).sort((a, b) => new Date(b) - new Date(a));
 
   const supplyItemsByWeek = supplyItems.reduce((acc, item) => {
     let weekLabel = 'General / Unscheduled';
@@ -160,46 +197,71 @@ const LessonPlanReview = () => {
               <option value="NEEDS_REVISION">Needs Revision</option>
               <option value="APPROVED">Approved</option>
             </select>
+            <label className="lpr-archived-toggle">
+              <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />
+              Show archived
+            </label>
           </div>
 
-          <div className="lpr-card">
-            {loading ? (
-              <div className="lpr-empty"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading lesson plans…</span></div>
-            ) : plans.length === 0 ? (
-              <div className="lpr-empty">
-                <BookOpen size={32} />
-                <p>No lesson plans found.</p>
-              </div>
-            ) : (
-              <table className="lpr-table">
-                <thead>
-                  <tr>
-                    {['Week Of', 'Type', 'Class', 'Teacher', 'Main Activity', 'Status'].map(h => (
-                      <th key={h}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {plans.map(plan => (
-                    <tr key={plan.id} onClick={() => openReview(plan)}>
-                      <td>
-                        {new Date(plan.weekOf).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
-                      </td>
-                      <td>{plan.type === 'DISCOVERY_COVE' ? 'Discovery Cove' : 'Elective'}</td>
-                      <td>{plan.class?.name || '—'}</td>
-                      <td>{plan.teacher?.fullName}</td>
-                      <td className="lpr-td-activity">{plan.mainActivity}</td>
-                      <td>
-                        <span className={`lpr-status-pill ${(plan.status || 'SUBMITTED').toLowerCase()}`}>
-                          {STATUS_LABEL[plan.status] || STATUS_LABEL.SUBMITTED}
-                        </span>
-                      </td>
+          {loading ? (
+            <div className="lpr-card lpr-empty"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading lesson plans…</span></div>
+          ) : plans.length === 0 ? (
+            <div className="lpr-card lpr-empty">
+              <BookOpen size={32} />
+              <p>{showArchived ? 'No archived lesson plans.' : 'No lesson plans found.'}</p>
+            </div>
+          ) : (
+            sortedPlanWeeks.map(weekKey => (
+              <div key={weekKey} className="lpr-card" style={{ marginBottom: 16 }}>
+                <div className="lpr-week-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Week of {new Date(weekKey).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}</span>
+                  {!showArchived && (
+                    <button
+                      className="lpr-archive-week-btn"
+                      onClick={(e) => handleArchiveWeek(weekKey, e)}
+                      disabled={archivingKey === weekKey}
+                    >
+                      <Archive size={14} /> Archive Week
+                    </button>
+                  )}
+                </div>
+                <table className="lpr-table">
+                  <thead>
+                    <tr>
+                      {['Type', 'Class', 'Teacher', 'Main Activity', 'Status', ''].map(h => (
+                        <th key={h}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+                  </thead>
+                  <tbody>
+                    {plansByWeek[weekKey].map(plan => (
+                      <tr key={plan.id} onClick={() => openReview(plan)}>
+                        <td>{plan.type === 'DISCOVERY_COVE' ? 'Discovery Cove' : 'Elective'}</td>
+                        <td>{plan.class?.name || '—'}</td>
+                        <td>{plan.teacher?.fullName}</td>
+                        <td className="lpr-td-activity">{plan.mainActivity}</td>
+                        <td>
+                          <span className={`lpr-status-pill ${(plan.status || 'SUBMITTED').toLowerCase()}`}>
+                            {STATUS_LABEL[plan.status] || STATUS_LABEL.SUBMITTED}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className="lpr-archive-btn"
+                            onClick={(e) => handleArchivePlan(plan, e)}
+                            disabled={archivingKey === plan.id}
+                            title={showArchived ? 'Restore' : 'Archive'}
+                          >
+                            {showArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
+          )}
         </>
       ) : (
         <>

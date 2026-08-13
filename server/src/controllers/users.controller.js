@@ -135,7 +135,15 @@ export const listUsers = async (req, res, next) => {
     // privately message a family that isn't theirs.
     if (isOnly(req.user, 'TEACHER')) {
       const enrollments = await prisma.classEnrollment.findMany({
-        where: { status: 'active', class: { teacherId: req.user.id } },
+        where: {
+          status: 'active',
+          class: {
+            OR: [
+              { teacherId: req.user.id },
+              { coTeachers: { some: { id: req.user.id } } },
+            ],
+          },
+        },
         select: { studentId: true },
       });
       const studentIds = enrollments.map((e) => e.studentId);
@@ -423,7 +431,14 @@ export const setTeachingRole = async (req, res, next) => {
     if (adding) {
       held.add('TEACHER');
     } else {
-      const taught = await prisma.class.count({ where: { teacherId: user.id } });
+      // Co-taught classes count as still teaching: dropping the TEACHER role
+      // while they are on a roster would leave a class assigned to somebody the
+      // system no longer treats as staff.
+      const taught = await prisma.class.count({
+        where: {
+          OR: [{ teacherId: user.id }, { coTeachers: { some: { id: user.id } } }],
+        },
+      });
       if (taught > 0) {
         return res.status(409).json({
           error: 'Still Teaching',

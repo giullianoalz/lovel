@@ -100,8 +100,15 @@ export const getTeacherPortal = async (req, res, next) => {
           gte: startOfDay,
           lte: endOfDay
         },
+        // A co-teacher is in the room for the lesson, so the lesson belongs on
+        // their portal too — this is the screen they take attendance and write
+        // session notes from, and matching only on `teacherId` left everyone
+        // added as a co-teacher looking at an empty day.
         class: {
-          teacherId: userId
+          OR: [
+            { teacherId: userId },
+            { coTeachers: { some: { id: userId } } },
+          ],
         }
       },
       include: {

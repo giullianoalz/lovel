@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, MapPin, Pencil, Save, Receipt, Coffee, Lock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { X, DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, Mail, Phone, MapPin, Pencil, Save, Receipt, Coffee, Lock, LogIn } from 'lucide-react';
 import { database } from '../../lib/database';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
@@ -39,6 +40,7 @@ const clock = (value) => {
 const TeacherProfileModal = ({ teacher, onClose }) => {
   const { hasRole } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const [payrollData, setPayrollData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -140,6 +142,19 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
   const payroll = payrollData?.payroll;
   const classes = payrollData?.classes || [];
 
+  // Only an admin can open somebody else's portal, and only for someone who
+  // actually teaches — a salaried front-desk account has no roster to show.
+  const teacherRoles = teacher.role ? [teacher.role, ...(teacher.secondaryRoles || [])] : ['TEACHER'];
+  const canOpenPortal = hasRole('ADMIN') && teacherRoles.includes('TEACHER');
+
+  // Jump into their day exactly as they see it. The portal reads ?teacherId=
+  // and the server re-checks that the caller is allowed to look, so this is a
+  // view of their roster rather than a session as them.
+  const openTeacherPortal = () => {
+    onClose();
+    navigate(`/portal/teacher?teacherId=${teacher.id}`);
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content profile-modal teacher-profile-modal" onClick={e => e.stopPropagation()}>
@@ -171,6 +186,11 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
           <div className="teacher-contact-bar">
             <span><Mail size={14} /> {teacher.email}</span>
             <span><Phone size={14} /> {teacher.phone}</span>
+            {canOpenPortal && (
+              <button type="button" className="teacher-portal-jump" onClick={openTeacherPortal}>
+                <LogIn size={14} /> Open their portal
+              </button>
+            )}
           </div>
         </header>
 

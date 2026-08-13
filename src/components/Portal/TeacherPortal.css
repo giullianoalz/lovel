@@ -191,6 +191,31 @@
   animation: tp-fadeIn 0.4s ease;
 }
 
+/* Hop to another teacher's day without going back out to a list first. */
+.admin-viewing-switch {
+  margin-left: 4px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+  background: white;
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 220px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.admin-viewing-switch:hover {
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.admin-viewing-switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
 .admin-viewing-exit {
   display: flex;
   align-items: center;
@@ -1258,6 +1283,16 @@
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 12px; margin-bottom: 16px;
   padding: 10px 16px; background: #f8fafc; border-radius: 10px; border: 1px solid var(--border-light);
+}
+
+.session-lesson-plan-panel {
+  background: #f5f3ff; border: 1px dashed #c4b5fd; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 16px; font-size: 13px; color: #4c1d95; line-height: 1.6;
+}
+.session-lesson-plan-panel p { margin: 4px 0; }
+.session-lesson-plan-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  color: #5b21b6; font-size: 14px;
 }
 
 @media (max-width: 600px) {

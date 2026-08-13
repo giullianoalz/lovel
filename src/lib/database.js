@@ -742,6 +742,8 @@ export const database = {
       if (sessions.length > 0) {
         return sessions.map(s => ({
           id: s.id,
+          classId: s.classId,
+          date: s.date,
           title: s.class?.name || 'Class Session',
           time: `${formatTimeOfDay(s.startTime)} - ${formatTimeOfDay(s.endTime)}`,
           studentsCount: 0, // Should come from enrollments ideally
@@ -753,6 +755,19 @@ export const database = {
     } catch (error) {
       console.error("Error fetching daily sessions:", error);
       return null;
+    }
+  },
+
+  // The teacher picks any date to represent "the week" on a lesson plan, not
+  // necessarily a Monday, so we can't match it to a session by exact date —
+  // match by which Mon-Sun week each one falls in instead (done by the caller).
+  fetchLessonPlansForClass: async (classId) => {
+    try {
+      const response = await api.get('/lesson-plans', { params: { classId } });
+      return response.data.lessonPlans || [];
+    } catch (error) {
+      console.error("Error fetching lesson plans for class:", error);
+      return [];
     }
   }
 };
