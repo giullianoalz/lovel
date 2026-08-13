@@ -12,6 +12,25 @@ const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 
 const money = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/**
+ * Where a rate came from, in the few words that fit under it.
+ *
+ * The rate cascade has several steps, and "$50.00/hr" alone doesn't tell an
+ * admin whether that is this person's own deal or the category default every
+ * teacher gets — which is exactly the difference they need before paying.
+ */
+const RATE_SOURCE_TEXT = {
+  event: 'set on the entry',
+  flat: 'flat rate',
+  teacher: 'their own rate',
+  category: 'category rate',
+  base: 'their base rate',
+  salaried: 'covered by salary',
+  unset: 'no rate set',
+  frozen: 'rate at the time',
+  mixed: 'mixed sources',
+};
+
 // Mirrors UNCONFIRMED_REASON_LABELS on the server — why a past class could not
 // be paid, worded for the person who has to go and fix it.
 const UNCONFIRMED_REASONS = {
@@ -223,18 +242,41 @@ const PayrollOverview = () => {
                         )}
                       </td>
                       <td className="num">
-                        {/* The base hourly rate. Per-category overrides live in
-                            the modal — cramming both in here reads as a second
-                            rate rather than a replacement for the first. */}
-                        {row.hourlyRate != null
-                          ? <>
-                              {money(row.hourlyRate)}/hr
-                              {/* Worth saying on the row: it's the difference
-                                  between "this is the fallback" and "this is
-                                  the only rate that will ever apply". */}
-                              {row.flatRateOnly && <span className="po-sub">flat — all work</span>}
-                            </>
-                          : <span className="po-unset">not set</span>}
+                        {/* What these hours were actually paid at, not the
+                            person's fallback rate. This column used to read the
+                            base hourly rate alone, so anyone paid through a
+                            category rate — which is most people — showed "not
+                            set" beside real money, and the one column meant to
+                            answer "what am I paying them" answered nothing. */}
+                        {(() => {
+                          const paid = row.breakdown?.filter(b => b.hours > 0) || [];
+                          // Nobody worked: the fallback rate is all there is to
+                          // show, and it's what the next hour would cost.
+                          if (paid.length === 0) {
+                            return row.hourlyRate != null
+                              ? <>
+                                  {money(row.hourlyRate)}/hr
+                                  {row.flatRateOnly && <span className="po-sub">flat — all work</span>}
+                                </>
+                              : <span className="po-unset">not set</span>;
+                          }
+                          const rates = [...new Set(paid.map(b => (b.mixedRates ? null : b.rate)))];
+                          // One rate across every hour worked — the common case,
+                          // and the only one a single figure can honestly state.
+                          if (rates.length === 1 && rates[0] != null) {
+                            return <>
+                              {money(rates[0])}/hr
+                              <span className="po-sub">{RATE_SOURCE_TEXT[paid[0].source] || paid[0].source}</span>
+                            </>;
+                          }
+                          // Two kinds of work at two prices, or a rate set on one
+                          // entry. No single number is true, so it says so and
+                          // points at the breakdown rather than picking one.
+                          return <>
+                            <span className="po-mixed">mixed</span>
+                            <span className="po-sub">{paid.map(b => money(b.mixedRates ? b.amount / b.hours : b.rate)).join(' · ')}</span>
+                          </>;
+                        })()}
                       </td>
                       <td className="num">
                         {/* Three states, not two. A dash means nobody has said

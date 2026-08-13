@@ -174,3 +174,10 @@
   background: rgba(255, 255, 255, 0.35);
   transform: translateY(-1px);
 }
+
+/* Two kinds of work at two prices — no single figure is true, so the column
+   says so rather than picking one and being quietly wrong. */
+.po-mixed {
+  font-style: italic;
+  color: var(--text-muted, #64748b);
+}

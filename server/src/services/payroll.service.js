@@ -159,7 +159,12 @@ export const freezeSessionRates = async (sessionIds) => {
       // "mark the classes complete, then set the rates" order of work would
       // quietly cost somebody their pay. Left unfrozen, it keeps pricing live
       // and fixes itself the moment a rate exists.
-      if (source === 'unset') continue;
+      //
+      // A salaried hour is skipped for the mirror reason: its $0 isn't a rate
+      // anybody agreed, it's a consequence of being on a salary this month.
+      // Stamped, it would outlive the salary — move that person onto an hourly
+      // arrangement later and their past hours would stay pinned at nothing.
+      if (source === 'unset' || source === 'salaried') continue;
       writes.push(prisma.session.update({
         where: { id: session.id },
         data: { paidRate: rate, paidRateSource: source },
@@ -208,8 +213,9 @@ export const freezeShiftRates = async (shiftIds) => {
         contexts.get(staff.id),
         toNumber(shift.payRateOverride)
       );
-      // Same as sessions: no rate is a gap, not a contract. See freezeSessionRates.
-      if (source === 'unset') continue;
+      // Same as sessions: neither "no rate" nor "covered by salary" is a
+      // contract worth stamping. See freezeSessionRates.
+      if (source === 'unset' || source === 'salaried') continue;
       writes.push(prisma.workShift.update({
         where: { id: shift.id },
         data: { paidRate: rate, paidRateSource: source },
