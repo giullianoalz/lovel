@@ -40,7 +40,8 @@ const fmtTime = formatTimeOfDay;
 
 /* ============================================================ */
 const TeacherPortal = () => {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
+  const isAdmin = hasRole('ADMIN');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // Admins can jump straight into another teacher's day from the calendar —
@@ -175,15 +176,16 @@ const TeacherPortal = () => {
       .catch(() => {});
   }, [user?.id, viewTeacherId]);
 
-  // The switcher's options. Only fetched once an admin is actually viewing
-  // somebody — a teacher on their own portal never sees the banner, and the
-  // list would be a directory request they aren't entitled to make.
+  // The switcher's options. Fetched for any admin on this screen, not only
+  // once they're already viewing somebody — the whole point is to offer the
+  // jump before they've made it. A plain teacher never sees the switcher, and
+  // the list would be a directory request they aren't entitled to make.
   useEffect(() => {
-    if (!viewingTeacher || allTeachers.length > 0) return;
+    if (!isAdmin || allTeachers.length > 0) return;
     database.fetchTeachers()
       .then((list) => setAllTeachers(list || []))
       .catch(() => {});
-  }, [viewingTeacher, allTeachers.length]);
+  }, [isAdmin, allTeachers.length]);
 
   // Hop straight from one teacher's day to another's, keeping the date. The
   // session deep-link is dropped: it points at a session on the roster we are
@@ -571,33 +573,40 @@ const TeacherPortal = () => {
         </div>
       )}
 
-      {/* ── ADMIN VIEWING BANNER ─────────────────────────────── */}
-      {viewingTeacher && (
+      {/* ── ADMIN VIEWING BANNER ─────────────────────────────────
+          Shown to every admin on this screen, whether or not they're
+          currently viewing somebody else — the switcher is how they get
+          into a teacher's view in the first place, not just how they move
+          between two they've already reached. */}
+      {isAdmin && (
         <div className="admin-viewing-banner">
           <ShieldCheck size={14} />
-          <span>Viewing {viewingTeacher.fullName}'s classes as admin</span>
-          {allTeachers.length > 1 && (
+          <span>{viewingTeacher ? `Viewing ${viewingTeacher.fullName}'s classes as admin` : 'Viewing your own portal'}</span>
+          {allTeachers.length > 0 && (
             <select
               className="admin-viewing-switch"
-              value={viewingTeacher.id}
+              value={viewingTeacher ? viewingTeacher.id : user.id}
               onChange={(e) => switchToTeacher(e.target.value)}
-              aria-label="Switch to another teacher's portal"
+              aria-label="Switch to a teacher's portal"
             >
+              <option value={user.id}>My portal</option>
               {/* The person being viewed has to be an option or the select
                   would render somebody else's name as the current value —
                   they can be missing from the list if they were reached by
                   URL, or if their account is no longer listed as staff. */}
-              {!allTeachers.some(t => t.id === viewingTeacher.id) && (
+              {viewingTeacher && !allTeachers.some(t => t.id === viewingTeacher.id) && (
                 <option value={viewingTeacher.id}>{viewingTeacher.fullName}</option>
               )}
-              {allTeachers.map(t => (
+              {allTeachers.filter(t => t.id !== user.id).map(t => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
           )}
-          <button className="admin-viewing-exit" onClick={() => switchToTeacher(user.id)}>
-            <X size={14} /> Back to my portal
-          </button>
+          {viewingTeacher && (
+            <button className="admin-viewing-exit" onClick={() => switchToTeacher(user.id)}>
+              <X size={14} /> Back to my portal
+            </button>
+          )}
         </div>
       )}
 
