@@ -6,3 +6,7 @@ dist/
 # Database dumps. These carry student, medical and family records in the clear —
 # never commit one.
 backups/
+
+# Pasted TutorBird family-ledger pages (real balances, payment references) —
+# same reason as backups/ above.
+scripts/data/tutorbird-ledger/
