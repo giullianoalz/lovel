@@ -55,6 +55,9 @@ if (!fs.existsSync(TXT_PATH)) {
 }
 
 const MARKER = '[tutorbird-ledger]';
+// Opening balances carry their own marker so they can be found and replaced on
+// their own — see the deleteMany before each family is written.
+const OPENING_MARKER = '[tutorbird-opening]';
 const clean = (v) => (v == null ? '' : String(v).replace(/[‎‏‪-‮]/g, '').trim());
 
 /* ── Money / date parsing ────────────────────────────────────────────────── */
@@ -337,10 +340,20 @@ const targetFamilyIds = [...new Set(results.map(r => r.familyId).filter(Boolean)
 const priorTx = targetFamilyIds.length
   ? await withRetry('load existing transactions', () => prisma.transaction.findMany({
       where: { familyId: { in: targetFamilyIds }, description: { contains: MARKER } },
-      select: { familyId: true, date: true, type: true, amount: true, description: true },
+      select: { id: true, familyId: true, date: true, type: true, amount: true, description: true },
     }))
   : [];
 const priorKeys = new Set(priorTx.map(t => [t.familyId, t.date.toISOString().slice(0, 10), t.type, Number(t.amount).toFixed(2), t.description].join('|')));
+
+// One row per family, kept separate from priorKeys: an opening balance is
+// REPLACED wholesale when it changes (see below), never matched key-by-key
+// like an ordinary transaction — pasting more history later must change the
+// number, not add a second one next to it.
+// "Opening balance carried into" catches rows written before OPENING_MARKER
+// existed — this import has already run once in production without it.
+const priorOpeningByFamily = new Map(
+  priorTx.filter(t => t.description.includes(OPENING_MARKER) || t.description.startsWith('Opening balance carried into')).map(t => [t.familyId, t])
+);
 
 /* ── Report ───────────────────────────────────────────────────────────────── */
 
@@ -369,9 +382,15 @@ for (const r of results) {
   }
   const newRows = r.rows.filter(row => !priorKeys.has([r.familyId, row.date.toISOString().slice(0, 10), row.type, row.amount.toFixed(2), `${row.description} ${MARKER}`].join('|')));
   console.log(`✓ ${label} — ${r.rows.length} rows reconcile, balance owed: $${r.finalOwed.toFixed(2)} (${newRows.length} new, ${r.rows.length - newRows.length} already imported)`);
+  const priorOpening = r.familyId ? priorOpeningByFamily.get(r.familyId) : null;
   if (r.openingBalance) {
     const kind = r.openingBalance > 0 ? 'owed' : 'in credit';
-    console.log(`      + opening balance $${Math.abs(r.openingBalance).toFixed(2)} ${kind} — history before ${r.rows[0].date.toISOString().slice(0, 10)} is not in the paste`);
+    const signedNew = r.openingBalance;
+    const signedPrior = priorOpening ? (priorOpening.type === 'CREDIT' ? -Number(priorOpening.amount) : Number(priorOpening.amount)) : null;
+    const change = signedPrior === null ? '' : (Math.abs(signedPrior - signedNew) < 0.005 ? ' (unchanged)' : ` (replaces $${Math.abs(signedPrior).toFixed(2)} ${signedPrior > 0 ? 'owed' : 'in credit'})`);
+    console.log(`      + opening balance $${Math.abs(r.openingBalance).toFixed(2)} ${kind}${change} — history before ${r.rows[0].date.toISOString().slice(0, 10)} is not in the paste`);
+  } else if (priorOpening) {
+    console.log(`      + this paste now covers the family's full history — removes the $${Number(priorOpening.amount).toFixed(2)} opening balance from before`);
   }
   if (r.matchedVia?.startsWith('family name')) console.log(`      matched via ${r.matchedVia}`);
   if (r.notFoundStudents.length) console.log(`      note: not in the app, their rows carry no student — ${r.notFoundStudents.join(', ')}`);
@@ -392,25 +411,28 @@ if (!COMMIT) {
   process.exit(0);
 }
 
-const created = { families: 0, transactions: 0, skippedExisting: 0 };
+const created = { families: 0, transactions: 0, skippedExisting: 0, openingsReplaced: 0 };
 
 for (const r of clean_) {
   await withRetry(r.familyName, async () => {
-    // The balance the family carried into the pasted window. Dated with the
-    // oldest pasted row so it always sorts first, and labelled so nobody later
-    // mistakes a derived figure for something TutorBird actually charged.
+    // The balance the family carried into the pasted window — REPLACED
+    // wholesale rather than matched key-by-key like an ordinary row below,
+    // because pasting more of a family's history later changes this number
+    // (possibly to zero, if the new paste now reaches all the way back) and
+    // must overwrite the old one, not sit next to it.
+    const priorOpening = priorOpeningByFamily.get(r.familyId);
+    if (priorOpening) {
+      await prisma.transaction.delete({ where: { id: priorOpening.id } });
+      created.openingsReplaced++;
+    }
     if (r.openingBalance) {
-      const description = `Opening balance carried into ${r.rows[0].date.toISOString().slice(0, 10)} (earlier history not exported) ${MARKER}`;
+      const description = `Opening balance carried into ${r.rows[0].date.toISOString().slice(0, 10)} (earlier history not exported) ${OPENING_MARKER} ${MARKER}`;
       const type = r.openingBalance > 0 ? 'CHARGE' : 'CREDIT';
       const amount = Math.abs(r.openingBalance);
-      const key = [r.familyId, r.rows[0].date.toISOString().slice(0, 10), type, amount.toFixed(2), description].join('|');
-      if (!priorKeys.has(key)) {
-        priorKeys.add(key);
-        await prisma.transaction.create({
-          data: { familyId: r.familyId, amount, type, date: r.rows[0].date, description },
-        });
-        created.transactions++;
-      } else created.skippedExisting++;
+      await prisma.transaction.create({
+        data: { familyId: r.familyId, amount, type, date: r.rows[0].date, description },
+      });
+      created.transactions++;
     }
 
     for (const row of r.rows) {
@@ -437,6 +459,7 @@ for (const r of clean_) {
 
 console.log(`\n\nDone.`);
 console.log(`  families updated    ${clean_.length}`);
-console.log(`  transactions written ${created.transactions}${created.skippedExisting ? ` (${created.skippedExisting} already present, skipped)` : ''}\n`);
+console.log(`  transactions written ${created.transactions}${created.skippedExisting ? ` (${created.skippedExisting} already present, skipped)` : ''}`);
+console.log(`  opening balances replaced ${created.openingsReplaced}\n`);
 
 await prisma.$disconnect();
