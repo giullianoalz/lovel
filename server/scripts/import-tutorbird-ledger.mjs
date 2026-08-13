@@ -120,7 +120,10 @@ const blocks = blockStarts.map((start, i) => allLines.slice(start, blockStarts[i
 /* ── Parse one family block ──────────────────────────────────────────────── */
 
 const SECTION_HEADERS = ['Students', 'Family Contacts', 'Tags'];
-const NOISE_LINES = new Set(['Family Details', 'Active', 'Inactive', 'Invoice Recipient', 'Recurring', 'Lesson', '']);
+// 'Waiting' belongs here with 'Active'/'Inactive': it is an enrolment status
+// printed under a student's name, and leaving it out made the Woods block
+// import two students called "Waiting".
+const NOISE_LINES = new Set(['Family Details', 'Active', 'Inactive', 'Waiting', 'Invoice Recipient', 'Recurring', 'Lesson', '']);
 const TABLE_HEADER = ['Date', 'Student', 'Description', 'Charges & Discounts', 'Payments & Refunds', 'Sales Tax', 'Balance'];
 
 /**
@@ -202,19 +205,49 @@ const parseTransactions = (lines, studentNames) => {
 
 /* ── Reconcile one family ─────────────────────────────────────────────────── */
 
+/**
+ * Replays the pasted rows oldest-first and compares against the balance
+ * TutorBird printed on every one of them.
+ *
+ * The gap between the two is the tell. TutorBird's screen paginates, so a
+ * paste usually starts partway down a family's history — and then the oldest
+ * pasted row already carries whatever was owed before it. That shows up as the
+ * SAME gap on every row, which is proof the rows themselves are read
+ * correctly and only the starting point is missing: the gap is the opening
+ * balance, and one entry for it makes the whole block reconcile.
+ *
+ * A gap that MOVES is the opposite — a row misread, or a row missing from the
+ * middle. That is never patched over; the family is refused.
+ */
 const reconcile = (rows) => {
-  // Rows are pasted newest-first; walk oldest-first to replay the ledger the
-  // way it was actually built.
   const chrono = [...rows].reverse();
   let running = 0;
-  const mismatches = [];
+  const offsets = [];
+  const replay = [];
   for (const r of chrono) {
     running += r.type === 'CHARGE' ? r.amount : -r.amount;
-    if (Math.abs(running - r.owedAfter) > 0.005) {
-      mismatches.push(`${r.date.toISOString().slice(0, 10)} ${r.type} $${r.amount.toFixed(2)} "${r.description.slice(0, 40)}" — recomputed owed $${running.toFixed(2)}, TutorBird showed $${r.owedAfter.toFixed(2)}`);
-    }
+    offsets.push(Math.round((r.owedAfter - running) * 100) / 100);
+    replay.push({ ...r, recomputed: running });
   }
-  return { finalOwed: running, mismatches, chrono };
+
+  const distinct = [...new Set(offsets)];
+  const openingBalance = distinct.length === 1 ? distinct[0] : null;
+
+  // Only a wandering gap is a real failure.
+  const mismatches = openingBalance === null
+    ? replay
+        .filter((r, i) => offsets[i] !== offsets[0])
+        .slice(0, 8)
+        .map(r => `${r.date.toISOString().slice(0, 10)} ${r.type} $${r.amount.toFixed(2)} "${r.description.slice(0, 40)}" — recomputed owed $${r.recomputed.toFixed(2)}, TutorBird showed $${r.owedAfter.toFixed(2)}`)
+    : [];
+
+  return {
+    chrono,
+    mismatches,
+    openingBalance: openingBalance || 0,
+    finalOwed: running + (openingBalance || 0),
+    distinctOffsets: distinct.length,
+  };
 };
 
 /* ── Process every block ─────────────────────────────────────────────────── */
@@ -225,16 +258,19 @@ for (const [i, block] of blocks.entries()) {
   const studentLastFirst = header.Students;
   const studentNames = studentLastFirst.map(toGivenSurname);
   const { rows, problems } = parseTransactions(block, studentNames);
-  const { finalOwed, mismatches, chrono } = reconcile(rows);
+  const { finalOwed, mismatches, chrono, openingBalance } = reconcile(rows);
 
   results.push({
     blockIndex: i + 1,
     studentNames,
+    // Surname of the first student, for the family-name fallback below.
+    surname: (studentLastFirst[0] || '').split(',')[0].trim(),
     contactNames: header['Family Contacts'].map(toGivenSurname),
     tags: header.Tags,
     rows: chrono,
     problems,
     mismatches,
+    openingBalance,
     finalOwed,
   });
 }
@@ -248,19 +284,50 @@ const students = await withRetry('load students', () => prisma.user.findMany({
 }));
 const studentByName = new Map(students.map(s => [s.fullName.toLowerCase(), s]));
 
+// Families the roster import never populated — the archived households created
+// to hold legacy debt have a name and no members at all, so no student of
+// theirs can ever match. They are reached by family name instead, and only
+// when exactly one family carries it (this roster has three "Rodriguez
+// Family", so an ambiguous surname must never be guessed at).
+const surnames = [...new Set(results.map(r => r.surname).filter(Boolean))];
+const famsBySurname = new Map();
+for (const name of surnames) {
+  const hits = await withRetry(`match ${name}`, () => prisma.family.findMany({
+    where: { name: { equals: `${name} Family`, mode: 'insensitive' } },
+    select: { id: true, name: true, _count: { select: { members: true } } },
+  }));
+  famsBySurname.set(name, hits);
+}
+
 for (const r of results) {
   const found = r.studentNames.map(n => studentByName.get(n.toLowerCase())).filter(Boolean);
   const notFound = r.studentNames.filter(n => !studentByName.has(n.toLowerCase()));
   const familyIds = new Set(found.flatMap(s => s.familyMembers.map(m => m.familyId)));
 
   r.matchedStudents = found.length;
+  // A sibling missing from the app is not a reason to refuse the household:
+  // the ledger is the family's, and these blocks routinely list children who
+  // never made it into the active-roster export. Their rows simply carry no
+  // studentId. It IS worth saying out loud, so it is reported below.
   r.notFoundStudents = notFound;
-  if (notFound.length) r.matchProblem = `student(s) not found in the app: ${notFound.join(', ')}`;
-  else if (familyIds.size === 0) r.matchProblem = 'no student resolved to a family';
-  else if (familyIds.size > 1) r.matchProblem = `students belong to different families in the app (${familyIds.size})`;
-  else {
+
+  if (familyIds.size > 1) {
+    r.matchProblem = `its students belong to ${familyIds.size} different families in the app`;
+  } else if (familyIds.size === 1) {
     r.familyId = [...familyIds][0];
     r.familyName = found[0].familyMembers.find(m => m.familyId === r.familyId).family.name;
+    r.matchedVia = `student ${found[0].fullName}`;
+  } else {
+    const hits = famsBySurname.get(r.surname) || [];
+    if (hits.length === 1) {
+      r.familyId = hits[0].id;
+      r.familyName = hits[0].name;
+      r.matchedVia = `family name "${hits[0].name}" (no student of theirs is in the app)`;
+    } else if (hits.length > 1) {
+      r.matchProblem = `no student matched and ${hits.length} families are called "${r.surname} Family" — too ambiguous to guess`;
+    } else {
+      r.matchProblem = `no student matched and no family called "${r.surname} Family" exists`;
+    }
   }
 }
 
@@ -296,12 +363,18 @@ for (const r of results) {
     continue;
   }
   if (r.mismatches.length) {
-    console.log(`✗ ${label} — balance does not reconcile, REFUSED:`);
+    console.log(`✗ ${label} — balance drifts (${r.distinctOffsets} different gaps), REFUSED:`);
     r.mismatches.forEach(m => console.log(`    ${m}`));
     continue;
   }
   const newRows = r.rows.filter(row => !priorKeys.has([r.familyId, row.date.toISOString().slice(0, 10), row.type, row.amount.toFixed(2), `${row.description} ${MARKER}`].join('|')));
-  console.log(`✓ ${label} — ${r.rows.length} transactions reconcile exactly, current balance owed: $${r.finalOwed.toFixed(2)} (${newRows.length} new, ${r.rows.length - newRows.length} already imported)`);
+  console.log(`✓ ${label} — ${r.rows.length} rows reconcile, balance owed: $${r.finalOwed.toFixed(2)} (${newRows.length} new, ${r.rows.length - newRows.length} already imported)`);
+  if (r.openingBalance) {
+    const kind = r.openingBalance > 0 ? 'owed' : 'in credit';
+    console.log(`      + opening balance $${Math.abs(r.openingBalance).toFixed(2)} ${kind} — history before ${r.rows[0].date.toISOString().slice(0, 10)} is not in the paste`);
+  }
+  if (r.matchedVia?.startsWith('family name')) console.log(`      matched via ${r.matchedVia}`);
+  if (r.notFoundStudents.length) console.log(`      note: not in the app, their rows carry no student — ${r.notFoundStudents.join(', ')}`);
 }
 
 console.log(`\n${clean_.length} of ${results.length} families ready to import; ${bad.length} refused.`);
@@ -323,6 +396,23 @@ const created = { families: 0, transactions: 0, skippedExisting: 0 };
 
 for (const r of clean_) {
   await withRetry(r.familyName, async () => {
+    // The balance the family carried into the pasted window. Dated with the
+    // oldest pasted row so it always sorts first, and labelled so nobody later
+    // mistakes a derived figure for something TutorBird actually charged.
+    if (r.openingBalance) {
+      const description = `Opening balance carried into ${r.rows[0].date.toISOString().slice(0, 10)} (earlier history not exported) ${MARKER}`;
+      const type = r.openingBalance > 0 ? 'CHARGE' : 'CREDIT';
+      const amount = Math.abs(r.openingBalance);
+      const key = [r.familyId, r.rows[0].date.toISOString().slice(0, 10), type, amount.toFixed(2), description].join('|');
+      if (!priorKeys.has(key)) {
+        priorKeys.add(key);
+        await prisma.transaction.create({
+          data: { familyId: r.familyId, amount, type, date: r.rows[0].date, description },
+        });
+        created.transactions++;
+      } else created.skippedExisting++;
+    }
+
     for (const row of r.rows) {
       const description = `${row.description} ${MARKER}`;
       const key = [r.familyId, row.date.toISOString().slice(0, 10), row.type, row.amount.toFixed(2), description].join('|');
