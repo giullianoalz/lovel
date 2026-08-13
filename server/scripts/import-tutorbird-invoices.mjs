@@ -11,15 +11,25 @@
  * the books. The real outstanding balance is $43,282.50. That gap is the whole
  * reason this script splits the import in two:
  *
- *   1. HISTORY — every row becomes an Invoice row for the record, marked
- *      PAID/CANCELLED/SENT as the export says, with NO transactions and NO
- *      lines behind it. In this schema the ledger is Transaction; an invoice
- *      with nothing behind it is a document, so history is readable without
- *      moving a single balance.
+ * So this script imports HISTORY ONLY: every row becomes an Invoice row for
+ * the record, marked PAID/CANCELLED/SENT as the export says, with NO
+ * transactions and NO lines behind it. In this schema the ledger is
+ * Transaction; an invoice with nothing behind it is a document, so the paper
+ * trail is readable without moving a single balance.
  *
- *   2. BALANCES — one opening-balance CHARGE per family that still owes,
- *      taken from that family's most recent non-void invoice. That, and only
- *      that, is what the family's balance is built from.
+ * IT DELIBERATELY DOES NOT SET BALANCES, and no future version should try.
+ * An earlier version did: it read each family's most recent non-void statement
+ * and charged whatever it showed as unpaid. That produced $43,282.50 of
+ * receivables when TutorBird's own Family Accounts screen said $10,823.50.
+ * The reason is that THIS EXPORT CONTAINS NO PAYMENTS. A family that paid
+ * after its last statement leaves no trace here — there is no later invoice to
+ * record it — so every such payment was counted as live debt. It also can't
+ * see the $22,081.75 of prepaid credit families were holding, so households
+ * that were *ahead* looked like they owed.
+ *
+ * Current balances come from TutorBird's Family Accounts export (balance per
+ * family) or its Transactions export (the actual charge/payment ledger).
+ * Neither is this file.
  *
  * Numbered TB-#### rather than the LC-#### the app issues, so migrated history
  * is distinguishable at a glance and `nextLcNumber` (which scans LC- only) is
@@ -42,10 +52,6 @@ if (!CSV_PATH || !fs.existsSync(CSV_PATH)) {
   console.error('Usage: node scripts/import-tutorbird-invoices.mjs <csv-path> [--commit]');
   process.exit(1);
 }
-
-// Stamped into every opening-balance charge. Re-running looks for this before
-// creating anything, which is what stops a second run from charging twice.
-const OPENING_MARKER = '[tutorbird-opening-balance]';
 
 /* ── CSV parsing ─────────────────────────────────────────────────────────── */
 
@@ -253,12 +259,6 @@ const priorTb = await withRetry('load prior invoices', () => prisma.invoice.find
 const priorKeys = new Set(priorTb.map(i => [i.familyId, i.date.toISOString().slice(0, 10), Number(i.totalAmount).toFixed(2), i.dateRange || ''].join('|')));
 let nextTbNumber = priorTb.reduce((max, i) => Math.max(max, parseInt(i.invoiceNumber.slice(3), 10) || 0), 0) + 1;
 
-const priorOpenings = await withRetry('load opening balances', () => prisma.transaction.findMany({
-  where: { description: { contains: OPENING_MARKER } },
-  select: { familyId: true, amount: true },
-}));
-const familiesWithOpening = new Set(priorOpenings.map(t => t.familyId));
-
 /* ── Report ──────────────────────────────────────────────────────────────── */
 
 const toCreate = [...households.values()].filter(h => h.willCreate);
@@ -279,17 +279,11 @@ console.log(`  to import                 ${importable.length}  (face value $${fa
 console.log(`  belonging to skipped fams ${skippedInvoices}`);
 console.log(`  of those, void/cancelled  ${importable.filter(i => i.isVoid).length}`);
 console.log(`  of those, already paid    ${importable.filter(i => i.isPaid && !i.isVoid).length}`);
-console.log('\nOpening balances (this IS what moves the ledger):');
-console.log(`  families owing            ${owingAll.length}`);
-console.log(`  total to put on the books $${owingTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`);
-console.log(`\n  Face value of every row is $${faceValue.toLocaleString('en-US', { minimumFractionDigits: 2 })} — the difference is`);
-console.log(`  balance restated across statements, which is why it is not charged.`);
-
-console.log('\nWho owes what:');
-owingAll.sort((a, b) => b.owes - a.owes).forEach(h => {
-  const tag = h.existingFamilyId ? '' : ' (new)';
-  console.log(`  ${('$' + h.owes.toLocaleString('en-US', { minimumFractionDigits: 2 })).padStart(12)}  ${h.existingName || h.name}${tag}  — last statement ${h.latest.date.toISOString().slice(0, 10)}`);
-});
+console.log('\nLedger: untouched. No charge, payment or credit is written.');
+console.log(`  These statements total $${faceValue.toLocaleString('en-US', { minimumFractionDigits: 2 })} at face value and would say`);
+console.log(`  $${owingTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} is outstanding. Both are wrong — the export carries no payments, so`);
+console.log(`  anything settled after a family's last statement still looks unpaid here.`);
+console.log(`  Balances come from the Family Accounts export. See the header.`);
 
 if (warnings.length) {
   console.log(`\nNeeds review (${warnings.length}):`);
@@ -310,7 +304,7 @@ if (!COMMIT) {
   process.exit(0);
 }
 
-const created = { families: 0, invoices: 0, openings: 0, openingTotal: 0, skippedExisting: 0 };
+const created = { families: 0, invoices: 0, skippedExisting: 0 };
 
 for (const hh of households.values()) {
   if (!hh.existingFamilyId && !hh.willCreate) continue;
@@ -356,21 +350,8 @@ for (const hh of households.values()) {
       created.invoices++;
     }
 
-    // The only ledger write in the whole script.
-    if (hh.owes > 0 && !familiesWithOpening.has(familyId)) {
-      await prisma.transaction.create({
-        data: {
-          familyId,
-          amount: hh.owes,
-          type: 'CHARGE',
-          date: hh.latest.date,
-          description: `Opening balance carried over from TutorBird as of ${hh.latest.date.toISOString().slice(0, 10)} ${OPENING_MARKER}`,
-        },
-      });
-      familiesWithOpening.add(familyId);
-      created.openings++;
-      created.openingTotal += hh.owes;
-    }
+    // No ledger write here, on purpose — see the header. `hh.owes` is only
+    // used to decide which vanished households are worth creating at all.
   });
 
   process.stdout.write('.');
@@ -379,6 +360,6 @@ for (const hh of households.values()) {
 console.log(`\n\nDone.`);
 console.log(`  families created   ${created.families}`);
 console.log(`  invoices imported  ${created.invoices}${created.skippedExisting ? ` (${created.skippedExisting} already present, skipped)` : ''}`);
-console.log(`  opening balances   ${created.openings}  totalling $${created.openingTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}\n`);
+console.log(`  ledger untouched   — balances come from the Family Accounts export, not this file\n`);
 
 await prisma.$disconnect();
