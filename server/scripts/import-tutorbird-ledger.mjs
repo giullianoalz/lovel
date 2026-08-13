@@ -44,6 +44,11 @@ import prisma from '../src/config/database.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const COMMIT = process.argv.includes('--commit');
+// Households in the paste that exist nowhere in the app — not as students, not
+// as one of the archived shells the invoice import left behind. Off by default:
+// creating a family is how a typo in a surname becomes a permanent duplicate,
+// so it takes saying so out loud.
+const CREATE_MISSING = process.argv.includes('--create-missing');
 const TXT_PATH = process.argv[2] && !process.argv[2].startsWith('--')
   ? process.argv[2]
   : path.join(__dirname, 'data', 'tutorbird-ledger', 'families.txt');
@@ -325,15 +330,23 @@ const studentByName = new Map(students.map(s => [s.fullName.toLowerCase(), s]));
 // Karsen Walker (a real student, matched by name above) and Jeremiah Walker
 // (never in the roster) — without this filter, Jeremiah's whole ledger was
 // silently merged into Karsen's family on this script's first production run.
+// `startsWith` rather than an exact match: when the invoice import created an
+// archived household whose surname was already taken, it disambiguated with
+// the guardian's first name — "Scott Family (Anna)", "Brooks Family (Andrew)".
+// Matching only "<Surname> Family" would miss those and create a second copy
+// of a household that already exists to hold that family's debt.
 const surnames = [...new Set(results.map(r => r.surname).filter(Boolean))];
 const famsBySurname = new Map();
 for (const name of surnames) {
   const hits = await withRetry(`match ${name}`, () => prisma.family.findMany({
-    where: { name: { equals: `${name} Family`, mode: 'insensitive' } },
+    where: { name: { startsWith: `${name} Family`, mode: 'insensitive' } },
     select: { id: true, name: true, _count: { select: { members: true } } },
   }));
   famsBySurname.set(name, { empty: hits.filter(h => h._count.members === 0), populated: hits.filter(h => h._count.members > 0) });
 }
+
+/** First name of each guardian on the block, for the "(Anna)" style match. */
+const guardianGivenNames = (r) => (r.contactNames || []).map(n => clean(n).split(' ')[0]).filter(Boolean);
 
 for (const r of results) {
   const found = r.studentNames.map(n => studentByName.get(n.toLowerCase())).filter(Boolean);
@@ -355,15 +368,24 @@ for (const r of results) {
     r.matchedVia = `student ${found[0].fullName}`;
   } else {
     const { empty, populated } = famsBySurname.get(r.surname) || { empty: [], populated: [] };
-    if (empty.length === 1) {
-      r.familyId = empty[0].id;
-      r.familyName = empty[0].name;
-      r.matchedVia = `family name "${empty[0].name}" (no student of theirs is in the app)`;
+    // A guardian's first name in the household name is what tells two archived
+    // "<Surname> Family" records apart, so try that before giving up — the
+    // invoice import named them exactly this way.
+    const byGuardian = empty.filter(f => guardianGivenNames(r).some(g => f.name.toLowerCase().includes(`(${g.toLowerCase()})`)));
+    const exact = empty.filter(f => f.name.toLowerCase() === `${r.surname} Family`.toLowerCase());
+    const pick = byGuardian.length === 1 ? byGuardian[0] : (exact.length === 1 && empty.length === 1 ? exact[0] : null);
+
+    if (pick) {
+      r.familyId = pick.id;
+      r.familyName = pick.name;
+      r.matchedVia = `family name "${pick.name}" (no student of theirs is in the app)`;
     } else if (empty.length > 1) {
-      r.matchProblem = `no student matched and ${empty.length} empty "${r.surname} Family" households exist — too ambiguous to guess`;
+      r.matchProblem = `no student matched and ${empty.length} empty "${r.surname} Family" households exist (${empty.map(f => f.name).join(', ')}) — no guardian name tells them apart`;
     } else if (populated.length > 0) {
+      r.needsFamily = true;
       r.matchProblem = `no student matched, and "${r.surname} Family" already has real members — almost certainly a different, unrelated household with the same surname`;
     } else {
+      r.needsFamily = true;
       r.matchProblem = `no student matched and no family called "${r.surname} Family" exists`;
     }
   }
@@ -440,6 +462,41 @@ for (const r of results) {
   else blockSignatures.set(signature, r.blockIndex);
 }
 
+/* ── Households with nowhere to live ──────────────────────────────────────── */
+
+// Only blocks that parsed and reconciled cleanly and simply have no family —
+// never a parse failure, a drifting balance, or a duplicate paste. Each gets a
+// proposed name here so the dry run can show it before anything is written.
+const takenNames = new Set(
+  (await withRetry('load family names', () => prisma.family.findMany({ select: { name: true } }))).map(f => f.name.toLowerCase())
+);
+const toCreate = results.filter(r => r.needsFamily && !r.problems.length && !r.mismatches.length);
+for (const r of toCreate) {
+  const base = `${r.surname} Family`;
+  if (!takenNames.has(base.toLowerCase())) {
+    r.proposedName = base;
+  } else {
+    // Same convention the invoice import used, so the two importers can find
+    // each other's households instead of each making their own.
+    const given = guardianGivenNames(r).find(g => !takenNames.has(`${base} (${g})`.toLowerCase()));
+    r.proposedName = given ? `${base} (${given})` : `${base} [block ${r.blockIndex}]`;
+  }
+  takenNames.add(r.proposedName.toLowerCase());
+}
+
+if (CREATE_MISSING && COMMIT) {
+  for (const r of toCreate) {
+    const family = await withRetry(`create ${r.proposedName}`, () => prisma.family.create({
+      data: { name: r.proposedName, tags: ['archived', 'tutorbird-legacy'] },
+    }));
+    r.familyId = family.id;
+    r.familyName = family.name;
+    r.matchedVia = `newly created archived household "${family.name}"`;
+    r.matchProblem = null;
+    r.createdFamily = true;
+  }
+}
+
 const clean_ = results.filter(r => !r.problems.length && !r.mismatches.length && !r.matchProblem);
 const bad = results.filter(r => r.problems.length || r.mismatches.length || r.matchProblem);
 
@@ -499,6 +556,15 @@ if (bad.length) console.log('Fix or omit the refused blocks and re-run — nothi
 const totalOwed = clean_.reduce((s, r) => s + Math.max(0, r.finalOwed), 0);
 const totalCredit = clean_.reduce((s, r) => s + Math.max(0, -r.finalOwed), 0);
 console.log(`\nAcross the ${clean_.length} clean families: $${totalOwed.toFixed(2)} owed, $${totalCredit.toFixed(2)} in credit.`);
+
+if (toCreate.length && !(CREATE_MISSING && COMMIT)) {
+  console.log(`\n${toCreate.length} households reconcile but exist nowhere in the app.`);
+  console.log(`Re-run with --create-missing --commit to create them as archived shells:`);
+  for (const r of toCreate) {
+    const bal = r.finalOwed >= 0 ? `$${r.finalOwed.toFixed(2)} owed` : `$${Math.abs(r.finalOwed).toFixed(2)} in credit`;
+    console.log(`  ${r.proposedName.padEnd(32)} ${String(r.rows.length).padStart(3)} rows, ${bal}`);
+  }
+}
 
 /* ── Write ───────────────────────────────────────────────────────────────── */
 
