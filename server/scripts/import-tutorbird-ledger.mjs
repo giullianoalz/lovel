@@ -90,7 +90,12 @@ const parseDate = (v) => {
   return isNaN(d) ? null : d;
 };
 
-const MONEY_LINE = /^(Charge|Payment|Refund|Discount|Credit)\s+\$[\d,]+\.\d{2}$/;
+// The amount is parenthesized on a Discount or a Refund row — TutorBird's
+// "Charges & Discounts" / "Payments & Refunds" columns print a reduction in
+// parens regardless of which of the two rows in that pair it is. The parens
+// carry no sign information beyond that; the actual effect on the balance
+// still comes from AMOUNT_TYPE + INCREASES_OWED below.
+const MONEY_LINE = /^(Charge|Payment|Refund|Discount|Credit)\s+\(?\$[\d,]+\.\d{2}\)?$/;
 const AMOUNT_TYPE = { Charge: 'CHARGE', Payment: 'PAYMENT', Refund: 'REFUND', Discount: 'CREDIT', Credit: 'CREDIT' };
 
 const withRetry = async (label, fn, attempts = 6) => {
@@ -123,10 +128,13 @@ const blocks = blockStarts.map((start, i) => allLines.slice(start, blockStarts[i
 /* ── Parse one family block ──────────────────────────────────────────────── */
 
 const SECTION_HEADERS = ['Students', 'Family Contacts', 'Tags'];
-// 'Waiting' belongs here with 'Active'/'Inactive': it is an enrolment status
-// printed under a student's name, and leaving it out made the Woods block
-// import two students called "Waiting".
-const NOISE_LINES = new Set(['Family Details', 'Active', 'Inactive', 'Waiting', 'Invoice Recipient', 'Recurring', 'Lesson', '']);
+// Enrolment status words printed under a student's name in the Students
+// section. Each one missing here produces a fake "student" with that word as
+// its name — 'Waiting' did exactly that for the Woods block, 'Trial' for
+// Owens. Confirmed complete by scanning every status word across a 90-family
+// paste; if TutorBird has others, a family will fail to match and the report
+// will name the bogus "student" so a new one is easy to spot and add here.
+const NOISE_LINES = new Set(['Family Details', 'Active', 'Inactive', 'Waiting', 'Trial', 'Invoice Recipient', 'Recurring', 'Lesson', '']);
 const TABLE_HEADER = ['Date', 'Student', 'Description', 'Charges & Discounts', 'Payments & Refunds', 'Sales Tax', 'Balance'];
 
 /**
@@ -155,6 +163,16 @@ const toGivenSurname = (lastFirst) => {
 };
 
 /**
+ * TutorBird's Step Up/FES marker, same as import-tutorbird-contacts.mjs's
+ * stripEmaMarker — but here it can land on a STUDENT's own name column too
+ * ("Branca EMA, Arrow"), not only a guardian's, so it has to be stripped
+ * before the surname is used to look up a family by name. The existing
+ * archived "Branca Family" (created by the invoice import, which does strip
+ * this) would otherwise never be found under "Branca EMA Family".
+ */
+const stripEma = (s) => clean(s).replace(/\s*\bEMA\b\s*/gi, ' ').replace(/\s+/g, ' ').trim();
+
+/**
  * The transaction table: a run of chunks, each starting at a date line
  * (M/D/YYYY) and ending just before the next date line or end of block.
  * Within a chunk: the money line ("Charge $X.XX" etc.) and, immediately after
@@ -176,8 +194,8 @@ const parseTransactions = (lines, studentNames) => {
 
     const moneyLineIdx = chunk.findIndex(l => MONEY_LINE.test(l));
     if (moneyLineIdx === -1) { problems.push(`no Charge/Payment/Refund line found near ${chunk[0]}`); continue; }
-    const [, kind, ] = chunk[moneyLineIdx].match(/^(Charge|Payment|Refund|Discount|Credit)\s+\$([\d,]+\.\d{2})$/) || [];
-    const amount = parsePlainMoney(chunk[moneyLineIdx].replace(/^(Charge|Payment|Refund|Discount|Credit)\s+/, ''));
+    const [, kind, ] = chunk[moneyLineIdx].match(/^(Charge|Payment|Refund|Discount|Credit)\s+\(?\$([\d,]+\.\d{2})\)?$/) || [];
+    const amount = parsePlainMoney(chunk[moneyLineIdx].replace(/^(Charge|Payment|Refund|Discount|Credit)\s+\(?/, '').replace(/\)$/, ''));
 
     let owedAfter = null;
     for (let j = moneyLineIdx + 1; j < chunk.length; j++) {
@@ -222,13 +240,21 @@ const parseTransactions = (lines, studentNames) => {
  * A gap that MOVES is the opposite — a row misread, or a row missing from the
  * middle. That is never patched over; the family is refused.
  */
+// Must match BALANCE_INCREASING_TYPES / BALANCE_DECREASING_TYPES in
+// src/services/billingCredit.service.js — that is what actually computes a
+// family's balance in the running app, so this reconciliation is only
+// meaningful if it moves the ledger the same way. REFUND belongs with CHARGE,
+// not with PAYMENT: it reverses an earlier payment, so it puts money back on
+// what the family owes rather than taking it off.
+const INCREASES_OWED = new Set(['CHARGE', 'REFUND']);
+
 const reconcile = (rows) => {
   const chrono = [...rows].reverse();
   let running = 0;
   const offsets = [];
   const replay = [];
   for (const r of chrono) {
-    running += r.type === 'CHARGE' ? r.amount : -r.amount;
+    running += INCREASES_OWED.has(r.type) ? r.amount : -r.amount;
     offsets.push(Math.round((r.owedAfter - running) * 100) / 100);
     replay.push({ ...r, recomputed: running });
   }
@@ -267,7 +293,7 @@ for (const [i, block] of blocks.entries()) {
     blockIndex: i + 1,
     studentNames,
     // Surname of the first student, for the family-name fallback below.
-    surname: (studentLastFirst[0] || '').split(',')[0].trim(),
+    surname: stripEma((studentLastFirst[0] || '').split(',')[0]),
     contactNames: header['Family Contacts'].map(toGivenSurname),
     tags: header.Tags,
     rows: chrono,
@@ -290,8 +316,15 @@ const studentByName = new Map(students.map(s => [s.fullName.toLowerCase(), s]));
 // Families the roster import never populated — the archived households created
 // to hold legacy debt have a name and no members at all, so no student of
 // theirs can ever match. They are reached by family name instead, and only
-// when exactly one family carries it (this roster has three "Rodriguez
+// when exactly one EMPTY family carries it (this roster has three "Rodriguez
 // Family", so an ambiguous surname must never be guessed at).
+//
+// Restricted to families with zero members on purpose: a name-only guess must
+// never land on a family that already has a real student, because a shared
+// surname does not mean a shared household. This roster has an unrelated
+// Karsen Walker (a real student, matched by name above) and Jeremiah Walker
+// (never in the roster) — without this filter, Jeremiah's whole ledger was
+// silently merged into Karsen's family on this script's first production run.
 const surnames = [...new Set(results.map(r => r.surname).filter(Boolean))];
 const famsBySurname = new Map();
 for (const name of surnames) {
@@ -299,7 +332,7 @@ for (const name of surnames) {
     where: { name: { equals: `${name} Family`, mode: 'insensitive' } },
     select: { id: true, name: true, _count: { select: { members: true } } },
   }));
-  famsBySurname.set(name, hits);
+  famsBySurname.set(name, { empty: hits.filter(h => h._count.members === 0), populated: hits.filter(h => h._count.members > 0) });
 }
 
 for (const r of results) {
@@ -321,13 +354,15 @@ for (const r of results) {
     r.familyName = found[0].familyMembers.find(m => m.familyId === r.familyId).family.name;
     r.matchedVia = `student ${found[0].fullName}`;
   } else {
-    const hits = famsBySurname.get(r.surname) || [];
-    if (hits.length === 1) {
-      r.familyId = hits[0].id;
-      r.familyName = hits[0].name;
-      r.matchedVia = `family name "${hits[0].name}" (no student of theirs is in the app)`;
-    } else if (hits.length > 1) {
-      r.matchProblem = `no student matched and ${hits.length} families are called "${r.surname} Family" — too ambiguous to guess`;
+    const { empty, populated } = famsBySurname.get(r.surname) || { empty: [], populated: [] };
+    if (empty.length === 1) {
+      r.familyId = empty[0].id;
+      r.familyName = empty[0].name;
+      r.matchedVia = `family name "${empty[0].name}" (no student of theirs is in the app)`;
+    } else if (empty.length > 1) {
+      r.matchProblem = `no student matched and ${empty.length} empty "${r.surname} Family" households exist — too ambiguous to guess`;
+    } else if (populated.length > 0) {
+      r.matchProblem = `no student matched, and "${r.surname} Family" already has real members — almost certainly a different, unrelated household with the same surname`;
     } else {
       r.matchProblem = `no student matched and no family called "${r.surname} Family" exists`;
     }
@@ -343,7 +378,36 @@ const priorTx = targetFamilyIds.length
       select: { id: true, familyId: true, date: true, type: true, amount: true, description: true },
     }))
   : [];
-const priorKeys = new Set(priorTx.map(t => [t.familyId, t.date.toISOString().slice(0, 10), t.type, Number(t.amount).toFixed(2), t.description].join('|')));
+
+/**
+ * A COUNT per key, not presence/absence — TutorBird families do carry two
+ * genuinely separate transactions that are identical in every field this key
+ * looks at (same date, type, amount, and a bare "Payment $50.00" line has no
+ * further description text to tell them apart). A plain Set idempotency check
+ * silently ate the second one on this script's first production run: it
+ * looked "already imported" the instant the first one was written, moments
+ * earlier in the same pass, and 55 came in short their real balance.
+ *
+ * The row-key builder below is shared by the report and the write loop so
+ * both partition a family's rows into "already there" / "new" the same way —
+ * the Nth occurrence of a key in this run corresponds to the Nth existing DB
+ * row with that key, and only occurrences beyond that count are new.
+ */
+const rowKey = (familyId, date, type, amount, description) =>
+  [familyId, date.toISOString().slice(0, 10), type, amount.toFixed(2), description].join('|');
+
+const priorCounts = new Map();
+for (const t of priorTx) {
+  const key = [t.familyId, t.date.toISOString().slice(0, 10), t.type, Number(t.amount).toFixed(2), t.description].join('|');
+  priorCounts.set(key, (priorCounts.get(key) || 0) + 1);
+}
+
+/** True if this occurrence of `key` is new — call once per row, in order, with a fresh `usedCounts` per pass. */
+const claimIsNew = (key, usedCounts) => {
+  const used = usedCounts.get(key) || 0;
+  usedCounts.set(key, used + 1);
+  return used >= (priorCounts.get(key) || 0);
+};
 
 // One row per family, kept separate from priorKeys: an opening balance is
 // REPLACED wholesale when it changes (see below), never matched key-by-key
@@ -361,8 +425,31 @@ console.log(`\n${COMMIT ? '=== COMMITTING ===' : '=== DRY RUN (nothing will be w
 console.log(`\nFile: ${TXT_PATH}`);
 console.log(`Family blocks found: ${results.length}\n`);
 
+// The same family pasted twice — easy to do when collecting 90 households by
+// hand, and it happened on the first production run (Carroll, whose balance
+// came out at $40 instead of $20). Two blocks resolving to one family with an
+// identical set of rows is a re-paste, not two windows of history, so the
+// later one is dropped. The per-key counting below cannot catch this on its
+// own: with nothing yet in the database both blocks legitimately look new.
+const blockSignatures = new Map();
+for (const r of results) {
+  if (r.problems.length || r.mismatches.length || r.matchProblem) continue;
+  const signature = [r.familyId, ...r.rows.map(row => rowKey(r.familyId, row.date, row.type, row.amount, row.description))].join('||');
+  const firstSeen = blockSignatures.get(signature);
+  if (firstSeen) r.matchProblem = `identical to block ${firstSeen} (same family, same ${r.rows.length} rows) — pasted twice, this copy ignored`;
+  else blockSignatures.set(signature, r.blockIndex);
+}
+
 const clean_ = results.filter(r => !r.problems.length && !r.mismatches.length && !r.matchProblem);
 const bad = results.filter(r => r.problems.length || r.mismatches.length || r.matchProblem);
+
+// Shared across every block, not reset per family: this roster has families
+// reached by more than one pasted block (e.g. one page per student in the
+// household), and a key must be claimed against the family's total count
+// across ALL of this run's blocks — a fresh counter per block would let two
+// blocks each think a shared-looking row is "the new one" and duplicate it.
+const reportUsed = new Map();
+const previewOpeningByFamily = new Map(priorOpeningByFamily);
 
 for (const r of results) {
   const label = r.familyName || r.studentNames.join(', ') || `block ${r.blockIndex}`;
@@ -372,7 +459,11 @@ for (const r of results) {
     continue;
   }
   if (r.matchProblem) {
-    console.log(`✗ ${label} — ${r.matchProblem}`);
+    // The reconciliation already ran even though there's no family to attach
+    // it to — showing the amount here is what turns "not in the app" into a
+    // decision instead of a shrug.
+    const balNote = r.mismatches.length ? ' — balance also does not reconcile, would need review either way' : ` — would carry $${Math.abs(r.finalOwed).toFixed(2)} ${r.finalOwed >= 0 ? 'owed' : 'in credit'}`;
+    console.log(`✗ ${label} — ${r.matchProblem}${balNote}`);
     continue;
   }
   if (r.mismatches.length) {
@@ -380,17 +471,23 @@ for (const r of results) {
     r.mismatches.forEach(m => console.log(`    ${m}`));
     continue;
   }
-  const newRows = r.rows.filter(row => !priorKeys.has([r.familyId, row.date.toISOString().slice(0, 10), row.type, row.amount.toFixed(2), `${row.description} ${MARKER}`].join('|')));
-  console.log(`✓ ${label} — ${r.rows.length} rows reconcile, balance owed: $${r.finalOwed.toFixed(2)} (${newRows.length} new, ${r.rows.length - newRows.length} already imported)`);
-  const priorOpening = r.familyId ? priorOpeningByFamily.get(r.familyId) : null;
+  const newRowCount = r.rows.filter(row => claimIsNew(rowKey(r.familyId, row.date, row.type, row.amount, `${row.description} ${MARKER}`), reportUsed)).length;
+  console.log(`✓ ${label} — ${r.rows.length} rows reconcile, balance owed: $${r.finalOwed.toFixed(2)} (${newRowCount} new, ${r.rows.length - newRowCount} already imported)`);
+  // A local copy for preview purposes only — mutating the real map here would
+  // make the write loop below (which runs after this, sharing the same
+  // process in a --commit run) try to delete a transaction id that only ever
+  // existed on screen.
+  const priorOpening = r.familyId ? previewOpeningByFamily.get(r.familyId) : null;
   if (r.openingBalance) {
     const kind = r.openingBalance > 0 ? 'owed' : 'in credit';
     const signedNew = r.openingBalance;
     const signedPrior = priorOpening ? (priorOpening.type === 'CREDIT' ? -Number(priorOpening.amount) : Number(priorOpening.amount)) : null;
     const change = signedPrior === null ? '' : (Math.abs(signedPrior - signedNew) < 0.005 ? ' (unchanged)' : ` (replaces $${Math.abs(signedPrior).toFixed(2)} ${signedPrior > 0 ? 'owed' : 'in credit'})`);
     console.log(`      + opening balance $${Math.abs(r.openingBalance).toFixed(2)} ${kind}${change} — history before ${r.rows[0].date.toISOString().slice(0, 10)} is not in the paste`);
+    if (r.familyId) previewOpeningByFamily.set(r.familyId, { amount: Math.abs(r.openingBalance), type: r.openingBalance > 0 ? 'CHARGE' : 'CREDIT' });
   } else if (priorOpening) {
     console.log(`      + this paste now covers the family's full history — removes the $${Number(priorOpening.amount).toFixed(2)} opening balance from before`);
+    if (r.familyId) previewOpeningByFamily.delete(r.familyId);
   }
   if (r.matchedVia?.startsWith('family name')) console.log(`      matched via ${r.matchedVia}`);
   if (r.notFoundStudents.length) console.log(`      note: not in the app, their rows carry no student — ${r.notFoundStudents.join(', ')}`);
@@ -406,12 +503,24 @@ console.log(`\nAcross the ${clean_.length} clean families: $${totalOwed.toFixed(
 /* ── Write ───────────────────────────────────────────────────────────────── */
 
 if (!COMMIT) {
+  // Post-commit verification needs to check the exact family a block resolved
+  // to — this roster has same-named families (e.g. two "Rodriguez Family"),
+  // so checking by name after the fact would be ambiguous. Opt-in via env var
+  // since it's a verification aid, not part of the normal dry run.
+  if (process.env.DUMP_MATCHES) {
+    fs.writeFileSync(process.env.DUMP_MATCHES, JSON.stringify(
+      clean_.map(r => ({ family: r.familyName, familyId: r.familyId, expected: r.finalOwed })), null, 1
+    ));
+    console.log(`\nWrote ${clean_.length} matches to ${process.env.DUMP_MATCHES}`);
+  }
   console.log('\nRe-run with --commit to apply (only the clean families above are written).\n');
   await prisma.$disconnect();
   process.exit(0);
 }
 
 const created = { families: 0, transactions: 0, skippedExisting: 0, openingsReplaced: 0 };
+// Shared across every block for the same reason as reportUsed above.
+const writeUsed = new Map();
 
 for (const r of clean_) {
   await withRetry(r.familyName, async () => {
@@ -424,22 +533,31 @@ for (const r of clean_) {
     if (priorOpening) {
       await prisma.transaction.delete({ where: { id: priorOpening.id } });
       created.openingsReplaced++;
+      priorOpeningByFamily.delete(r.familyId);
     }
     if (r.openingBalance) {
       const description = `Opening balance carried into ${r.rows[0].date.toISOString().slice(0, 10)} (earlier history not exported) ${OPENING_MARKER} ${MARKER}`;
       const type = r.openingBalance > 0 ? 'CHARGE' : 'CREDIT';
       const amount = Math.abs(r.openingBalance);
-      await prisma.transaction.create({
+      const opening = await prisma.transaction.create({
         data: { familyId: r.familyId, amount, type, date: r.rows[0].date, description },
       });
       created.transactions++;
+      // Keeps a second block for the SAME family in this run (a real case —
+      // Carroll appears twice) from re-deriving its own opening balance and
+      // stacking a second one: the next block sees this one and replaces it.
+      // NOTE: this makes the second block's figure win outright rather than
+      // combine the two — correct for a literal re-paste of the same page,
+      // but not a general answer for two DIFFERENT windows of one family's
+      // history landing in one run. That situation hasn't occurred yet; if it
+      // does, the dry run's per-block opening-balance lines make it visible
+      // before anything is written.
+      priorOpeningByFamily.set(r.familyId, opening);
     }
 
     for (const row of r.rows) {
       const description = `${row.description} ${MARKER}`;
-      const key = [r.familyId, row.date.toISOString().slice(0, 10), row.type, row.amount.toFixed(2), description].join('|');
-      if (priorKeys.has(key)) { created.skippedExisting++; continue; }
-      priorKeys.add(key);
+      if (!claimIsNew(rowKey(r.familyId, row.date, row.type, row.amount, description), writeUsed)) { created.skippedExisting++; continue; }
 
       await prisma.transaction.create({
         data: {
