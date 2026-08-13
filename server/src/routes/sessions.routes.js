@@ -24,6 +24,7 @@ import {
   cancelStudentSession,
   listCancellations,
   resolveCancellation,
+  setSessionPayApproval,
 } from '../controllers/sessions.controller.js';
 
 const router = Router();
@@ -77,5 +78,10 @@ router.post('/:id/notes', authenticate, requireRole('ADMIN', 'TEACHER'), addSess
 
 // POST /api/sessions/:id/cancel-student — Cancel one student's spot (Admin/front desk)
 router.post('/:id/cancel-student', authenticate, requireRole('ADMIN'), validate(cancelStudentSchema), cancelStudentSession);
+
+// POST /api/sessions/pay-approval — Pay for classes nobody closed out (Admin only).
+// Authorising money against no register is an admin decision and nobody else's,
+// least of all the teacher being paid for the hour.
+router.post('/pay-approval', authenticate, requireRole('ADMIN'), setSessionPayApproval);
 
 export default router;

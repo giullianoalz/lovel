@@ -124,6 +124,7 @@ model User {
   payRates               TeacherPayRate[]
   workShifts             WorkShift[]               @relation("StaffShifts")
   shiftsScheduled        WorkShift[]               @relation("ShiftScheduledBy")
+  sessionPayApprovals    Session[]                 @relation("SessionPayApprovals")
   spaceReservations      SpaceReservation[]
   tempPickupAuths        TempPickupAuth[]
   pickupAuthsAsStudent   TempPickupAuth[]          @relation("PickupAuthStudent")
@@ -313,6 +314,20 @@ model Session {
   // Which step of the cascade produced `paidRate` ("category", "flat", …), kept
   // so the payslip can still explain a frozen rate months later.
   paidRateSource  String?               @map("paid_rate_source") @db.VarChar(20)
+  // An admin vouching that this hour was worked, when nobody closed it out.
+  //
+  // A class is normally confirmed by the teacher: marked complete, register
+  // saved. Teachers forget, and the hour was still taught — so payroll used to
+  // flag it and then refuse to pay it, leaving the only fix outside the system
+  // (pay them by hand, and hope somebody remembers). This is the way back in:
+  // an admin says "I know this ran, pay it", and the session becomes payable
+  // without a register ever existing.
+  //
+  // Who and when, not a boolean: this is somebody authorising money against no
+  // evidence, so the record has to name them. Null means nobody has vouched.
+  payApprovedById String?               @map("pay_approved_by") @db.Uuid
+  payApprovedAt   DateTime?             @map("pay_approved_at") @db.Timestamptz(6)
+  payApprovedBy   User?                 @relation("SessionPayApprovals", fields: [payApprovedById], references: [id])
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
   behaviorLogs    BehaviorLog[]

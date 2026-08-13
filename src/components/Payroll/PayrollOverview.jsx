@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Wallet, ChevronLeft, ChevronRight, AlertTriangle, Pencil, Users, Clock, DollarSign, Tags } from 'lucide-react';
 import PayCategoriesPanel from './PayCategoriesPanel';
+import UnconfirmedSessionsPanel from './UnconfirmedSessionsPanel';
 import { database } from '../../lib/database';
 import { useAsyncData } from '../../lib/useAsyncData';
 import ErrorBanner from '../Layout/ErrorBanner';
@@ -32,6 +33,7 @@ const PayrollOverview = () => {
   const [year, setYear] = useState(today.getFullYear());
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [showCategories, setShowCategories] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   const { data, loading, error, retry } = useAsyncData(
     () => database.fetchPayrollSummary(month, year),
@@ -132,15 +134,24 @@ const PayrollOverview = () => {
           )}
 
           {totals.unconfirmedCount > 0 && (
-            <div className="po-warning">
+            <div className="po-warning po-warning-actionable">
               <AlertTriangle size={16} />
-              <span>
-                <strong>{totals.unconfirmedCount} past class{totals.unconfirmedCount === 1 ? '' : 'es'}</strong>
-                {' '}({totals.unconfirmedHours} h) {totals.unconfirmedCount === 1 ? 'was' : 'were'} never
-                closed out — not marked complete, or complete with no register saved. Payroll can't
-                pay an hour nobody confirmed, so the total above excludes them. Close them on the
-                calendar and they will price themselves.
-              </span>
+              <div className="po-warning-body">
+                <span>
+                  <strong>{totals.unconfirmedCount} past class{totals.unconfirmedCount === 1 ? '' : 'es'}</strong>
+                  {' '}({totals.unconfirmedHours} h) {totals.unconfirmedCount === 1 ? 'was' : 'were'} never
+                  closed out — not marked complete, or complete with no register saved. They are not
+                  in the total above. Either the teacher closes them on the calendar, or you confirm
+                  here that the class ran and payroll pays for it.
+                </span>
+                {/* The way out of "the teacher forgot and payroll won't pay".
+                    Per person rather than one button for the month: an admin
+                    can vouch for Charmaine's Tuesdays without also vouching for
+                    hours belonging to somebody they haven't spoken to. */}
+                <button className="po-approve-open" onClick={() => setApproving(true)}>
+                  Review and pay these hours
+                </button>
+              </div>
             </div>
           )}
 
@@ -311,6 +322,19 @@ const PayrollOverview = () => {
       {showCategories && (
         <PayCategoriesPanel
           onClose={() => { setShowCategories(false); retry(); }}
+        />
+      )}
+
+      {approving && (
+        <UnconfirmedSessionsPanel
+          rows={rows}
+          month={month}
+          monthName={MONTH_NAMES[month - 1]}
+          year={year}
+          onClose={() => setApproving(false)}
+          // Approving turns unpaid hours into paid ones, so every total on the
+          // page behind is now wrong until it re-reads the month.
+          onDone={retry}
         />
       )}
     </div>

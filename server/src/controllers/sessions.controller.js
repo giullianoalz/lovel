@@ -1360,3 +1360,83 @@ export const resolveCancellation = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * POST /api/sessions/pay-approval
+ * Pay for classes nobody closed out (Admin only).
+ *
+ * A class is normally confirmed by the teacher — marked complete, register
+ * saved — and payroll pays nothing without that. Teachers forget, and the hour
+ * was still taught, so payroll would flag it ("3 h not closed out") and then
+ * refuse to pay it: the only remedy was to settle up outside the system.
+ *
+ * This is the way back in. The admin vouches that the class ran, the session
+ * becomes payable with no register, and the approval is stamped with their name
+ * — it authorises money against no evidence, so it must never be anonymous.
+ *
+ * Body: { sessionIds: string[], approved?: boolean }
+ * `approved: false` withdraws it again, for the approval made by mistake.
+ */
+export const setSessionPayApproval = async (req, res, next) => {
+  try {
+    const { sessionIds, approved = true } = req.body;
+
+    if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Send the sessions to approve in sessionIds.',
+      });
+    }
+
+    // Only sessions that have actually happened. Approving next Tuesday's class
+    // would pay for a lesson nobody has taught yet, and an approval made in
+    // advance is exactly the one nobody re-checks afterwards.
+    const today = new Date(new Date().setHours(0, 0, 0, 0));
+    const targets = await prisma.session.findMany({
+      where: { id: { in: sessionIds }, date: { lte: today }, status: { not: 'CANCELLED' } },
+      select: { id: true, date: true, class: { select: { name: true, teacher: { select: { fullName: true } } } } },
+    });
+
+    if (targets.length === 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'None of those sessions can be approved — they are cancelled, or they have not happened yet.',
+      });
+    }
+
+    const ids = targets.map((s) => s.id);
+
+    await prisma.session.updateMany({
+      where: { id: { in: ids } },
+      data: approved
+        ? { payApprovedById: req.user.id, payApprovedAt: new Date() }
+        : { payApprovedById: null, payApprovedAt: null },
+    });
+
+    // Approving makes the hour payable, so its rate is pinned now, exactly as
+    // it would have been had the teacher closed the class out. Withdrawing
+    // releases it again — an hour that is no longer paid holds no rate.
+    if (approved) {
+      await freezeSessionRates(ids);
+    } else {
+      await clearFrozenRates({ sessionIds: ids });
+    }
+
+    // No audit table exists yet, so the log is the only trace of who authorised
+    // pay for a class with no register. Worth a real record if this is ever
+    // questioned.
+    console.log(
+      `[Payroll] ${req.user.email} ${approved ? 'approved' : 'withdrew'} pay for ${ids.length} unconfirmed session(s): ` +
+      targets.map((s) => `${s.class?.teacher?.fullName || '?'} ${s.date.toISOString().slice(0, 10)} ${s.class?.name || ''}`).join('; ')
+    );
+
+    res.json({
+      message: approved
+        ? `${ids.length} class${ids.length === 1 ? '' : 'es'} approved for pay.`
+        : `${ids.length} approval${ids.length === 1 ? '' : 's'} withdrawn.`,
+      count: ids.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

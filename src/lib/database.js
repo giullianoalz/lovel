@@ -678,6 +678,15 @@ export const database = {
   // Marks the session COMPLETED server-side. Payroll only counts sessions in this
   // status (plus real attendance), so scheduling a class must never pay a teacher —
   // only actually finishing it does.
+  // Pay for classes nobody closed out. The admin is vouching that the hour was
+  // taught when no register exists to prove it, so this is deliberately a
+  // separate, explicit call rather than a quiet side effect of anything else.
+  // No mock fallback — it moves real money.
+  setSessionPayApproval: async (sessionIds, approved = true) => {
+    const response = await api.post('/sessions/pay-approval', { sessionIds, approved });
+    return response.data;
+  },
+
   completeSession: async (sessionId) => {
     try {
       await api.put(`/sessions/${sessionId}`, { status: 'COMPLETED' });

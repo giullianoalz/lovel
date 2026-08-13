@@ -117,7 +117,10 @@ export const freezeSessionRates = async (sessionIds) => {
     const [categoryList, sessions] = await Promise.all([
       loadPayCategories(),
       prisma.session.findMany({
-        where: { id: { in: sessionIds }, status: 'COMPLETED', paidRate: null },
+        // Anything payable, not only COMPLETED: a session an admin vouched for
+        // is being paid too, so its rate has to be pinned the same way — or a
+        // later raise would reprice an hour that was already signed off.
+        where: { id: { in: sessionIds }, ...PAYABLE_SESSION, paidRate: null },
         select: {
           id: true, meetingUrl: true, payCategoryKey: true, payRateOverride: true,
           class: {
@@ -360,6 +363,11 @@ const PAYABLE_SESSION = {
   OR: [
     { status: 'COMPLETED', attendance: { some: { status: 'PRESENT' } } },
     { cancellations: { some: { hoursBeforeClass: { lt: CANCELLATION_WINDOW_HOURS } } } },
+    // 3. an admin vouched for it. Teachers forget to close a class out, and the
+    //    hour was still taught — without this the only remedy was to pay them
+    //    outside the system. Listed last because it is the one branch backed by
+    //    somebody's word rather than a record: see Session.payApprovedById.
+    { payApprovedAt: { not: null } },
   ],
 };
 
@@ -426,6 +434,8 @@ const PAID_SESSION_SELECT = {
   id: true, date: true, startTime: true, endTime: true, status: true,
   meetingUrl: true, payCategoryKey: true, payRateOverride: true,
   paidRate: true, paidRateSource: true,
+  payApprovedAt: true,
+  payApprovedBy: { select: { fullName: true } },
   attendance: { where: { status: 'PRESENT' }, select: { id: true } },
   cancellations: {
     where: { hoursBeforeClass: { lt: CANCELLATION_WINDOW_HOURS } },
@@ -438,13 +448,26 @@ const wasLateCancelled = (session) =>
   (session.cancellations?.length ?? 0) > 0 && (session.attendance?.length ?? 0) === 0;
 
 /**
+ * True when the only reason this hour is on the payslip is that an admin said so.
+ *
+ * Kept apart from the other two reasons because it is the one with no evidence
+ * behind it — no register, no late cancellation, just somebody's word. A payslip
+ * that shows it plainly is one an admin can defend; one that hides it is how a
+ * mistaken approval survives every review.
+ */
+const wasPayApproved = (session) =>
+  Boolean(session.payApprovedAt)
+  && (session.attendance?.length ?? 0) === 0
+  && (session.cancellations?.length ?? 0) === 0;
+
+/**
  * Turns one worked entry into a payslip line.
  *
  * Sessions and shifts differ in almost everything except the four numbers that
  * matter here — when, how long, at what rate, for how much — so they are
  * flattened into one shape and the screen renders a single list.
  */
-const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled }, context, categories) => {
+const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled, payApproved, payApprovedBy }, context, categories) => {
   const hours = sessionHours({ startTime, endTime });
   // A frozen rate wins outright: this hour was confirmed under a contract that
   // may since have changed, and re-resolving it would rewrite history.
@@ -465,6 +488,10 @@ const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categor
     // the class ran. Says so on the payslip so nobody reading it later has to
     // guess why an hour with no attendance was paid.
     lateCancelled: Boolean(lateCancelled),
+    // Paid on an admin's say-so, with no register behind it. Named on the line
+    // so the person who authorised it is visible months later.
+    payApproved: Boolean(payApproved),
+    payApprovedBy: payApprovedBy || null,
     category: categoryKey,
     categoryLabel: categories.get(categoryKey)?.label || (categoryKey ? categoryKey : 'Uncategorised'),
     categoryColor: categories.get(categoryKey)?.color || null,
@@ -651,6 +678,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
           categoryKey: sessionCategory(s, cls),
           override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
           lateCancelled: wasLateCancelled(s),
+          payApproved: wasPayApproved(s), payApprovedBy: s.payApprovedBy?.fullName,
         },
         context,
         categories
@@ -925,6 +953,7 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
           id: s.id, kind: 'session', date: s.date, startTime: s.startTime, endTime: s.endTime,
           title: cls.name, categoryKey: sessionCategory(s, cls), override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
           lateCancelled: wasLateCancelled(s),
+          payApproved: wasPayApproved(s), payApprovedBy: s.payApprovedBy?.fullName,
         }, context, categories));
       }
     }
