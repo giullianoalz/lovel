@@ -3,6 +3,7 @@ import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, Dollar
 import { startOfWeek } from 'date-fns';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
+import { parseDateOnly } from '../../lib/time';
 import './LessonPlanReview.css';
 
 const STATUS_LABEL = {
@@ -122,7 +123,10 @@ const LessonPlanReview = () => {
   const pendingCount = plans.filter(p => p.status === 'SUBMITTED').length;
 
   const plansByWeek = plans.reduce((acc, plan) => {
-    const key = new Date(plan.weekOf).toISOString();
+    // Teachers can pick any date to represent "the week" on a lesson plan, not
+    // necessarily a Monday — group by the Mon-Sun week it falls in, not the
+    // exact date, or every distinct pick becomes its own group.
+    const key = startOfWeek(parseDateOnly(plan.weekOf), { weekStartsOn: 1 }).toISOString();
     if (!acc[key]) acc[key] = [];
     acc[key].push(plan);
     return acc;
@@ -134,29 +138,49 @@ const LessonPlanReview = () => {
     let weekKey = 0;
 
     if (item.lessonPlan?.weekOf) {
-      // Snap any date to the Monday of that week
-      const date = new Date(item.lessonPlan.weekOf);
-      // We pass the raw UTC date and get the local Monday, but wait
-      // `weekOf` is typically stored as a date string. Let's ensure it's a Monday:
+      const date = parseDateOnly(item.lessonPlan.weekOf);
       const monday = startOfWeek(date, { weekStartsOn: 1 });
       weekLabel = `Week of ${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`;
       weekKey = monday.getTime();
     }
 
     if (!acc[weekKey]) {
-      acc[weekKey] = { label: weekLabel, pending: [], purchased: [] };
+      acc[weekKey] = { 
+        label: weekLabel, 
+        totalPending: 0, 
+        totalPurchased: 0, 
+        totalItems: 0,
+        groups: {} 
+      };
     }
+
+    acc[weekKey].totalItems++;
+    
+    const className = item.lessonPlan?.class?.name || 'General';
+    const teacherName = item.teacher?.fullName || 'No Teacher';
+    const groupKey = `${className} — ${teacherName}`;
+
+    if (!acc[weekKey].groups[groupKey]) {
+      acc[weekKey].groups[groupKey] = { name: groupKey, pending: [], purchased: [] };
+    }
+
     if (item.status === 'PENDING') {
-      acc[weekKey].pending.push(item);
+      acc[weekKey].totalPending++;
+      acc[weekKey].groups[groupKey].pending.push(item);
     } else {
-      acc[weekKey].purchased.push(item);
+      acc[weekKey].totalPurchased++;
+      acc[weekKey].groups[groupKey].purchased.push(item);
     }
     return acc;
   }, {});
 
   const sortedWeeks = Object.keys(supplyItemsByWeek)
     .sort((a, b) => Number(a) - Number(b))
-    .map(key => supplyItemsByWeek[key]);
+    .map(key => {
+      const week = supplyItemsByWeek[key];
+      week.sortedGroups = Object.values(week.groups).sort((a, b) => a.name.localeCompare(b.name));
+      return week;
+    });
 
   return (
     <div className="lpr-page">
@@ -276,85 +300,113 @@ const LessonPlanReview = () => {
             <div className="lpr-supply-grid">
               {sortedWeeks.map(weekGroup => (
                 <div key={weekGroup.label} className="lpr-week-section">
-                  <h3 className="lpr-week-header">{weekGroup.label}</h3>
-
-                  {weekGroup.pending.length > 0 && (
-                    <div className="lpr-supply-group">
-                      <div className="lpr-supply-group-header pending">
-                        <Package size={16} /> To Buy ({weekGroup.pending.length})
+                  <div className="lpr-week-header-row">
+                    <h3 className="lpr-week-header">{weekGroup.label}</h3>
+                    {weekGroup.totalItems > 0 && (
+                      <div className="lpr-week-progress">
+                        <div className="lpr-week-progress-bar">
+                          <div 
+                            className="lpr-week-progress-fill" 
+                            style={{ width: `${Math.round((weekGroup.totalPurchased / weekGroup.totalItems) * 100)}%` }} 
+                          />
+                        </div>
+                        <span className="lpr-week-progress-text">
+                          {weekGroup.totalPurchased} / {weekGroup.totalItems} Purchased
+                        </span>
                       </div>
-                      {weekGroup.pending.map(item => (
-                        <div key={item.id} className="lpr-supply-row">
-                          <label className="lpr-supply-checkbox">
-                            <input 
-                              type="checkbox" 
-                              onChange={() => handleMarkPurchased(item)}
-                              disabled={purchasingId === item.id}
-                            />
-                            <span className="lpr-custom-check"></span>
-                          </label>
+                    )}
+                  </div>
 
-                          <div className="lpr-supply-info">
-                            <div className="lpr-supply-name">{item.itemName} <span>× {item.quantity}</span></div>
-                            <div className="lpr-supply-meta">
-                              {item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName} {item.dayNeeded && `· Needed ${item.dayNeeded}`}
-                            </div>
+                  {weekGroup.sortedGroups.length > 0 && (
+                    <div className="lpr-supply-groups-container">
+                      {weekGroup.sortedGroups.map(group => (
+                        <div key={group.name} className="lpr-supply-group">
+                          <div className="lpr-supply-group-header">
+                            <Package size={16} /> {group.name}
                           </div>
                           
-                          <div className="lpr-supply-actions">
-                            {item.lessonPlan?.mainActivity && (
-                              <button
-                                className="lpr-activity-btn"
-                                onClick={() => setActivityModal(item.lessonPlan.mainActivity)}
-                                title="View activity"
-                              >
-                                <Info size={14} /> Activity
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                          {/* Pending Items */}
+                          {group.pending.map(item => (
+                            <div 
+                              key={item.id} 
+                              className="lpr-supply-row clickable-row"
+                              onClick={() => {
+                                if (purchasingId !== item.id) handleMarkPurchased(item);
+                              }}
+                            >
+                              <label className="lpr-supply-checkbox" onClick={e => e.stopPropagation()}>
+                                <input 
+                                  type="checkbox" 
+                                  onChange={() => handleMarkPurchased(item)}
+                                  disabled={purchasingId === item.id}
+                                />
+                                <span className="lpr-custom-check"></span>
+                              </label>
 
-                  {weekGroup.purchased.length > 0 && (
-                    <div className="lpr-supply-group" style={{ marginTop: weekGroup.pending.length > 0 ? '16px' : '0' }}>
-                      <div className="lpr-supply-group-header purchased">
-                        <CheckCircle size={16} /> Purchased ({weekGroup.purchased.length})
-                      </div>
-                      {weekGroup.purchased.map(item => (
-                        <div key={item.id} className="lpr-supply-row purchased">
-                          <label className="lpr-supply-checkbox">
-                            <input 
-                              type="checkbox" 
-                              checked 
-                              onChange={() => handleMarkPurchased(item)}
-                              disabled={purchasingId === item.id}
-                            />
-                            <span className="lpr-custom-check checked"><CheckCircle size={12} /></span>
-                          </label>
+                              <div className="lpr-supply-info">
+                                <div className="lpr-supply-name">{item.itemName} <span>× {item.quantity}</span></div>
+                                {item.dayNeeded && (
+                                  <div className={`lpr-urgency-badge urgency-${item.dayNeeded.toLowerCase()}`}>
+                                    Needed {item.dayNeeded}
+                                  </div>
+                                )}
+                              </div>
+                              
+                              <div className="lpr-supply-actions" onClick={e => e.stopPropagation()}>
+                                {item.lessonPlan?.mainActivity && (
+                                  <button
+                                    className="lpr-activity-btn icon-only"
+                                    onClick={() => setActivityModal(item.lessonPlan.mainActivity)}
+                                    title="View activity"
+                                  >
+                                    <Info size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
 
-                          <div className="lpr-supply-info">
-                            <div className="lpr-supply-name purchased">{item.itemName} × {item.quantity}</div>
-                            <div className="lpr-supply-meta">{item.lessonPlan?.class?.name || 'General'} · {item.teacher?.fullName}</div>
-                          </div>
+                          {/* Purchased Items */}
+                          {group.purchased.map(item => (
+                            <div 
+                              key={item.id} 
+                              className="lpr-supply-row purchased clickable-row"
+                              onClick={() => {
+                                if (purchasingId !== item.id) handleMarkPurchased(item);
+                              }}
+                            >
+                              <label className="lpr-supply-checkbox" onClick={e => e.stopPropagation()}>
+                                <input 
+                                  type="checkbox" 
+                                  checked 
+                                  onChange={() => handleMarkPurchased(item)}
+                                  disabled={purchasingId === item.id}
+                                />
+                                <span className="lpr-custom-check checked"><CheckCircle size={12} /></span>
+                              </label>
 
-                          <div className="lpr-supply-actions">
-                            {item.lessonPlan?.mainActivity && (
-                              <button
-                                className="lpr-activity-btn"
-                                onClick={() => setActivityModal(item.lessonPlan.mainActivity)}
-                                title="View activity"
-                              >
-                                <Info size={14} /> Activity
-                              </button>
-                            )}
-                            {item.cost != null && (
-                              <span className="lpr-cost">
-                                <DollarSign size={13} /> {Number(item.cost).toFixed(2)}
-                              </span>
-                            )}
-                          </div>
+                              <div className="lpr-supply-info">
+                                <div className="lpr-supply-name purchased">{item.itemName} × {item.quantity}</div>
+                              </div>
+
+                              <div className="lpr-supply-actions" onClick={e => e.stopPropagation()}>
+                                {item.lessonPlan?.mainActivity && (
+                                  <button
+                                    className="lpr-activity-btn icon-only"
+                                    onClick={() => setActivityModal(item.lessonPlan.mainActivity)}
+                                    title="View activity"
+                                  >
+                                    <Info size={16} />
+                                  </button>
+                                )}
+                                {item.cost != null && (
+                                  <span className="lpr-cost">
+                                    <DollarSign size={13} /> {Number(item.cost).toFixed(2)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>

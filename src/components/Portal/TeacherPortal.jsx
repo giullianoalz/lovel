@@ -12,7 +12,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
-import { formatTimeOfDay, timeOfDayMinutes, nowMinutes } from '../../lib/time';
+import { formatTimeOfDay, timeOfDayMinutes, nowMinutes, parseDateOnly } from '../../lib/time';
 import StudentProfileModal from '../Students/StudentProfileModal';
 import ErrorBanner from '../Layout/ErrorBanner';
 import './TeacherPortal.css';
@@ -122,6 +122,8 @@ const TeacherPortal = () => {
   const [lpForm, setLpForm] = useState({ classId: '', weekOf: '', type: 'DISCOVERY_COVE', mainActivity: '', safetyNotes: '', skillConnection: '', differentiation: '', supplyItems: [] });
   const [lpShowForm, setLpShowForm] = useState(false);
   const [lpSubmitting, setLpSubmitting] = useState(false);
+  const lpFileInputRef = useRef(null);
+  const populatedLessonPlanRef = useRef(null);
   const [lpSupplyInput, setLpSupplyInput] = useState({ itemName: '', quantity: 1, dayNeeded: '' });
 
   /* ── Forms ── */
@@ -268,17 +270,25 @@ const TeacherPortal = () => {
       .finally(() => setOfficeProcessing(false));
   }, [previewFile]);
 
+  // "recuerda que debe estar linkeado a la live session del dia que se abra el contenido subido a la lesson del dia"
+
   /* ═══════════════════════════════════════════════════════════
      HELPERS
   ═══════════════════════════════════════════════════════════ */
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
-
   const handleMarkRead = async (annId) => {
     try {
       await api.post(`/announcements/${annId}/read`);
       setAnnouncements(prev => prev.map(a => a.id === annId ? { ...a, isRead: true } : a));
     } catch { /* silent */ }
   };
+  const handleLpFileChange = (e) => {
+    const files = Array.from(e.target.files).map((f) => ({
+      name: f.name, type: f.type, size: f.size, url: URL.createObjectURL(f),
+    }));
+    setLpForm((prev) => ({ ...prev, attachments: [...(prev.attachments || []), ...files] }));
+  };
+
   const handleSubmitLessonPlan = async () => {
     setLpSubmitting(true);
     try {
@@ -314,12 +324,32 @@ const TeacherPortal = () => {
     const sessionWeek = startOfWeek(new Date(y, m - 1, d), { weekStartsOn: 1 });
     const matches = lessonPlans.filter(p =>
       p.classId === currentClass.classId &&
-      isEqual(startOfWeek(new Date(p.weekOf), { weekStartsOn: 1 }), sessionWeek)
+      isEqual(startOfWeek(parseDateOnly(p.weekOf), { weekStartsOn: 1 }), sessionWeek)
     );
     return matches.find(p => p.status === 'APPROVED')
       || matches.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
       || null;
   })();
+
+  useEffect(() => {
+    if (sessionLessonPlan?.id && sessionLessonPlan.id !== populatedLessonPlanRef.current) {
+      populatedLessonPlanRef.current = sessionLessonPlan.id;
+      if (sessionLessonPlan.attachments?.length > 0) {
+        const lpFiles = sessionLessonPlan.attachments.map(att => ({
+          name: att.fileName,
+          type: att.fileType,
+          size: 0,
+          url: att.fileUrl,
+          fromLessonPlan: true
+        }));
+        setAttachedFiles(prev => {
+          const existingUrls = new Set(prev.map(f => f.url));
+          const newFiles = lpFiles.filter(f => !existingUrls.has(f.url));
+          return [...prev, ...newFiles];
+        });
+      }
+    }
+  }, [sessionLessonPlan]);
   const allStudents = schedule.flatMap((c) => c.roster);
   // "Student out" has to work even when the teacher isn't sitting on a class —
   // between periods, or when today's schedule is empty. Fall back to everyone on
@@ -781,6 +811,19 @@ const TeacherPortal = () => {
                   {sessionLessonPlan.safetyNotes && <p><strong>Safety Notes:</strong> {sessionLessonPlan.safetyNotes}</p>}
                   {sessionLessonPlan.skillConnection && <p><strong>Skill Connection:</strong> {sessionLessonPlan.skillConnection}</p>}
                   {sessionLessonPlan.differentiation && <p><strong>Differentiation:</strong> {sessionLessonPlan.differentiation}</p>}
+                  {sessionLessonPlan.attachments?.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <strong style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>Attachments:</strong>
+                      <div className="attachments-list" style={{ marginTop: 0 }}>
+                        {sessionLessonPlan.attachments.map((att, idx) => (
+                          <button key={idx} className="hist-mat-chip previewable" onClick={() => setPreviewFile({ name: att.fileName, url: att.fileUrl, type: att.fileType })} title="Preview">
+                            {att.fileType?.includes('image') ? <Image size={12} /> : <Paperclip size={12} />}
+                            <span style={{ marginLeft: 4 }}>{att.fileName}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1254,6 +1297,31 @@ const TeacherPortal = () => {
                   )}
                 </div>
 
+                <div className="lp-attachments-section" style={{ marginTop: 16 }}>
+                  <label style={{fontWeight: 600, fontSize: 13}}>Attachments</label>
+                  <p className="text-muted" style={{fontSize: 12, margin: '2px 0 6px'}}>Upload handouts, worksheets, or reference materials.</p>
+                  
+                  {lpForm.attachments?.length > 0 && (
+                    <div className="attachments-list" style={{ marginBottom: 10 }}>
+                      {lpForm.attachments.map((file, idx) => (
+                        <div key={idx} className="attachment-chip">
+                          {file.type?.includes('image') ? <Image size={14} /> : <Paperclip size={14} />}
+                          <span className="file-name">{file.name}</span>
+                          <button type="button" className="remove-file-btn" onClick={() => setLpForm((p) => ({ ...p, attachments: p.attachments.filter((_, i) => i !== idx) }))}>
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <input type="file" ref={lpFileInputRef} style={{ display: 'none' }} multiple onChange={handleLpFileChange} />
+                  <button type="button" className="upload-recording-btn" style={{ background: '#f8fafc', color: '#64748b', borderColor: '#e2e8f0', margin: 0 }}
+                    onClick={() => lpFileInputRef.current.click()}>
+                    <Paperclip size={16} /> Attach Files
+                  </button>
+                </div>
+
                 <button className="tp-submit-btn" onClick={handleSubmitLessonPlan} disabled={lpSubmitting || !lpForm.mainActivity || !lpForm.weekOf} style={{marginTop: 14}}>
                   {lpSubmitting ? 'Submitting...' : 'Submit Lesson Plan'}
                 </button>
@@ -1275,6 +1343,17 @@ const TeacherPortal = () => {
                     </div>
                     <p className="lp-activity">{lp.mainActivity}</p>
                     {lp.materials && <p className="text-muted" style={{fontSize: 12}}>Materials: {lp.materials}</p>}
+                    
+                    {lp.attachments?.length > 0 && (
+                      <div className="history-materials" style={{ marginTop: 8 }}>
+                        {lp.attachments.map((att, i) => (
+                          <button key={i} className="hist-mat-chip previewable" onClick={() => setPreviewFile({ name: att.fileName, url: att.fileUrl, type: att.fileType })} title="Preview">
+                            {att.fileType?.includes('image') ? <Image size={10} /> : <Paperclip size={10} />} <span style={{ marginLeft: 4 }}>{att.fileName}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     {lp.managerFeedback && (
                       <div className="lp-feedback">
                         <strong>Manager Feedback:</strong> {lp.managerFeedback}

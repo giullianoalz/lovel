@@ -57,3 +57,15 @@ export const nowMinutes = () => {
   const now = new Date();
   return now.getHours() * 60 + now.getMinutes();
 };
+
+/**
+ * Parses a date string (like "YYYY-MM-DD" or "1970-01-01T00:00:00.000Z") into
+ * a local Date object that represents the same year/month/day at local midnight,
+ * preventing timezone shifts from crossing into the previous day.
+ */
+export const parseDateOnly = (value) => {
+  if (!value) return new Date();
+  const str = typeof value === 'string' ? value : value.toISOString();
+  const [y, m, d] = str.split('T')[0].split('-').map(Number);
+  return new Date(y, m - 1, d);
+};

@@ -4,7 +4,7 @@ import { sendNotification } from '../jobs/notification.helper.js';
 
 export const createLessonPlan = async (req, res, next) => {
   try {
-    const { classId, weekOf, type, mainActivity, materials, safetyNotes, skillConnection, differentiation, supplyItems } = req.body;
+    const { classId, weekOf, type, mainActivity, materials, safetyNotes, skillConnection, differentiation, supplyItems, attachments } = req.body;
     const teacherId = req.user.id;
 
     if (!weekOf || !mainActivity) {
@@ -30,11 +30,19 @@ export const createLessonPlan = async (req, res, next) => {
             dayNeeded: item.dayNeeded || null,
           }))
         } : undefined,
+        attachments: attachments?.length > 0 ? {
+          create: attachments.map(att => ({
+            fileName: att.name || att.fileName,
+            fileUrl: att.url || att.fileUrl,
+            fileType: att.type || att.fileType
+          }))
+        } : undefined,
       },
       include: {
         teacher: { select: { id: true, fullName: true } },
         class: { select: { id: true, name: true } },
         supplyItems: true,
+        attachments: true,
       },
     });
 
@@ -86,6 +94,7 @@ export const listLessonPlans = async (req, res, next) => {
         teacher: { select: { id: true, fullName: true } },
         class: { select: { id: true, name: true } },
         supplyItems: true,
+        attachments: true,
       },
       orderBy: { weekOf: 'desc' },
     });
@@ -104,6 +113,7 @@ export const getLessonPlan = async (req, res, next) => {
         teacher: { select: { id: true, fullName: true } },
         class: { select: { id: true, name: true } },
         supplyItems: true,
+        attachments: true,
       },
     });
     if (!lessonPlan) return res.status(404).json({ error: 'Not Found' });
@@ -127,6 +137,7 @@ export const reviewLessonPlan = async (req, res, next) => {
         teacher: { select: { id: true, fullName: true } },
         class: { select: { id: true, name: true } },
         supplyItems: true,
+        attachments: true,
       },
     });
 
@@ -147,6 +158,7 @@ export const archiveLessonPlan = async (req, res, next) => {
         teacher: { select: { id: true, fullName: true } },
         class: { select: { id: true, name: true } },
         supplyItems: true,
+        attachments: true,
       },
     });
 
@@ -163,8 +175,15 @@ export const archiveLessonPlansByWeek = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: 'weekOf is required.' });
     }
 
+    // Teachers pick any date to represent "the week" on a lesson plan, not
+    // necessarily a Monday, so two plans for the same week can carry different
+    // weekOf values. `weekOf` here is the Monday the UI grouped them under —
+    // archive the whole Mon-Sun span, not just an exact date match.
+    const start = new Date(weekOf);
+    const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+
     const result = await prisma.lessonPlan.updateMany({
-      where: { weekOf: new Date(weekOf), archived: false },
+      where: { weekOf: { gte: start, lt: end }, archived: false },
       data: { archived: true, archivedAt: new Date() },
     });
 

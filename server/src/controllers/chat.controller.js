@@ -236,9 +236,23 @@ export const getThreads = async (req, res, next) => {
         return role;
       });
 
+      let threadName = thread.name || otherNames || 'System Assistant';
+
+      // For internal group threads like "Management Team" or "Ocean Navigators", 
+      // if the current user is part of the staff that receives these messages, 
+      // they should see the name of the parent/sender, not the generic group name.
+      if ((thread.name === 'Management Team' && req.user.role === 'ADMIN') ||
+          (thread.name === 'Ocean Navigators' && ['ADMIN', 'TEACHER'].includes(req.user.role))) {
+        // Find the "external" participants (i.e. parents/students) to name the thread after them
+        const externals = otherParticipants.filter(p => !['ADMIN', 'TEACHER'].includes(p.user.role));
+        if (externals.length > 0) {
+          threadName = externals.map(p => displayNameFor(maskMap, p.user)).join(', ');
+        }
+      }
+
       return {
         id: thread.id,
-        name: thread.name || otherNames || 'System Assistant',
+        name: threadName,
         isBot: thread.isBot,
         status: thread.status,
         isBlocked: isBlocked,
@@ -335,7 +349,16 @@ const canOpenDirectThread = async (userA, userB) => {
 
     if (studentIds.length === 0) return false;
     const enrolled = await prisma.classEnrollment.findFirst({
-      where: { studentId: { in: studentIds }, status: 'active', class: { teacherId: teacher.id } },
+      where: { 
+        studentId: { in: studentIds }, 
+        status: 'active', 
+        class: { 
+          OR: [
+            { teacherId: teacher.id },
+            { coTeachers: { some: { id: teacher.id } } }
+          ]
+        } 
+      },
     });
     return !!enrolled;
   }

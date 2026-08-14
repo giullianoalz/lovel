@@ -20,6 +20,12 @@
   gap: 12px;
 }
 
+@media (min-width: 769px) {
+  .calendar-header-top {
+    padding-right: 48px; /* Avoid overlapping with fixed desktop bell */
+  }
+}
+
 .calendar-header-bottom {
   display: flex;
   justify-content: space-between;

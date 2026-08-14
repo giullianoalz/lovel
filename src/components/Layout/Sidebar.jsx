@@ -227,7 +227,7 @@ const Sidebar = () => {
               <span>Announcements</span>
               {announcementsUnread > 0 && <span className="nav-item-badge">{announcementsUnread > 9 ? '9+' : announcementsUnread}</span>}
             </NavLink>
-            <NavLink to="/chat" onClick={closeMenu} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
+            <NavLink to="/chat" onClick={() => { closeMenu(); notif.markReadByReferenceType('chat_thread'); }} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
               <MessageSquare size={20} />
               <span>Chat Hub</span>
               {chatUnread > 0 && <span className="nav-item-badge">{chatUnread > 9 ? '9+' : chatUnread}</span>}

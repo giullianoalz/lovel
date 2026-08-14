@@ -711,6 +711,7 @@ const CalendarView = () => {
           type: cls.type === 'VIRTUAL' || s.meetingUrl ? 'Virtual' : 'In-Person',
           classType: cls.type || 'IN_PERSON',
           teacher: teacherNameStr,
+          allTeacherNames, // Pass all names so Day View can create separate columns
           teacherId: s.class?.teacherId || classInfo.teacherId || classInfo.teacher?.id || null,
           coTeacherIds: coTeachers.map(c => c.id),
           students: roster.length || classInfo._count?.enrollments || 0,
@@ -1652,7 +1653,10 @@ const CalendarView = () => {
     // Own-PTO rows carry no name (the server only names people on the org-wide
     // view), and a nameless column would render as a blank tutor lane.
     .filter(Boolean);
-  const uniqueTeachers = [...new Set([...dayEventsList.map(e => e.teacher), ...todaysPtoTeachers].filter(Boolean))].sort();
+  const uniqueTeachers = [...new Set([
+    ...dayEventsList.flatMap(e => e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames : [e.teacher]), 
+    ...todaysPtoTeachers
+  ].filter(Boolean))].sort();
 
   // Moves currentDate by one unit of whatever's currently in view — this is
   // what the header's ◀ ▶ arrows call; each change re-fetches sessions via
@@ -2409,7 +2413,10 @@ const CalendarView = () => {
 
                 {/* Instructors Columns */}
                 {uniqueTeachers.map(teacher => {
-                  const teacherEvents = dayEventsList.filter(e => e.teacher === teacher);
+                  const teacherEvents = dayEventsList.filter(e => 
+                    (e.allTeacherNames && e.allTeacherNames.includes(teacher)) || 
+                    (!e.allTeacherNames && e.teacher === teacher)
+                  );
                   const teacherLayout = layoutOverlaps(teacherEvents);
                   // PTO has no time-of-day, so it can't be positioned on the
                   // timeline like a real session — it shows as a badge on the

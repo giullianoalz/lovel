@@ -4,13 +4,15 @@ import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, Arro
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket, SOCKET_URL } from '../../lib/socket';
+import { useNotifications } from '../../hooks/useNotifications';
 import ProtectedImage from '../Layout/ProtectedImage';
 import './ChatHub.css';
 
 const MEDIA_BASE = SOCKET_URL;
 
 const ChatHub = () => {
-  const { user, hasRole } = useAuth();
+  const { user, hasRole, role } = useAuth();
+  const notif = useNotifications(role);
 
   // A teacher can't look a guardian up by name or address — both are hidden
   // from them, and the server matches guardians on their child's name instead
@@ -75,6 +77,7 @@ const ChatHub = () => {
 
   useEffect(() => {
     loadThreads();
+    notif.markReadByReferenceType('chat_thread');
 
     // Share the app-wide socket (also used by the notification bell) instead
     // of opening a second connection — keeps a single set of rooms per tab.

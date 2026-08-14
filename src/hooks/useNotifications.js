@@ -137,5 +137,16 @@ export const useNotifications = (role) => {
     try { await Promise.all(matching.map(persistRead)); } catch { /* noop */ }
   };
 
-  return { inboxItems, laterItems, archiveItems, unreadCount, markRead, markLater, restoreToInbox, markAllRead, markReadBySource };
+  const markReadByReferenceType = async (refType) => {
+    const matching = inboxItems.filter(n => n.referenceType === refType);
+    if (matching.length === 0) return;
+    const nextRead  = new Set(readIds);
+    const nextLater = new Set(laterIds);
+    matching.forEach(n => { nextRead.add(n.id); nextLater.delete(n.id); });
+    setReadIds(nextRead);   saveSet(LS_READ, nextRead);
+    setLaterIds(nextLater); saveSet(LS_LATER, nextLater);
+    try { await Promise.all(matching.map(persistRead)); } catch { /* noop */ }
+  };
+
+  return { inboxItems, laterItems, archiveItems, unreadCount, markRead, markLater, restoreToInbox, markAllRead, markReadBySource, markReadByReferenceType };
 };

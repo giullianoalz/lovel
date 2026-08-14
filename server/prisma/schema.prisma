@@ -1371,10 +1371,24 @@ model LessonPlan {
   teacher         User             @relation("TeacherLessonPlans", fields: [teacherId], references: [id])
   class           Class?           @relation(fields: [classId], references: [id])
   supplyItems     SupplyItem[]
+  attachments     LessonPlanAttachment[]
 
   @@index([teacherId])
   @@index([archived])
   @@map("lesson_plans")
+}
+
+model LessonPlanAttachment {
+  id           String     @id @default(uuid()) @db.Uuid
+  lessonPlanId String     @map("lesson_plan_id") @db.Uuid
+  fileName     String     @map("file_name") @db.VarChar(255)
+  fileUrl      String     @map("file_url")
+  fileType     String?    @map("file_type") @db.VarChar(100)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  lessonPlan   LessonPlan @relation(fields: [lessonPlanId], references: [id], onDelete: Cascade)
+
+  @@index([lessonPlanId])
+  @@map("lesson_plan_attachments")
 }
 
 model SupplyItem {
