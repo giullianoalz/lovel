@@ -146,7 +146,7 @@ export const database = {
   // --- Families ---
   fetchFamilies: async () => {
     try {
-      const response = await api.get('/families?limit=100');
+      const response = await api.get('/families?limit=1000');
       // Mapear al formato que espera el frontend
       const realFamilies = response.data.families.map(dbFam => {
         return {
@@ -170,7 +170,7 @@ export const database = {
   // --- Students ---
   fetchStudents: async () => {
     try {
-      const response = await api.get('/students?limit=100');
+      const response = await api.get('/students?limit=1000');
       
       // Mapear el formato del backend (Prisma) al formato que espera el frontend actual.
       // El padre lo resuelve el backend (withParentContact) — buscarlo aquí por

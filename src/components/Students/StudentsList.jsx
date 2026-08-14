@@ -91,7 +91,7 @@ const StudentsList = () => {
   // before the person can sign in, so admins need to see who still has no access.
   const loadParents = async () => {
     try {
-      const res = await api.get('/users', { params: { role: 'PARENT', limit: 200 } });
+      const res = await api.get('/users', { params: { role: 'PARENT', limit: 1000 } });
       setParents(res.data.users || []);
     } catch (error) {
       console.error('Error loading parents:', error);

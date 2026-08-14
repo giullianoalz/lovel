@@ -521,7 +521,7 @@ const CalendarView = () => {
     loadStudents();
 
     database.fetchTeachers().then(setTeachers);
-    api.get('/classes?limit=200&includeRoster=true').then(r => setClassesList(r.data.classes || [])).catch(() => setClassesList([]));
+    api.get('/classes?limit=1000&includeRoster=true').then(r => setClassesList(r.data.classes || [])).catch(() => setClassesList([]));
   }, []);
 
   // The visible date range for the current view — this is what actually gets
@@ -661,7 +661,7 @@ const CalendarView = () => {
 
   const reloadClasses = async () => {
     try {
-      const res = await api.get('/classes?limit=200&includeRoster=true');
+      const res = await api.get('/classes?limit=1000&includeRoster=true');
       setClassesList(res.data.classes || []);
     } catch { /* keep previous list on failure */ }
   };
