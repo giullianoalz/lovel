@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail
+  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
 import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
 import EmailPreviewModal from '../Layout/EmailPreviewModal';
+import SessionChargesPanel from './SessionChargesPanel';
 import { defaultInvoiceSubject, defaultInvoiceMessage, INVOICE_FIXED_NOTE } from '../../lib/emailDefaults';
 import './BillingPanel.css';
 
@@ -38,6 +39,8 @@ const BillingPanel = () => {
   // Modal States
   const [isAddTxModalOpen, setIsAddTxModalOpen] = useState(false);
   const [isEmaModalOpen, setIsEmaModalOpen] = useState(false);
+  // Meetings priced on the calendar, waiting to be turned into real charges.
+  const [isSessionChargesOpen, setIsSessionChargesOpen] = useState(false);
   const [emaSyncState, setEmaSyncState] = useState({ step: 1, matched: 0, newInvoices: [] });
   const [isReconcileOpen, setIsReconcileOpen] = useState(false);
   const [reconcile, setReconcile] = useState({ step: 1, text: '', lines: [], report: null });
@@ -662,6 +665,9 @@ const BillingPanel = () => {
           <div className="table-header">
             <h2>Family Accounts</h2>
             <div className="table-actions">
+              <button className="btn-export" style={{background: '#059669', color: 'white', borderColor: '#059669'}} onClick={() => setIsSessionChargesOpen(true)}>
+                <Receipt size={16} /> Calendar Charges
+              </button>
               <button className="btn-export" style={{background: 'var(--primary)', color: 'white', borderColor: 'var(--primary)'}} onClick={() => setIsEmaModalOpen(true)}>
                 <UploadCloud size={16} /> EMA Auto-Sync
               </button>
@@ -734,6 +740,16 @@ const BillingPanel = () => {
             </table>
           </div>
         </div>
+
+        {/* Meetings given a price on the calendar. Reloads the ledger on the
+            way out so the charges it raised show up on the family accounts
+            behind it, rather than only after a refresh. */}
+        {isSessionChargesOpen && (
+          <SessionChargesPanel
+            onClose={() => setIsSessionChargesOpen(false)}
+            onDone={loadBilling}
+          />
+        )}
 
         {/* EMA Sync Modal */}
         {isEmaModalOpen && (

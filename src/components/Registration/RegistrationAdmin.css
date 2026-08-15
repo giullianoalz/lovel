@@ -1481,3 +1481,24 @@
 @media (max-width: 600px) {
   .waiver-row { flex-direction: column; align-items: flex-start; }
 }
+
+/* The academy bills from the calendar, not from this panel. Both price the same
+   classes and neither database constraint spans the two, so running this as well
+   charges every family twice. Loud on purpose: the button underneath moves real
+   money and there is nothing downstream that would catch the mistake. */
+.qc-double-bill-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(180, 83, 9, 0.3);
+  border-radius: 9px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #92400e;
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 68ch;
+}
+
+.qc-double-bill-warning svg { flex-shrink: 0; margin-top: 1px; }

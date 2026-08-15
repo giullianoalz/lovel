@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX, Receipt } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
@@ -39,6 +39,24 @@ const hhmmToMins = (hhmm) => {
   return h * 60 + m;
 };
 
+// Folds accents away before matching, so typing "Pena" at the desk still finds
+// "Brandon Peña". The roster is typed in from a keyboard nobody switches
+// layouts on, and a name that can't be searched is a student who can't be
+// enrolled.
+const foldName = (str) => (str || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase();
+
+// Every whitespace-separated piece of the query has to appear somewhere in the
+// name, in any order — "julian cora" finds "Cora Julian", and a stray double
+// space doesn't zero out the list. An empty query matches everything; the
+// callers decide whether an empty box should show anything at all.
+const nameMatches = (name, query) => {
+  const folded = foldName(name);
+  return foldName(query).split(/\s+/).filter(Boolean).every(term => folded.includes(term));
+};
+
 // "2026-08-19" → "Wednesday". Parsed as UTC to match how session dates are
 // stored, so the weekday never slips a day in a timezone behind UTC.
 const weekdayNameOf = (isoDate) =>
@@ -64,6 +82,16 @@ const formatDateUS = (dateStr) => {
   const [y, m, d] = parts;
   return `${m}/${d}/${y}`;
 };
+
+// Shown in place of the roster when its fetch failed. It says the roster is
+// unknown rather than empty: "no students" and "we couldn't ask" look identical
+// on screen but mean opposite things to whoever is about to enroll someone.
+const RosterLoadError = ({ onRetry }) => (
+  <div className="roster-load-error">
+    <p>Couldn’t load this class roster.</p>
+    <button type="button" className="text-action" onClick={onRetry}>Try again</button>
+  </div>
+);
 
 const CATEGORY_GROUPS = [
   {
@@ -258,6 +286,14 @@ const CalendarView = () => {
   const [isEditingEvent, setIsEditingEvent] = useState(false);
   const [editEventForm, setEditEventForm] = useState({});
   const [rosterSearch, setRosterSearch] = useState('');
+  // Set when the per-event detail fetch fails. Without it the roster sat on its
+  // "Loading roster…" spinner forever, which reads as "this class has nobody in
+  // it" rather than "we never found out" — and the edit form below would then
+  // offer to enroll a student who is already on the roster.
+  const [rosterError, setRosterError] = useState(false);
+  // Which event the modal is actually showing, readable from inside an async
+  // load without making it a dependency of one.
+  const openEventIdRef = useRef(null);
   const [appAlert, setAppAlert] = useState({ isOpen: false, title: '', message: '', type: 'info', onConfirm: null });
   // Jump-to-date popover on the header, so getting to a week doesn't mean
   // clicking the arrow once per week from today.
@@ -396,8 +432,10 @@ const CalendarView = () => {
     date: toISODate(new Date()),
     time: '14:30',
     duration: 60,
+    // What each enrolled family is charged for one meeting. Sent through as
+    // `chargeAmount` on every session this form creates; approving it in
+    // Billing is what turns it into money.
     price: '',
-    billingFrequency: 'Per Class', // 'Per Class', 'Weekly', 'Start of Cycle'
 
     // Legacy / Shared
     tutor: '',
@@ -587,8 +625,12 @@ const CalendarView = () => {
   // time off and nobody else's, matching what the server will hand back either
   // way (asking for orgWide as a teacher is simply ignored there).
   const [staffEvents, setStaffEvents] = useState([]);
-  const canSeeStaffEvents = hasRole('ADMIN', 'TEACHER');
   const canSeeOrgWide = hasRole('ADMIN') || (hasRole('RECEPTIONIST') && !hasRole('TEACHER'));
+  // Front desk is included because the rota is her own schedule: leaving her out
+  // meant the one person whose hours are the front desk's hours was the only
+  // member of staff who could not see them — the server has always been willing
+  // to hand her the org-wide view, the calendar just never asked for it.
+  const canSeeStaffEvents = hasRole('ADMIN', 'TEACHER') || canSeeOrgWide;
 
   const staffEventsSeqRef = useRef(0);
   const loadStaffEvents = async (viewMode, date) => {
@@ -742,6 +784,13 @@ const CalendarView = () => {
           // back to the old guess (online if there's a link, else in person).
           payCategoryKey: s.payCategoryKey || '',
           payRateOverride: s.payRateOverride == null ? '' : String(s.payRateOverride),
+          // What this meeting charges each enrolled family. The other side of
+          // payRateOverride: that is what the hour pays the teacher, this is
+          // what it bills the client. Empty means it raises nothing, which is
+          // most sessions — the term's tuition is billed by the quarterly run.
+          // Admin-only; the API nulls it for everybody else.
+          chargeAmount: s.chargeAmount == null ? '' : String(s.chargeAmount),
+          chargeNote: s.chargeNote || '',
           // Once the hour is confirmed its rate is written down and no longer
           // follows the category, so the picker says so instead of implying an
           // edit here would change what was paid.
@@ -1036,16 +1085,11 @@ const CalendarView = () => {
 
   const events = getFilteredEvents();
 
-  const handleEventClick = async (event) => {
-    setSelectedEvent(event);
-    setEditNotes(event.notes || '');
-    setIsEditing(false);
-    setIsEditingEvent(false);
-    setIsEditingLink(false);
-    setRosterSearch('');
-
-    // The tile only carries lightweight info — fetch the class roster and the
-    // session's full notes/materials the moment it's actually opened.
+  // The tile only carries lightweight info — fetch the class roster and the
+  // session's full notes/materials the moment it's actually opened. Split out
+  // of handleEventClick so the roster's Retry can run exactly the same load.
+  const loadEventDetail = async (event) => {
+    setRosterError(false);
     try {
       const [classRes, sessionRes] = await Promise.all([
         api.get(`/classes/${event.classId}`),
@@ -1066,7 +1110,21 @@ const CalendarView = () => {
       } : prev);
     } catch (error) {
       console.error('Error loading session detail:', error);
+      // Only complain about the event still on screen: a slow request for an
+      // event the user already clicked away from isn't their problem.
+      if (openEventIdRef.current === event.id) setRosterError(true);
     }
+  };
+
+  const handleEventClick = async (event) => {
+    openEventIdRef.current = event.id;
+    setSelectedEvent(event);
+    setEditNotes(event.notes || '');
+    setIsEditing(false);
+    setIsEditingEvent(false);
+    setIsEditingLink(false);
+    setRosterSearch('');
+    await loadEventDetail(event);
   };
 
   const handleStartEditEvent = () => {
@@ -1087,6 +1145,8 @@ const CalendarView = () => {
       applyToSeries: false,
       payCategoryKey: selectedEvent.payCategoryKey || '',
       payRateOverride: selectedEvent.payRateOverride || '',
+      chargeAmount: selectedEvent.chargeAmount || '',
+      chargeNote: selectedEvent.chargeNote || '',
       // Separate from applyToSeries on purpose: retiming one session is usually
       // a one-off, but "this class is private tutoring" is nearly always true of
       // the whole term, and mixing the two would make each fix the other.
@@ -1117,6 +1177,10 @@ const CalendarView = () => {
         ? {
             payCategoryKey: editEventForm.payCategoryKey || null,
             payRateOverride: editEventForm.payRateOverride ?? '',
+            // Typing a price charges nobody — it records what the meeting costs,
+            // and an admin approves the pending ones into the ledger later.
+            chargeAmount: editEventForm.chargeAmount ?? '',
+            chargeNote: editEventForm.chargeNote ?? '',
           }
         : {};
       await api.put(`/sessions/${selectedEvent.id}`, { date, startTime, endTime, ...payFields });
@@ -1168,6 +1232,8 @@ const CalendarView = () => {
         students: editEventForm.studentList.length,
         payCategoryKey: editEventForm.payCategoryKey || '',
         payRateOverride: editEventForm.payRateOverride || '',
+        chargeAmount: editEventForm.chargeAmount || '',
+        chargeNote: editEventForm.chargeNote || '',
       };
       setSelectedEvent(updated);
       setIsEditingEvent(false);
@@ -1178,11 +1244,29 @@ const CalendarView = () => {
     }
   };
 
+  // Enrolling writes to the server the moment the name is clicked — there is no
+  // pending state to Save. So the rest of the calendar has to be brought up to
+  // date right here: closing the modal with the X used to leave the tiles, the
+  // headcounts and every other meeting of the class showing the old roster
+  // until the page was reloaded, which read as "the student wasn't added".
+  const refreshAfterRosterChange = (studentList) => {
+    setSelectedEvent(prev => prev ? {
+      ...prev,
+      studentIds: studentList,
+      studentList: studentList.map(s => s.name),
+      students: studentList.length,
+    } : prev);
+    reloadClasses();
+    loadSessions(view, currentDate);
+  };
+
   const handleAddStudentToRoster = async (student) => {
     if (editEventForm.studentList.some(s => s.id === student.id)) { setRosterSearch(''); return; }
     try {
       await api.post(`/classes/${selectedEvent.classId}/enrollments`, { studentId: student.id });
-      setEditEventForm(prev => ({ ...prev, studentList: [...prev.studentList, student] }));
+      const next = [...editEventForm.studentList, student];
+      setEditEventForm(prev => ({ ...prev, studentList: next }));
+      refreshAfterRosterChange(next);
     } catch (error) {
       toast.error(error.response?.data?.message || 'Could not add this student to the class.');
     }
@@ -1192,7 +1276,9 @@ const CalendarView = () => {
   const handleRemoveStudentFromRoster = async (student) => {
     try {
       await api.delete(`/classes/${selectedEvent.classId}/enrollments/${student.id}`);
-      setEditEventForm(prev => ({ ...prev, studentList: prev.studentList.filter(s => s.id !== student.id) }));
+      const next = editEventForm.studentList.filter(s => s.id !== student.id);
+      setEditEventForm(prev => ({ ...prev, studentList: next }));
+      refreshAfterRosterChange(next);
     } catch (error) {
       toast.error(error.response?.data?.message || 'Could not remove this student from the class.');
     }
@@ -1366,12 +1452,21 @@ const CalendarView = () => {
 
       const duration = parseInt(newEventForm.duration) || 60;
 
+      // The price typed on this form is what each enrolled family is charged
+      // for one meeting. It used to be collected and silently dropped — the box
+      // was there, nothing read it — so an admin who priced an event on the way
+      // in had no way of knowing it never landed. Admin-only, like the pay
+      // fields: the route rejects it from anyone else.
+      const priceFields = (price) =>
+        canSetPay && price !== '' && price != null ? { chargeAmount: price } : {};
+
       if (newEventForm.topLevelType === 'Tutoring' && newEventForm.tutoringRecurrence === '1 time') {
         await api.post('/sessions', {
           classId,
           date: newEventForm.date,
           startTime: newEventForm.time,
           endTime: addMinutesToTime(newEventForm.time, duration),
+          ...priceFields(newEventForm.price),
         });
       } else if (newEventForm.topLevelType === 'Tutoring') {
         const endDate = newEventForm.noEndDate
@@ -1386,6 +1481,10 @@ const CalendarView = () => {
             weekdays: [DAY_NAME_TO_NUM[row.day]],
             startTime: row.time,
             endTime: addMinutesToTime(row.time, rowDuration),
+            // Each row carries its own price — a Monday hour and a Thursday
+            // hour can cost different amounts — falling back to the form's
+            // single price when the row leaves it blank.
+            ...priceFields(row.price !== '' && row.price != null ? row.price : newEventForm.price),
           });
         }
       } else {
@@ -1396,6 +1495,7 @@ const CalendarView = () => {
             date: dateStr,
             startTime: newEventForm.time,
             endTime: addMinutesToTime(newEventForm.time, duration),
+            ...priceFields(newEventForm.price),
           });
         }
       }
@@ -1932,7 +2032,7 @@ const CalendarView = () => {
                           allStudents
                             .map(s => s.name)
                             .filter(s => !searchForm.students.includes(s))
-                            .filter(s => s.toLowerCase().includes(searchForm.studentSearchText.toLowerCase()))
+                            .filter(s => nameMatches(s, searchForm.studentSearchText))
                             .map(student => (
                             <div
                               key={student}
@@ -2851,6 +2951,45 @@ const CalendarView = () => {
                         </p>
                       </div>
                     )}
+
+                    {/* What this meeting costs the family — the other side of
+                        the block above. Most sessions leave it empty: the term
+                        is billed by the quarterly run, and pricing every
+                        session too would charge twice. This is for the one-off
+                        — a workshop, a make-up lesson, a week that costs
+                        something on its own. */}
+                    {canSetPay && (
+                      <div className="cal-charge-block">
+                        <div className="meta-item">
+                          <Receipt size={16} />
+                          <div className="cal-charge-amount">
+                            <span>$</span>
+                            <input
+                              type="number" min="0" step="0.01" inputMode="decimal"
+                              className="form-control"
+                              value={editEventForm.chargeAmount}
+                              onChange={e => setEditEventForm(prev => ({ ...prev, chargeAmount: e.target.value }))}
+                              placeholder="price"
+                              title="What each enrolled family is charged for this meeting"
+                            />
+                          </div>
+                          <input
+                            type="text"
+                            className="form-control cal-charge-note"
+                            value={editEventForm.chargeNote}
+                            onChange={e => setEditEventForm(prev => ({ ...prev, chargeNote: e.target.value }))}
+                            placeholder={`What the family sees (default: “${selectedEvent.title}”)`}
+                            title="The description that lands on the invoice line"
+                          />
+                        </div>
+
+                        <p className="cal-pay-hint">
+                          {editEventForm.chargeAmount === '' || editEventForm.chargeAmount == null
+                            ? 'Leave this empty and the meeting charges nothing — the term’s tuition is billed separately.'
+                            : `Charges each of the ${selectedEvent.students} enrolled ${selectedEvent.students === 1 ? 'family' : 'families'} $${Number(editEventForm.chargeAmount || 0).toFixed(2)}. Nothing is billed until you approve it in Billing.`}
+                        </p>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -2875,6 +3014,31 @@ const CalendarView = () => {
                             <strong className="cal-pay-tag">${Number(selectedEvent.payRateOverride).toFixed(2)}/hr</strong>
                           )}
                         </span>
+                      </div>
+                    )}
+                    {/* What the family pays for this meeting.
+                        Shown even when nothing is set, unlike the pay row above
+                        — an admin looking for "what do I charge for this?" has
+                        to find the answer here, and a row that only appears
+                        once the answer exists is invisible precisely when it is
+                        being looked for. */}
+                    {canSetPay && (
+                      <div className="meta-item">
+                        <Receipt size={16} />
+                        {selectedEvent.chargeAmount !== '' && selectedEvent.chargeAmount != null ? (
+                          <span>
+                            <strong>${Number(selectedEvent.chargeAmount).toFixed(2)}</strong> per family
+                            {selectedEvent.chargeNote ? ` — ${selectedEvent.chargeNote}` : ''}
+                            <small className="cal-charge-pending">approve in Billing to charge it</small>
+                          </span>
+                        ) : (
+                          <span className="cal-charge-unset">
+                            No charge on this meeting
+                            <button className="cal-charge-set" onClick={handleStartEditEvent}>
+                              set a price
+                            </button>
+                          </span>
+                        )}
                       </div>
                     )}
                     {/* Pay comes off the calendar now: this hour is paid once
@@ -2988,9 +3152,17 @@ const CalendarView = () => {
               {/* ── Student Roster ── */}
               <div className="roster-section">
                 <div className="notes-header">
-                  <h3><User size={18} /> Student Roster ({isEditingEvent ? editEventForm.studentList.length : (selectedEvent.studentList?.length || selectedEvent.students)})</h3>
+                  {/* The headcount is a lie while the roster is unknown — the
+                      tile's own number counts enrollments the failed request
+                      was meant to list. Show it only once we have the names. */}
+                  <h3><User size={18} /> Student Roster{rosterError ? '' : ` (${isEditingEvent ? editEventForm.studentList.length : (selectedEvent.studentList?.length || selectedEvent.students)})`}</h3>
                 </div>
-                {isEditingEvent ? (
+                {isEditingEvent && rosterError ? (
+                  // Editing on top of a roster we failed to load would offer to
+                  // enroll students who are already in the class, so the add bar
+                  // stays out of reach until the real roster is in hand.
+                  <RosterLoadError onRetry={() => loadEventDetail(selectedEvent)} />
+                ) : isEditingEvent ? (
                   <div className="roster-edit-area">
                     <div className="roster-add-bar">
                       <div style={{ position: 'relative', flex: 1 }}>
@@ -3005,14 +3177,14 @@ const CalendarView = () => {
                         {rosterSearch && (
                           <div className="roster-search-dropdown">
                             {allStudents
-                              .filter(s => s.name.toLowerCase().includes(rosterSearch.toLowerCase()) && !editEventForm.studentList.some(x => x.id === s.id))
+                              .filter(s => nameMatches(s.name, rosterSearch) && !editEventForm.studentList.some(x => x.id === s.id))
                               .map(s => (
                                 <button key={s.id} className="roster-search-option" onClick={() => handleAddStudentToRoster(s)}>
                                   <UserPlus size={14} /> {s.name}
                                 </button>
                               ))
                             }
-                            {allStudents.filter(s => s.name.toLowerCase().includes(rosterSearch.toLowerCase()) && !editEventForm.studentList.some(x => x.id === s.id)).length === 0 && (
+                            {allStudents.filter(s => nameMatches(s.name, rosterSearch) && !editEventForm.studentList.some(x => x.id === s.id)).length === 0 && (
                               <div className="roster-search-option" style={{ color: '#94a3b8', cursor: 'default' }}>No students found</div>
                             )}
                           </div>
@@ -3040,6 +3212,8 @@ const CalendarView = () => {
                           <span>{name}</span>
                         </div>
                       ))
+                    ) : rosterError ? (
+                      <RosterLoadError onRetry={() => loadEventDetail(selectedEvent)} />
                     ) : selectedEvent.studentList === null ? (
                       <p className="app-inline-loader" style={{ padding: '8px 0' }}><span className="app-spinner-sm" />Loading roster…</p>
                     ) : (
@@ -3210,8 +3384,11 @@ const CalendarView = () => {
                             </div>
                           </div>
                           <div className="form-group half">
-                            <label>Price ($)</label>
+                            <label>Price per family ($)</label>
                             <input className="form-control" type="number" placeholder="0.00" value={newEventForm.price} onChange={e => setNewEventForm({...newEventForm, price: e.target.value})} />
+                            <small className="cal-price-hint">
+                              Charged to each enrolled family. Approve it in Billing to bill it.
+                            </small>
                           </div>
                         </div>
                       </div>
@@ -3361,16 +3538,21 @@ const CalendarView = () => {
                     </div>
                     <div className="form-row">
                         <div className="form-group half">
-                          <label>Cost / Price ($)</label>
+                          <label>Price per family ($)</label>
                           <input className="form-control" type="number" placeholder="0.00" value={newEventForm.price} onChange={e => setNewEventForm({...newEventForm, price: e.target.value})} />
                         </div>
+                        {/* This used to be a "Billing Frequency" picker offering
+                            Weekly and Start of Cycle. Neither was ever built —
+                            it set a field nobody read — so it promised a billing
+                            schedule that silently never happened. A price on a
+                            calendar entry charges for that entry, and now the
+                            form says so instead of implying otherwise. */}
                         <div className="form-group half">
-                          <label>Billing Frequency</label>
-                          <select className="form-control" value={newEventForm.billingFrequency} onChange={e => setNewEventForm({...newEventForm, billingFrequency: e.target.value})}>
-                            <option value="Per Class">Per Class</option>
-                            <option value="Weekly">Weekly</option>
-                            <option value="Start of Cycle">Start of Cycle</option>
-                          </select>
+                          <label>How it's billed</label>
+                          <p className="cal-price-note">
+                            Once per meeting, to each enrolled family. Nothing is charged until
+                            you approve it under <strong>Billing → Calendar Charges</strong>.
+                          </p>
                         </div>
                     </div>
                   </div>
@@ -3483,7 +3665,7 @@ const CalendarView = () => {
                       ) : (
                         <>
                           {allStudents
-                            .filter(s => s.name.toLowerCase().includes(attendeeSearchText.toLowerCase()))
+                            .filter(s => nameMatches(s.name, attendeeSearchText))
                             .filter(s => !newEventForm.students.find(existing => existing.id === s.id))
                             .map(student => (
                               <div 
@@ -3495,7 +3677,7 @@ const CalendarView = () => {
                               </div>
                             ))
                           }
-                          {allStudents.filter(s => s.name.toLowerCase().includes(attendeeSearchText.toLowerCase())).length === 0 && (
+                          {allStudents.filter(s => nameMatches(s.name, attendeeSearchText)).length === 0 && (
                             <div style={{ padding: '8px 16px', color: 'var(--text-muted)', fontSize: '13px' }}>No students found</div>
                           )}
                         </>

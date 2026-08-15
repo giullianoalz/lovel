@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone, Pencil, FileSignature, Download } from 'lucide-react';
+import { Calendar, Users, Settings, Plus, Play, ChevronDown, CheckCircle, Check, Clock, Copy, User, X, Mail, Trash2, RefreshCw, AlertCircle, Inbox, UserPlus, Ban, Phone, Pencil, FileSignature, Download, AlertTriangle } from 'lucide-react';
 import api from '../../lib/api';
 import { interestLabel } from '../../lib/enrollmentInterests';
 import AddSelfAsTeacher from '../Common/AddSelfAsTeacher';
@@ -2130,11 +2130,25 @@ const RegistrationAdmin = () => {
 
             {/* Quarterly tuition. A term is billed twice at the same rate, and
                 the amounts come off the roster as it stands right now — which
-                is what makes a drop or a class switch come out right. */}
+                is what makes a drop or a class switch come out right.
+
+                Not the route the academy actually bills on any more, hence the
+                warning below: the same classes are priced on the calendar, and
+                nothing in the database stops a family being charged once by
+                each. See quarterlyBilling.service.js. */}
             <div className="glass-card quarter-charge-panel">
               <div className="qc-head">
                 <div>
                   <h3>Quarterly tuition</h3>
+                  <p className="qc-double-bill-warning">
+                    <AlertTriangle size={14} />
+                    <span>
+                      <strong>You bill from the calendar, not from here.</strong> These same classes
+                      already carry their price on the first week of the term, waiting under
+                      Billing → Calendar Charges. Raising tuition here as well would charge every
+                      family twice — the two run independently and neither blocks the other.
+                    </span>
+                  </p>
                   <p className="text-muted text-xs" style={{ margin: '4px 0 0' }}>
                     Charges are worked out from who is enrolled <strong>today</strong>. Make sure drops and
                     class changes are recorded before you raise them.

@@ -66,6 +66,51 @@ const readPayFields = async (req) => {
   return { data };
 };
 
+/**
+ * The price this one meeting charges a family, off the request body.
+ *
+ * The mirror of readPayFields: that reads what the hour pays the teacher, this
+ * reads what it bills the client. Admin-only for the same reason and then some
+ * — it is the number a family will be asked for.
+ *
+ * Typing it charges nobody. It records what the meeting costs; an admin reviews
+ * the pending ones and approves them into the ledger (see
+ * sessionCharges.service.js), so a fat-fingered price is caught on a review
+ * screen rather than on somebody's invoice.
+ */
+const readChargeFields = async (req) => {
+  const { chargeAmount, chargeNote } = req.body;
+  if (chargeAmount === undefined && chargeNote === undefined) return { data: {} };
+
+  if (!hasRole(req.user, 'ADMIN')) {
+    return { error: 'Only an admin can set what a session charges.' };
+  }
+
+  const data = {};
+  if (chargeAmount !== undefined) {
+    // Empty clears the price, and the meeting goes back to raising nothing.
+    // Zero is kept as a real price — "this one is free" is a decision, and
+    // collapsing it to null would make it indistinguishable from "not set".
+    if (chargeAmount === null || chargeAmount === '') {
+      data.chargeAmount = null;
+    } else {
+      const n = typeof chargeAmount === 'number'
+        ? chargeAmount
+        : parseFloat(String(chargeAmount).replace(/[$,\s]/g, ''));
+      if (!Number.isFinite(n)) return { error: 'The price for this session must be a number.' };
+      if (n < 0) return { error: 'The price for this session cannot be negative.' };
+      if (n > 99999999.99) return { error: 'That price is implausibly large.' };
+      data.chargeAmount = Math.round(n * 100) / 100;
+    }
+  }
+
+  if (chargeNote !== undefined) {
+    data.chargeNote = chargeNote?.trim()?.slice(0, 255) || null;
+  }
+
+  return { data };
+};
+
 // Every cancellation reaches the admin for a decision — none is ever charged
 // automatically, however much notice was given. What the notice changes is the
 // amount suggested; the window and percentages live in
@@ -262,13 +307,19 @@ export const listSessions = async (req, res, next) => {
     // An absence is redacted along the same line and for a stronger reason: it
     // is a statement about a member of staff, and a parent reading their child's
     // calendar has no business being told their tutor did not show up.
+    //
+    // The price the family is charged is admin-only, and not on the same line
+    // as the two above: a teacher may see what their own hour pays, but what
+    // the academy bills for it is not their business, and a parent must not see
+    // a price that nobody has approved yet — it is a draft until it is raised.
     const isAdmin = hasRole(req.user, 'ADMIN');
     res.json({
-      sessions: sessions.map((s) =>
-        isAdmin || s.class?.teacherId === req.user.id
-          ? s
-          : { ...s, payRateOverride: null, paidRate: null, absentAt: null, absentReason: null, absentBy: null }
-      ),
+      sessions: sessions.map((s) => {
+        const visible = isAdmin ? s : { ...s, chargeAmount: null, chargeNote: null };
+        return isAdmin || s.class?.teacherId === req.user.id
+          ? visible
+          : { ...visible, payRateOverride: null, paidRate: null, absentAt: null, absentReason: null, absentBy: null };
+      }),
     });
   } catch (error) {
     next(error);
@@ -339,6 +390,13 @@ export const createSession = async (req, res, next) => {
     const pay = await readPayFields(req);
     if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
 
+    // What the meeting charges the family, set at the same moment as what it
+    // pays the teacher. Booking somebody is the act that decides both numbers,
+    // so refusing the price here would mean every priced session had to be
+    // created and then immediately edited.
+    const charge = await readChargeFields(req);
+    if (charge.error) return res.status(400).json({ error: 'Validation Error', message: charge.error });
+
     // Convert startTime/endTime strings to proper DateTime objects for PostgreSQL TIME column
     const startObj = new Date(`1970-01-01T${startTime}:00Z`);
     const endObj = new Date(`1970-01-01T${endTime}:00Z`);
@@ -351,6 +409,7 @@ export const createSession = async (req, res, next) => {
         endTime: endObj,
         status: 'SCHEDULED',
         ...pay.data,
+        ...charge.data,
       },
     });
 
@@ -385,6 +444,13 @@ export const bulkScheduleSessions = async (req, res, next) => {
     // category is set once here rather than on each generated session.
     const pay = await readPayFields(req);
     if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
+
+    // The price rides along the same way — but note it lands on *every*
+    // generated session, so a term of 30 Tuesdays priced at $50 is 30 separate
+    // $50 charges per family, not one. That is right for a per-session price
+    // and wrong for a term fee: a term fee belongs to the quarterly run.
+    const charge = await readChargeFields(req);
+    if (charge.error) return res.status(400).json({ error: 'Validation Error', message: charge.error });
 
     // Parse as UTC-midnight dates and check weekday with getUTCDay() throughout —
     // mixing local getDay() with UTC-parsed dates shifts the matched weekday
@@ -427,7 +493,7 @@ export const bulkScheduleSessions = async (req, res, next) => {
     const createdSessions = await prisma.$transaction(
       newDates.map((date) =>
         prisma.session.create({
-          data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED', ...pay.data },
+          data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED', ...pay.data, ...charge.data },
         })
       )
     );
@@ -464,8 +530,12 @@ export const bulkUpdateSessions = async (req, res, next) => {
     const pay = await readPayFields(req);
     if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
 
-    if (!startTime && !endTime && !status && meetingUrl === undefined && Object.keys(pay.data).length === 0) {
-      return res.status(400).json({ error: 'Validation Error', message: 'Nothing to change — pass startTime, endTime, status, meetingUrl, or the pay category.' });
+    const charge = await readChargeFields(req);
+    if (charge.error) return res.status(400).json({ error: 'Validation Error', message: charge.error });
+
+    if (!startTime && !endTime && !status && meetingUrl === undefined
+        && Object.keys(pay.data).length === 0 && Object.keys(charge.data).length === 0) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Nothing to change — pass startTime, endTime, status, meetingUrl, the pay category, or the price.' });
     }
     if ((startTime && !endTime) || (endTime && !startTime)) {
       return res.status(400).json({ error: 'Validation Error', message: 'startTime and endTime must be changed together.' });
@@ -496,7 +566,7 @@ export const bulkUpdateSessions = async (req, res, next) => {
       return res.json({ message: 'No sessions matched — nothing was changed.', updated: 0 });
     }
 
-    const data = { ...pay.data };
+    const data = { ...pay.data, ...charge.data };
     if (startTime) data.startTime = new Date(`1970-01-01T${startTime}:00Z`);
     if (endTime) data.endTime = new Date(`1970-01-01T${endTime}:00Z`);
     if (status) data.status = status.toUpperCase();
@@ -541,7 +611,10 @@ export const updateSession = async (req, res, next) => {
     const pay = await readPayFields(req);
     if (pay.error) return res.status(400).json({ error: 'Validation Error', message: pay.error });
 
-    const updateData = { ...pay.data };
+    const charge = await readChargeFields(req);
+    if (charge.error) return res.status(400).json({ error: 'Validation Error', message: charge.error });
+
+    const updateData = { ...pay.data, ...charge.data };
 
     if (status) updateData.status = status.toUpperCase();
     if (date) updateData.date = new Date(date);

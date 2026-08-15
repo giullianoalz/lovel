@@ -344,6 +344,28 @@ model Session {
   absentById      String?               @map("absent_by") @db.Uuid
   absentReason    String?               @map("absent_reason") @db.VarChar(255)
   absentBy        User?                 @relation("SessionAbsences", fields: [absentById], references: [id])
+  // What this one meeting costs a family, charged per enrolled student.
+  //
+  // The other half of `payRateOverride` above: that is what the hour pays the
+  // teacher, this is what it bills the client, and the two are unrelated
+  // numbers that happen to hang off the same calendar entry.
+  //
+  // This is how the academy actually bills — the price goes on the first week
+  // of a class and every enrolled family owes it. Null means the meeting raises
+  // nothing, which is what all the other weeks stay. 0 is a real price ("this
+  // one is free"), deliberately distinct from null.
+  //
+  // The term-based quarterly run prices the same classes and is deliberately
+  // not executed; running both charges every family twice, and no constraint
+  // spans the two. See quarterlyBilling.service.js.
+  //
+  // Setting it does not charge anybody. It marks what the meeting costs; an
+  // admin reviews the pending ones and approves them into the ledger — see
+  // sessionCharges.service.js.
+  chargeAmount    Decimal?              @map("charge_amount") @db.Decimal(10, 2)
+  // What the family sees on the invoice line. Falls back to the class name.
+  chargeNote      String?               @map("charge_note") @db.VarChar(255)
+  charges         Transaction[]         @relation("SessionCharges")
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
   behaviorLogs    BehaviorLog[]
@@ -655,6 +677,11 @@ model Transaction {
   // above and termId/quarter, this is how the ledger knows what produced a
   // charge and can send an admin to that source to correct it.
   sessionCancellationId String? @map("session_cancellation_id") @db.Uuid
+  // Set only on a charge raised from a price typed onto one calendar entry.
+  // Same trick as termId/quarter and recurringChargeId/periodKey above: with
+  // the unique index below it is what stops one meeting billing the same
+  // student twice, however many times an admin re-runs the approval.
+  sessionId   String?         @map("session_id") @db.Uuid
   invoiceId   String?         @map("invoice_id") @db.Uuid
   paymentId   String?         @map("payment_id") @db.Uuid
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -664,11 +691,13 @@ model Transaction {
   student     User?           @relation(fields: [studentId], references: [id])
   recurringCharge RecurringCharge? @relation(fields: [recurringChargeId], references: [id], onDelete: SetNull)
   sessionCancellation SessionCancellation? @relation(fields: [sessionCancellationId], references: [id], onDelete: SetNull)
+  session     Session?        @relation("SessionCharges", fields: [sessionId], references: [id], onDelete: SetNull)
   snackReload SnackReloadRequest?
   invoiceLine InvoiceLine?
 
   @@unique([studentId, termId, quarter])
   @@unique([recurringChargeId, periodKey])
+  @@unique([studentId, sessionId])
   @@index([familyId])
   @@index([date])
   @@index([sessionCancellationId])

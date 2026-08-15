@@ -1,6 +1,24 @@
 /**
  * Quarterly tuition.
  *
+ * ⚠️ NOT THE LIVE BILLING PATH — and running it would double-bill.
+ *
+ * The academy charges families from the calendar instead: a price typed onto the
+ * first week of each class, approved under Billing → Calendar Charges. Confirmed
+ * by the admin on 2026-08-15 ("yo solo uso el flujo del calendario"). See
+ * sessionCharges.service.js.
+ *
+ * Both systems price the same classes and neither knows about the other. The
+ * term carries regularRate $400 and the electives their $130 priceOverride, and
+ * those same amounts now sit on Session.chargeAmount for the first week of each
+ * class. The unique indexes that make each run safe to repeat are different —
+ * (studentId, termId, quarter) here versus (studentId, sessionId) there — so the
+ * database will NOT stop a family being charged once by each. It only stops each
+ * system charging twice by itself.
+ *
+ * Everything below still works and is left in place in case the term-based route
+ * is ever picked back up. It simply is not executed today.
+ *
  * A term is billed in two quarters at the same rate, so the charges are raised
  * twice. The amount is read off the roster *as it stands when the run happens*
  * rather than off what the family originally registered for — that is the whole

@@ -1113,6 +1113,13 @@ export const previewQuarterCharges = async (req, res, next) => {
  * Raises the quarter's tuition as Transactions, which is what the existing
  * invoicing screen bundles into an invoice.
  *
+ * ⚠️ This is the money-moving end of a route the academy no longer uses. Billing
+ * happens from the calendar now (see sessionCharges.service.js), and the same
+ * classes are priced in both places — so calling this today charges every family
+ * a second time. The unique index below guards against re-running *this*, not
+ * against overlapping with the calendar charges. Read the header of
+ * quarterlyBilling.service.js before enabling it anywhere.
+ *
  * Recomputed here rather than trusting amounts posted by the client: the
  * browser must not be able to name the price. Re-running is safe — the unique
  * index on (studentId, termId, quarter) refuses a second charge for the same

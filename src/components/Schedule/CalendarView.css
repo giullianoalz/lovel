@@ -1982,6 +1982,30 @@
   background: #f8fafc;
 }
 
+/* Sits where the roster would be when its fetch failed. Amber rather than red:
+   nothing is broken or lost, we just don't know who is in the class yet. */
+.roster-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  background: #fffbeb;
+}
+
+.roster-load-error p {
+  margin: 0;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.roster-load-error .text-action {
+  flex-shrink: 0;
+}
+
 .roster-student-item {
   display: flex;
   align-items: center;
@@ -2995,4 +3019,91 @@ select.form-control {
 @keyframes calAbsentIn {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── What this meeting charges the family ─────────────────────
+   Deliberately a separate block from the pay one above, and tinted differently:
+   the two carry numbers that look alike and mean opposite things — one is money
+   going out to the teacher, the other money coming in from the client. Anything
+   that makes them read as one group invites typing the price into the rate. */
+.cal-charge-block {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.cal-charge-block .meta-item { margin: 0; gap: 8px; }
+
+.cal-charge-amount {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.cal-charge-amount .form-control {
+  width: 92px;
+  height: 34px;
+  font-size: 13px;
+}
+
+.cal-charge-note {
+  flex: 1;
+  min-width: 140px;
+  height: 34px;
+  font-size: 13px;
+}
+
+/* "Priced, but not yet billed" — the price on a session is a draft until an
+   admin approves it, and a row that didn't say so would read as money already
+   charged. */
+.cal-charge-pending {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+/* The price row when nothing is set. Muted, but present — this is the row an
+   admin scans for when they want to know what a meeting charges, and one that
+   only rendered once a price existed was missing exactly when it was needed. */
+.cal-charge-unset {
+  color: var(--text-muted, #94a3b8);
+  font-size: 13px;
+}
+
+.cal-charge-set {
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #059669;
+  font-size: 12.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cal-charge-set:hover { color: #047857; }
+
+/* Helper text under the price boxes on the create form. */
+.cal-price-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted, #94a3b8);
+}
+
+.cal-price-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted, #94a3b8);
 }

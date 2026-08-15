@@ -17,6 +17,8 @@ import {
   generateEmaBatch,
   reconcileEmaRemittance,
   refundPayment,
+  previewSessionCharges,
+  generateSessionCharges,
 } from '../controllers/billing.controller.js';
 import {
   listRecurringCharges,
@@ -81,5 +83,13 @@ router.post('/ema/reconcile', authenticate, requireRole('ADMIN'), reconcileEmaRe
 
 // POST /api/billing/payments/:id/refund — Refund a payment (Stripe reversal if card, ledger-only otherwise) (Admin)
 router.post('/payments/:id/refund', authenticate, requireRole('ADMIN'), refundPayment);
+
+// GET /api/billing/session-charges — What the priced meetings would charge (Admin).
+// Read-only: this is the sheet reviewed before any money is committed.
+router.get('/session-charges', authenticate, requireRole('ADMIN'), previewSessionCharges);
+
+// POST /api/billing/session-charges — Raise those charges into the ledger (Admin).
+// Committing money to real families is an admin decision and nobody else's.
+router.post('/session-charges', authenticate, requireRole('ADMIN'), generateSessionCharges);
 
 export default router;

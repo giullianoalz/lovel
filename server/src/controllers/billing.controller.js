@@ -8,6 +8,7 @@ import { nextLcNumber } from '../services/invoicing.service.js';
 import { buildInvoicePdf, invoicePdfFilename } from '../services/invoicePdf.service.js';
 import { sendInvoiceEmail } from '../services/email.service.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
+import { buildSessionCharges, isBillable } from '../services/sessionCharges.service.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -39,6 +40,11 @@ const originOf = (t) => {
     // but the admin decides its charge in the Front Desk queue, which is the
     // screen that can actually change this fee.
     return { kind: 'CANCELLATION_FEE', label: 'Cancellation review', href: '/alerts' };
+  }
+  if (t.sessionId) {
+    // The price lives on the calendar entry, so that is where an admin has to
+    // go to change what this charge will be next time it is raised.
+    return { kind: 'SESSION', label: 'Priced on the calendar', href: '/schedule', sessionId: t.sessionId };
   }
   if (t.snackReload) {
     return { kind: 'REWARD', label: 'Snack punch reload', href: null };
@@ -1298,4 +1304,116 @@ export const refundPayment = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+};
+
+/**
+ * GET /api/billing/session-charges?from=&to=
+ * What the priced meetings in a date range would charge. Read-only — this is
+ * the sheet an admin checks before any money is committed.
+ */
+export const previewSessionCharges = async (req, res, next) => {
+  try {
+    const { from, to } = req.query;
+    const range = parseChargeRange(from, to);
+    if (range.error) {
+      return res.status(400).json({ error: 'Validation Error', message: range.error });
+    }
+    res.json(await buildSessionCharges(range));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/billing/session-charges
+ * Body: { from?, to?, sessionIds?: string[] }
+ * Raises the priced meetings as Transactions, which the invoicing screen then
+ * bundles onto an invoice.
+ *
+ * Recomputed here rather than trusting amounts posted by the client: the browser
+ * must not be able to name the price. Re-running is safe — the unique index on
+ * (studentId, sessionId) refuses a second charge for the same meeting, so a
+ * double click or a retry after a timeout cannot bill twice.
+ *
+ * `sessionIds` narrows the commit to particular meetings, for the admin who
+ * wants to raise this week's workshop without also releasing everything else
+ * sitting in the range.
+ */
+export const generateSessionCharges = async (req, res, next) => {
+  try {
+    const { from, to, sessionIds } = req.body;
+    const range = parseChargeRange(from, to);
+    if (range.error) {
+      return res.status(400).json({ error: 'Validation Error', message: range.error });
+    }
+
+    const { lines } = await buildSessionCharges(range);
+    const wanted = Array.isArray(sessionIds) && sessionIds.length > 0
+      ? new Set(sessionIds)
+      : null;
+    const billable = lines.filter((l) => isBillable(l) && (!wanted || wanted.has(l.sessionId)));
+
+    if (billable.length === 0) {
+      return res.json({
+        message: 'Nothing to charge — every priced meeting in that range is already billed.',
+        created: 0,
+        skipped: lines.length,
+      });
+    }
+
+    const created = await prisma.transaction.createMany({
+      data: billable.map((l) => ({
+        studentId: l.studentId,
+        familyId: l.familyId,
+        amount: l.amount,
+        type: 'CHARGE',
+        description: l.description,
+        date: l.date,
+        sessionId: l.sessionId,
+      })),
+      // Belt and braces alongside the unique index: a concurrent second run
+      // skips what it finds rather than failing the whole batch.
+      skipDuplicates: true,
+    });
+
+    console.log(
+      `[Billing] ${req.user.email} raised ${created.count} session charge(s) `
+      + `totalling $${billable.reduce((sum, l) => sum + l.amount, 0).toFixed(2)}`
+    );
+
+    res.json({
+      message: `Raised ${created.count} charge${created.count === 1 ? '' : 's'}.`,
+      created: created.count,
+      skipped: lines.length - billable.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * The from/to pair as Dates, or an error message.
+ *
+ * Both are optional — no range means "every priced meeting there has ever
+ * been", which is what an admin wants the first time they open the screen and
+ * harmless because anything already billed comes back flagged rather than
+ * raised again.
+ */
+const parseChargeRange = (from, to) => {
+  const parse = (value, label) => {
+    if (!value) return { value: undefined };
+    const date = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
+    return Number.isNaN(date.getTime())
+      ? { error: `${label} must be a valid date.` }
+      : { value: date };
+  };
+
+  const start = parse(from, 'from');
+  if (start.error) return { error: start.error };
+  const end = parse(to, 'to');
+  if (end.error) return { error: end.error };
+  if (start.value && end.value && end.value < start.value) {
+    return { error: 'from must be on or before to.' };
+  }
+  return { from: start.value, to: end.value };
 };
