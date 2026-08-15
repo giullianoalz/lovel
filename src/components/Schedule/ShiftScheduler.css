@@ -215,12 +215,44 @@
   background: rgba(16, 185, 129, 0.08);
 }
 
-.shift-done {
+/* …except when it is the undo, where hovering is a step back towards paying. */
+.shift-item-actions .shift-mark:hover:not(:disabled) {
+  color: #059669;
+  border-color: #059669;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+/* Nobody worked it. Quiet until it has been used — it is one option among
+   several, not the expected end of every shift — and red on the way to being
+   used, because from then on it is hours missing from somebody's pay. */
+.shift-absent {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: transparent;
   font-size: 11.5px;
-  color: #059669;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.shift-absent:hover:not(:disabled) {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.shift-absent:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Already marked: the button now reads "Not paid" and undoes it, so it sits in
+   the warning colour rather than the neutral one. */
+.shift-item-actions .shift-mark {
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.07);
 }
 
 .shift-remove {

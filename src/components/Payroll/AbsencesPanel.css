@@ -1,0 +1,118 @@
+/* The hours a period deliberately isn't paying for. Grouped by person, because
+   that is who lost them — not a flat list of orphan hours. */
+
+.absence-panel {
+  max-width: 760px;
+  width: 100%;
+  padding: 28px;
+  animation: absence-rise 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes absence-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.absence-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+  color: #dc2626;
+}
+
+.absence-header h2 { margin: 0 0 4px; font-size: 19px; color: var(--text-main, #1e293b); }
+.absence-header p { margin: 0; font-size: 13px; color: var(--text-muted, #64748b); max-width: 62ch; }
+
+.absence-empty { font-size: 14px; color: var(--text-muted, #94a3b8); padding: 24px 0; }
+
+.absence-list { max-height: 56vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+
+.absence-person {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.absence-person-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.absence-person-head strong { font-size: 14px; color: var(--text-main, #1e293b); }
+.absence-person-sum { font-size: 11.5px; color: #b91c1c; }
+
+.absence-row {
+  display: grid;
+  grid-template-columns: 62px 1fr auto minmax(0, 1.3fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 4px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  transition: background 0.15s ease;
+}
+
+.absence-row:hover { background: rgba(148, 163, 184, 0.08); }
+
+.absence-date { color: var(--text-muted, #64748b); white-space: nowrap; }
+
+.absence-title {
+  color: var(--text-main, #1e293b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.absence-kind {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--text-muted, #64748b);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.absence-hours { color: var(--text-main, #1e293b); font-variant-numeric: tabular-nums; }
+
+.absence-reason {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.absence-restore {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.absence-restore:hover:not(:disabled) {
+  color: #059669;
+  border-color: #059669;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.absence-restore:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (max-width: 640px) {
+  .absence-panel { padding: 20px; }
+  .absence-row { grid-template-columns: 58px 1fr auto auto; }
+  .absence-reason { display: none; }
+}

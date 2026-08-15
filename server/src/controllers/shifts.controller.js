@@ -11,7 +11,7 @@
  */
 
 import prisma from '../config/database.js';
-import { loadPayCategories, freezeShiftRates, clearFrozenRates } from '../services/payroll.service.js';
+import { loadPayCategories, freezeShiftRates, clearFrozenRates, isShiftPayable } from '../services/payroll.service.js';
 import { hasRole, isFrontDeskOnly } from '../utils/roles.js';
 
 const SHIFT_STATUSES = ['SCHEDULED', 'COMPLETED', 'CANCELLED'];
@@ -324,21 +324,13 @@ export const updateShift = async (req, res, next) => {
       include: shiftInclude,
     });
 
-    // The rate is stamped on when the shift is confirmed worked, and released
-    // if it stops being confirmed or if the rate on it is corrected after the
-    // fact — see freezeShiftRates. An hour keeps the contract it was worked under.
-    if (shift.status !== 'COMPLETED') {
-      await clearFrozenRates({ shiftIds: [shift.id] });
-    } else {
-      if (data.payRateOverride !== undefined || data.payCategoryKey !== undefined) {
-        await clearFrozenRates({ shiftIds: [shift.id] });
-      }
-      await freezeShiftRates([shift.id]);
-    }
-
-    if (status === 'COMPLETED' && existing.status !== 'COMPLETED') {
-      console.log(`[Payroll] ${req.user.email} marked ${existing.staff.fullName}'s ${existing.date.toISOString().slice(0, 10)} shift worked`);
-    }
+    // The rate is stamped on once the shift's hour has passed, and released if
+    // the shift stops being payable or if the rate on it is corrected after the
+    // fact — see freezeShiftRates. An hour keeps the contract it was worked
+    // under. Clear first, then freeze, so a correction re-stamps at the new
+    // number instead of keeping the old one.
+    await clearFrozenRates({ shiftIds: [shift.id] });
+    if (shift.status !== 'CANCELLED') await freezeShiftRates([shift.id]);
 
     const categories = new Map((await loadPayCategories()).map((c) => [c.key, c]));
     res.json({ message: 'Shift updated.', shift: decorate(shift, categories) });
@@ -348,67 +340,58 @@ export const updateShift = async (req, res, next) => {
 };
 
 /**
- * POST /api/shifts/complete
- * Mark a batch of shifts worked (Admin only).
+ * POST /api/shifts/absence
+ * Nobody worked this shift — don't pay it (Admin only).
  *
- * Payroll month-end is "everything on the rota happened, except Tuesday" — one
- * request rather than twenty, so closing out a month isn't a reason to skip it.
- * Body: { ids: string[] } or { from, to, staffId? }
+ * A shift is paid once its hour has passed, the same as a class, so there is
+ * nothing to confirm at month end any more. What is left is the exception: the
+ * person was rota'd and did not come. Marking it takes the hours off payroll
+ * immediately; `absent: false` puts them back.
+ *
+ * Body: { ids: string[], absent?: boolean, reason?: string }
  */
-export const completeShifts = async (req, res, next) => {
+export const setShiftAbsence = async (req, res, next) => {
   try {
-    const { ids, from, to, staffId } = req.body;
+    const { ids, absent = true, reason } = req.body;
 
-    let where;
-    if (Array.isArray(ids) && ids.length > 0) {
-      where = { id: { in: ids }, status: 'SCHEDULED' };
-    } else if (from && to) {
-      const fromDate = toDate(from);
-      const toDate_ = toDate(to);
-      if (!fromDate || !toDate_) {
-        return res.status(400).json({ error: 'Validation Error', message: 'from and to must be dates.' });
-      }
-      where = {
-        date: { gte: fromDate, lte: toDate_ },
-        status: 'SCHEDULED',
-        ...(staffId ? { staffId } : {}),
-      };
-    } else {
-      return res.status(400).json({
-        error: 'Validation Error',
-        message: 'Send either ids, or a from/to range.',
-      });
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Send the shifts to mark in ids.' });
     }
 
-    // Never ahead of the calendar: a shift that hasn't happened yet cannot be
-    // confirmed as worked, and confirming a whole month in advance would put
-    // money on hours nobody has stood there for.
-    const today = new Date(new Date().setHours(0, 0, 0, 0));
-    const requestedEnd = where.date?.lte;
-    where.date = {
-      ...(where.date || {}),
-      // The earlier of "today" and whatever end date was asked for — replacing
-      // the end outright would quietly confirm shifts past the range requested.
-      lte: requestedEnd && requestedEnd < today ? requestedEnd : today,
-    };
-
-    // The ids are read before the write, because updateMany can't return them
-    // and the rate has to be stamped onto exactly the rows this call confirmed.
-    const confirming = await prisma.workShift.findMany({ where, select: { id: true } });
-    const confirmedIds = confirming.map((s) => s.id);
-
-    const { count } = await prisma.workShift.updateMany({
-      where: { id: { in: confirmedIds } },
-      data: { status: 'COMPLETED' },
+    const targets = await prisma.workShift.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, date: true, staff: { select: { fullName: true } } },
     });
-    await freezeShiftRates(confirmedIds);
-    console.log(`[Payroll] ${req.user.email} marked ${count} shift(s) worked`);
+
+    if (targets.length === 0) {
+      return res.status(404).json({ error: 'Not Found', message: 'No such shifts.' });
+    }
+
+    const targetIds = targets.map((s) => s.id);
+
+    await prisma.workShift.updateMany({
+      where: { id: { in: targetIds } },
+      data: absent
+        ? { absentAt: new Date(), absentById: req.user.id, absentReason: reason?.trim()?.slice(0, 255) || null }
+        : { absentAt: null, absentById: null, absentReason: null },
+    });
+
+    // An hour nobody is paid for holds no rate; one that comes back is stamped
+    // like any other elapsed hour.
+    await clearFrozenRates({ shiftIds: targetIds });
+    if (!absent) await freezeShiftRates(targetIds);
+
+    // The log is the only trace of who took hours off somebody's pay.
+    console.log(
+      `[Payroll] ${req.user.email} ${absent ? 'marked absent' : 'restored pay for'} ${targetIds.length} shift(s): ` +
+      targets.map((s) => `${s.staff?.fullName || '?'} ${s.date.toISOString().slice(0, 10)}`).join('; ')
+    );
 
     res.json({
-      message: count === 0
-        ? 'Nothing to confirm — those shifts are either already done or still in the future.'
-        : `${count} shift${count === 1 ? '' : 's'} marked as worked.`,
-      count,
+      message: absent
+        ? `${targetIds.length} shift${targetIds.length === 1 ? '' : 's'} marked as not worked — they won't be paid.`
+        : `${targetIds.length} shift${targetIds.length === 1 ? '' : 's'} back on payroll.`,
+      count: targetIds.length,
     });
   } catch (error) {
     next(error);
@@ -419,9 +402,14 @@ export const completeShifts = async (req, res, next) => {
  * DELETE /api/shifts/:id
  * Remove a shift (Admin only).
  *
- * A shift already marked worked is pay history, so it is cancelled rather than
- * deleted — the hours stop counting but the record of what was scheduled, and
- * that somebody unwound it, stays.
+ * A shift whose hour has already passed is pay history, so it is cancelled
+ * rather than deleted — the hours stop counting but the record of what was
+ * scheduled, and that somebody unwound it, stays.
+ *
+ * Note this cancels rather than marks absent, and the two are different on
+ * purpose: cancelled means the shift should not have been on the rota, absent
+ * means it should have been and nobody came. Both stop the pay; only one of
+ * them is a statement about the person.
  */
 export const deleteShift = async (req, res, next) => {
   try {
@@ -433,18 +421,18 @@ export const deleteShift = async (req, res, next) => {
       return res.status(404).json({ error: 'Not Found', message: 'That shift does not exist.' });
     }
 
-    if (existing.status === 'COMPLETED') {
+    if (isShiftPayable(existing)) {
       const shift = await prisma.workShift.update({
         where: { id: req.params.id },
         data: { status: 'CANCELLED' },
         include: shiftInclude,
       });
-      // It no longer counts, so it no longer holds a rate — if it is ever
-      // confirmed again it should price at whatever is true then.
+      // It no longer counts, so it no longer holds a rate — if it is ever put
+      // back it should price at whatever is true then.
       await clearFrozenRates({ shiftIds: [shift.id] });
-      console.log(`[Payroll] ${req.user.email} cancelled a completed shift for ${existing.staff.fullName}`);
+      console.log(`[Payroll] ${req.user.email} cancelled an already-worked shift for ${existing.staff.fullName}`);
       return res.json({
-        message: `That shift was already marked worked, so it was cancelled instead — it no longer counts towards pay.`,
+        message: `That shift's hours had already passed, so it was cancelled instead of deleted — it no longer counts towards pay.`,
         shift,
       });
     }

@@ -249,18 +249,25 @@ export const listSessions = async (req, res, next) => {
         },
         notes: { orderBy: { createdAt: 'desc' } },
         materials: true,
+        // Who marked the teacher absent, so the calendar can name them on the
+        // session rather than showing an anonymous "not paid" flag.
+        absentBy: { select: { fullName: true } },
       },
     });
 
     // A one-off rate on a session is somebody's pay. Admins see it because they
     // set it, and a teacher sees it on their own class because it is their own
     // money — front desk, who can read the whole building's calendar, does not.
+    //
+    // An absence is redacted along the same line and for a stronger reason: it
+    // is a statement about a member of staff, and a parent reading their child's
+    // calendar has no business being told their tutor did not show up.
     const isAdmin = hasRole(req.user, 'ADMIN');
     res.json({
       sessions: sessions.map((s) =>
         isAdmin || s.class?.teacherId === req.user.id
           ? s
-          : { ...s, payRateOverride: null, paidRate: null }
+          : { ...s, payRateOverride: null, paidRate: null, absentAt: null, absentReason: null, absentBy: null }
       ),
     });
   } catch (error) {
@@ -503,15 +510,13 @@ export const bulkUpdateSessions = async (req, res, next) => {
       data,
     });
 
-    // Same rule as the single-session route: confirming stamps the rate,
-    // anything else releases it. Retiming or recategorising a series that was
-    // already signed off re-stamps at whatever the rate is now.
-    if (data.status && data.status !== 'COMPLETED') {
+    // Same rule as the single-session route: the stamp is only released when
+    // the rate was touched or the hours stopped being payable, then whatever
+    // is still payable and unstamped gets one.
+    if (Object.keys(pay.data).length > 0 || data.status === 'CANCELLED') {
       await clearFrozenRates({ sessionIds: targetIds });
-    } else {
-      if (Object.keys(pay.data).length > 0) await clearFrozenRates({ sessionIds: targetIds });
-      await freezeSessionRates(targetIds);
     }
+    await freezeSessionRates(targetIds);
 
     res.json({
       message: `${targets.length} session${targets.length === 1 ? '' : 's'} updated.`,
@@ -552,18 +557,19 @@ export const updateSession = async (req, res, next) => {
     });
 
     // An hour belongs to the contract that was in force when it happened, so
-    // the rate is stamped onto the session the moment it is confirmed — and
-    // released again if it stops being confirmed, or if an admin corrects the
-    // rate on one already signed off. Order matters: clear first, then freeze,
-    // so a correction re-stamps at the new number instead of keeping the old.
-    if (updateData.status && updateData.status !== 'COMPLETED') {
+    // the rate is stamped onto the session once its hour has passed — and
+    // released again if it stops being payable, or if an admin corrects the
+    // rate on one already stamped. Order matters: clear first, then freeze, so
+    // a correction re-stamps at the new number instead of keeping the old.
+    //
+    // Only cleared when the rate itself was touched or the hour stopped being
+    // payable — clearing on every edit would mean fixing a typo in a Zoom link
+    // silently repriced a class taught last March at today's rate.
+    const repriced = pay.data.payRateOverride !== undefined || pay.data.payCategoryKey !== undefined;
+    if (repriced || updateData.status === 'CANCELLED') {
       await clearFrozenRates({ sessionIds: [req.params.id] });
-    } else {
-      if (pay.data.payRateOverride !== undefined || pay.data.payCategoryKey !== undefined) {
-        await clearFrozenRates({ sessionIds: [req.params.id] });
-      }
-      await freezeSessionRates([req.params.id]);
     }
+    await freezeSessionRates([req.params.id]);
 
     res.json({ message: 'Session updated.', session });
   } catch (error) {
@@ -1137,6 +1143,45 @@ export const addSessionNote = async (req, res, next) => {
 };
 
 /**
+ * PATCH /api/sessions/:id/notes/:noteId
+ * Edit an existing note in place.
+ *
+ * Exists mainly for the preview auto-published from an approved lesson plan:
+ * plans describe what a class WILL do, and when something changes or doesn't
+ * happen, staff need to correct what families already see rather than publish
+ * a second, contradicting note.
+ */
+export const updateSessionNote = async (req, res, next) => {
+  try {
+    const { id, noteId } = req.params;
+    const { notes, visibility } = req.body;
+
+    const denied = await denyForeignSession(req.user, id);
+    if (denied) return res.status(404).json(denied);
+
+    // Scoped to the session in the path so a valid note id from another class
+    // can't be edited by someone who only has access to this one.
+    const existing = await prisma.sessionNote.findFirst({
+      where: { id: noteId, sessionId: id },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json(NOT_FOUND);
+
+    const note = await prisma.sessionNote.update({
+      where: { id: noteId },
+      data: {
+        ...(notes !== undefined ? { notes } : {}),
+        ...(visibility !== undefined ? { visibility } : {}),
+      },
+    });
+
+    res.json({ message: 'Session note updated.', note });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/sessions/:id/cancel-student
  * Admin/front-desk cancels a single student's spot in a session.
  *
@@ -1362,78 +1407,76 @@ export const resolveCancellation = async (req, res, next) => {
 };
 
 /**
- * POST /api/sessions/pay-approval
- * Pay for classes nobody closed out (Admin only).
+ * POST /api/sessions/absence
+ * The teacher did not turn up — don't pay this hour (Admin only).
  *
- * A class is normally confirmed by the teacher — marked complete, register
- * saved — and payroll pays nothing without that. Teachers forget, and the hour
- * was still taught, so payroll would flag it ("3 h not closed out") and then
- * refuse to pay it: the only remedy was to settle up outside the system.
+ * Pay now accrues from the calendar: an hour that has passed is an hour that is
+ * owed, and nobody is asked to confirm it class by class. That is right almost
+ * always and wrong in exactly one case, which this handles — the teacher was
+ * not there. Marking it takes the hour off payroll straight away.
  *
- * This is the way back in. The admin vouches that the class ran, the session
- * becomes payable with no register, and the approval is stamped with their name
- * — it authorises money against no evidence, so it must never be anonymous.
+ * It lives on the calendar entry because the calendar is where the person who
+ * knows about the absence already is, and because "which hour" is a question
+ * only the calendar can answer. The class itself is untouched: it stays on the
+ * timetable, its register and notes survive, and the families' view does not
+ * change. This is a statement about pay, not about whether the class existed.
  *
- * Body: { sessionIds: string[], approved?: boolean }
- * `approved: false` withdraws it again, for the approval made by mistake.
+ * Stamped with the name of whoever marked it, because it removes money from
+ * somebody's payslip and that person is the least able to see it happen.
+ *
+ * Body: { sessionIds: string[], absent?: boolean, reason?: string }
+ * `absent: false` undoes it, and the hour is paid again.
  */
-export const setSessionPayApproval = async (req, res, next) => {
+export const setSessionAbsence = async (req, res, next) => {
   try {
-    const { sessionIds, approved = true } = req.body;
+    const { sessionIds, absent = true, reason } = req.body;
 
     if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
       return res.status(400).json({
         error: 'Validation Error',
-        message: 'Send the sessions to approve in sessionIds.',
+        message: 'Send the sessions to mark in sessionIds.',
       });
     }
 
-    // Only sessions that have actually happened. Approving next Tuesday's class
-    // would pay for a lesson nobody has taught yet, and an approval made in
-    // advance is exactly the one nobody re-checks afterwards.
-    const today = new Date(new Date().setHours(0, 0, 0, 0));
     const targets = await prisma.session.findMany({
-      where: { id: { in: sessionIds }, date: { lte: today }, status: { not: 'CANCELLED' } },
+      where: { id: { in: sessionIds } },
       select: { id: true, date: true, class: { select: { name: true, teacher: { select: { fullName: true } } } } },
     });
 
     if (targets.length === 0) {
-      return res.status(400).json({
-        error: 'Validation Error',
-        message: 'None of those sessions can be approved — they are cancelled, or they have not happened yet.',
-      });
+      return res.status(404).json({ error: 'Not Found', message: 'No such sessions.' });
     }
 
     const ids = targets.map((s) => s.id);
 
     await prisma.session.updateMany({
       where: { id: { in: ids } },
-      data: approved
-        ? { payApprovedById: req.user.id, payApprovedAt: new Date() }
-        : { payApprovedById: null, payApprovedAt: null },
+      data: absent
+        ? {
+          absentAt: new Date(),
+          absentById: req.user.id,
+          absentReason: reason?.trim()?.slice(0, 255) || null,
+        }
+        : { absentAt: null, absentById: null, absentReason: null },
     });
 
-    // Approving makes the hour payable, so its rate is pinned now, exactly as
-    // it would have been had the teacher closed the class out. Withdrawing
-    // releases it again — an hour that is no longer paid holds no rate.
-    if (approved) {
-      await freezeSessionRates(ids);
-    } else {
-      await clearFrozenRates({ sessionIds: ids });
-    }
+    // An hour nobody is paid for holds no rate; one that comes back gets the
+    // rate stamped as any other elapsed hour would. Clear first, then freeze,
+    // so undoing an absence prices at today's rate rather than a stale stamp.
+    await clearFrozenRates({ sessionIds: ids });
+    if (!absent) await freezeSessionRates(ids);
 
-    // No audit table exists yet, so the log is the only trace of who authorised
-    // pay for a class with no register. Worth a real record if this is ever
-    // questioned.
+    // No audit table exists yet, so the log is the only trace of who took an
+    // hour off somebody's pay. Worth a real record if this is ever questioned.
     console.log(
-      `[Payroll] ${req.user.email} ${approved ? 'approved' : 'withdrew'} pay for ${ids.length} unconfirmed session(s): ` +
+      `[Payroll] ${req.user.email} ${absent ? 'marked absent' : 'restored pay for'} ${ids.length} session(s): ` +
       targets.map((s) => `${s.class?.teacher?.fullName || '?'} ${s.date.toISOString().slice(0, 10)} ${s.class?.name || ''}`).join('; ')
     );
 
     res.json({
-      message: approved
-        ? `${ids.length} class${ids.length === 1 ? '' : 'es'} approved for pay.`
-        : `${ids.length} approval${ids.length === 1 ? '' : 's'} withdrawn.`,
+      message: absent
+        ? `${ids.length} class${ids.length === 1 ? '' : 'es'} marked as not taught — they won't be paid.`
+        : `${ids.length} class${ids.length === 1 ? '' : 'es'} back on payroll.`,
       count: ids.length,
     });
   } catch (error) {

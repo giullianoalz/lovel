@@ -125,6 +125,8 @@ model User {
   workShifts             WorkShift[]               @relation("StaffShifts")
   shiftsScheduled        WorkShift[]               @relation("ShiftScheduledBy")
   sessionPayApprovals    Session[]                 @relation("SessionPayApprovals")
+  sessionAbsences        Session[]                 @relation("SessionAbsences")
+  shiftAbsences          WorkShift[]               @relation("ShiftAbsences")
   spaceReservations      SpaceReservation[]
   tempPickupAuths        TempPickupAuth[]
   pickupAuthsAsStudent   TempPickupAuth[]          @relation("PickupAuthStudent")
@@ -328,6 +330,20 @@ model Session {
   payApprovedById String?               @map("pay_approved_by") @db.Uuid
   payApprovedAt   DateTime?             @map("pay_approved_at") @db.Timestamptz(6)
   payApprovedBy   User?                 @relation("SessionPayApprovals", fields: [payApprovedById], references: [id])
+  // The teacher did not turn up, so this hour is not paid.
+  //
+  // Pay now accrues from the calendar: once the hour has passed it is owed,
+  // and nobody is asked to confirm it. This is the one way out, and it lives
+  // on the calendar entry because that is where the person who knows about the
+  // absence already is. Setting it takes the hour off payroll immediately;
+  // clearing it puts it back.
+  //
+  // Who, when and why rather than a boolean: this removes money from somebody's
+  // payslip, so the record has to name whoever did it and what they said.
+  absentAt        DateTime?             @map("absent_at") @db.Timestamptz(6)
+  absentById      String?               @map("absent_by") @db.Uuid
+  absentReason    String?               @map("absent_reason") @db.VarChar(255)
+  absentBy        User?                 @relation("SessionAbsences", fields: [absentById], references: [id])
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
   behaviorLogs    BehaviorLog[]
@@ -466,8 +482,15 @@ model WorkShift {
   createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  // The same escape hatch sessions have: the shift's hour passed, so it is
+  // paid, unless somebody says the person was not there. See Session.absentAt.
+  absentAt        DateTime?       @map("absent_at") @db.Timestamptz(6)
+  absentById      String?         @map("absent_by") @db.Uuid
+  absentReason    String?         @map("absent_reason") @db.VarChar(255)
+
   staff     User  @relation("StaffShifts", fields: [staffId], references: [id], onDelete: Cascade)
   createdBy User? @relation("ShiftScheduledBy", fields: [createdById], references: [id])
+  absentBy  User? @relation("ShiftAbsences", fields: [absentById], references: [id])
 
   @@index([staffId, date])
   @@index([date])

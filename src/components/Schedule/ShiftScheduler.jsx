@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Clock, Trash2, CheckCircle2, Plus, Repeat, AlertTriangle } from 'lucide-react';
+import { X, Clock, Trash2, UserX, Plus, Repeat, AlertTriangle } from 'lucide-react';
 import api from '../../lib/api';
 import { database } from '../../lib/database';
 import { useToast } from '../Layout/ToastProvider';
@@ -154,13 +154,19 @@ const ShiftScheduler = ({ onClose, onSaved, defaultDate }) => {
     }
   };
 
-  const markWorked = async (shift) => {
+  /**
+   * Nobody worked this shift, so don't pay it — or put it back on payroll.
+   *
+   * There is nothing to confirm any more: a shift is paid once its hour has
+   * passed. What is left is the exception, and this is it.
+   */
+  const setAbsence = async (shift, absent) => {
     setBusyId(shift.id);
     try {
-      await database.updateShift(shift.id, { status: 'COMPLETED' });
+      const res = await database.setShiftAbsence([shift.id], absent);
       await loadShifts();
       onSaved?.();
-      toast.success('Marked as worked — it will be paid in that month.');
+      toast.success(res.message);
     } catch (err) {
       toast.error(err.response?.data?.message || err.userMessage || 'Could not update that shift.');
     } finally {
@@ -358,23 +364,30 @@ const ShiftScheduler = ({ onClose, onSaved, defaultDate }) => {
                           {s.payRateOverride != null && <small>{money(s.payRateOverride)}/hr</small>}
                         </div>
                         <div className="shift-item-actions">
-                          {s.status === 'SCHEDULED' ? (
+                          {s.absentAt ? (
                             <button
                               className="shift-mark"
-                              onClick={() => markWorked(s)}
+                              onClick={() => setAbsence(s, false)}
                               disabled={busyId === s.id}
-                              title="Confirm it happened — this is what makes it pay"
+                              title="Put these hours back on payroll"
                             >
-                              <CheckCircle2 size={14} /> Worked
+                              <UserX size={14} /> Not paid
                             </button>
                           ) : (
-                            <span className="shift-done"><CheckCircle2 size={13} /> Worked</span>
+                            <button
+                              className="shift-absent"
+                              onClick={() => setAbsence(s, true)}
+                              disabled={busyId === s.id}
+                              title="Nobody worked it — take these hours off payroll"
+                            >
+                              <UserX size={14} /> No-show
+                            </button>
                           )}
                           <button
                             className="shift-remove"
                             onClick={() => removeShift(s)}
                             disabled={busyId === s.id}
-                            title={s.status === 'COMPLETED' ? 'Cancel — it stops counting towards pay' : 'Remove'}
+                            title="Remove — or cancel it, if its hours have already passed"
                           >
                             <Trash2 size={13} />
                           </button>
@@ -387,8 +400,8 @@ const ShiftScheduler = ({ onClose, onSaved, defaultDate }) => {
 
               <p className="shift-footnote">
                 <AlertTriangle size={13} />
-                A shift only reaches payroll once it's marked worked — scheduling somebody never
-                creates money on its own.
+                Scheduling somebody is what pays them: a shift reaches payroll on its own once its
+                hours have passed. Mark a no-show to take those hours back off.
               </p>
             </div>
           </div>

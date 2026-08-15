@@ -14,7 +14,7 @@
 
 import prisma from '../config/database.js';
 import { resolveMeetingUrl } from '../utils/meetingLink.js';
-import { academyToday } from '../utils/academyTime.js';
+import { academyNowParts } from '../utils/academyTime.js';
 import { CANCELLATION_WINDOW_HOURS } from '../constants/cancellationPolicy.js';
 
 /**
@@ -95,21 +95,27 @@ export const sessionHours = (entry) => {
 };
 
 /**
- * Freezes the rate onto the entries that were just confirmed as worked.
+ * Freezes the rate onto the entries whose hour has passed.
  *
  * An hour belongs to the contract that was in force when it happened. Without
  * this, raising somebody's rate in March reprices February, because pay is
  * computed from whatever the rates say at the moment you look. Stamping the
- * resolved rate at the moment of confirmation — COMPLETED for a session, worked
- * for a shift — makes a signed-off month permanent.
+ * resolved rate once the hour is earned makes a past month permanent.
+ *
+ * The moment that used to trigger this was a human confirming the class. There
+ * is no such moment any more, so the clock provides it: the hourly `pay-accrual`
+ * cron sweeps the hours that just ended and stamps them (see cron.jobs.js), and
+ * the session and shift routes call it too so an edit re-stamps immediately
+ * instead of waiting for the next sweep.
  *
  * Only fills entries that don't have a frozen rate yet, so re-running it is
- * harmless and re-saving an already-confirmed session never quietly reprices it.
- * Un-confirming clears it (see clearFrozenRates) so the hour prices live again.
+ * harmless and the sweep can pass over the same week forever without repricing
+ * anything. Marking somebody absent, or cancelling, clears it (see
+ * clearFrozenRates) so the hour prices live again if it comes back.
  *
  * Deliberately never throws to its caller: a session that fails to freeze is a
- * session that keeps pricing live, which is the old behaviour — worth a loud
- * log, not worth failing the request that marked the class complete.
+ * session that keeps pricing live, which is survivable — worth a loud log, not
+ * worth failing the request or the sweep that touched it.
  */
 export const freezeSessionRates = async (sessionIds) => {
   if (!sessionIds?.length) return 0;
@@ -117,18 +123,21 @@ export const freezeSessionRates = async (sessionIds) => {
     const [categoryList, sessions] = await Promise.all([
       loadPayCategories(),
       prisma.session.findMany({
-        // Anything payable, not only COMPLETED: a session an admin vouched for
-        // is being paid too, so its rate has to be pinned the same way — or a
-        // later raise would reprice an hour that was already signed off.
-        where: { id: { in: sessionIds }, ...PAYABLE_SESSION, paidRate: null },
+        where: { id: { in: sessionIds }, ...payableSessionWhere(), paidRate: null },
         select: {
           id: true, meetingUrl: true, payCategoryKey: true, payRateOverride: true,
           class: {
             select: {
               type: true, meetingUrl: true,
               teacher: {
+                // baseSalary is not optional here, however unused it looks: it
+                // is the only thing that tells rateContextFor this person is
+                // salaried, and a salaried hour must never be stamped (see the
+                // skip below). Left out, every hour a salaried teacher works
+                // gets pinned at the category rate and paid on top of the
+                // salary that already covers it.
                 select: {
-                  id: true, hourlyRate: true, flatRateOnly: true,
+                  id: true, hourlyRate: true, flatRateOnly: true, baseSalary: true,
                   payRates: { select: { category: true, hourlyRate: true } },
                 },
               },
@@ -186,12 +195,14 @@ export const freezeShiftRates = async (shiftIds) => {
     const [categoryList, shifts] = await Promise.all([
       loadPayCategories(),
       prisma.workShift.findMany({
-        where: { id: { in: shiftIds }, status: 'COMPLETED', paidRate: null },
+        where: { id: { in: shiftIds }, status: { not: 'CANCELLED' }, absentAt: null, paidRate: null, ...elapsed() },
         select: {
           id: true, payCategoryKey: true, payRateOverride: true,
           staff: {
+            // baseSalary for the same reason as freezeSessionRates: without it
+            // a salaried person's shifts are stamped and paid twice.
             select: {
-              id: true, hourlyRate: true, flatRateOnly: true,
+              id: true, hourlyRate: true, flatRateOnly: true, baseSalary: true,
               payRates: { select: { category: true, hourlyRate: true } },
             },
           },
@@ -233,10 +244,10 @@ export const freezeShiftRates = async (shiftIds) => {
 /**
  * Drops a frozen rate, so the hour prices live again.
  *
- * Called when something stops being confirmed — a session moved back off
- * COMPLETED, a shift cancelled, or an admin correcting the rate on an entry
- * that was already signed off. Leaving the old stamp in place would pin the
- * hour to a number nobody can now change.
+ * Called when something stops being payable — a session cancelled, somebody
+ * marked absent, or an admin correcting the rate on an hour that has already
+ * been stamped. Leaving the old stamp in place would pin the hour to a number
+ * nobody can now change.
  */
 export const clearFrozenRates = async ({ sessionIds, shiftIds } = {}) => {
   const writes = [];
@@ -309,6 +320,25 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 const toNumber = (value) => (value == null ? null : parseFloat(value));
 
+/** ISO date (YYYY-MM-DD), for labelling a range without a time component. */
+const isoDate = (date) => date.toISOString().slice(0, 10);
+
+/**
+ * The Monday of the week containing `input` (a Date, an ISO string, or
+ * nothing for today), at UTC midnight. Payroll is settled weekly, and every
+ * week on the calendar starts on Monday, so this is the one anchor the
+ * weekly screen needs — everything else is six days added to it.
+ */
+const mondayOf = (input) => {
+  const d = input ? new Date(input) : new Date();
+  const day = d.getUTCDay(); // 0 = Sunday .. 6 = Saturday
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() + diff);
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday;
+};
+
 /** The per-person context the cascade reads, built once per person. */
 const rateContextFor = (person, categories) => ({
   hourlyRate: toNumber(person.hourlyRate),
@@ -345,88 +375,114 @@ const monthRange = (targetMonth, targetYear) => [
 ];
 
 /**
- * Which sessions count as worked.
+ * Has this hour finished?
  *
- * Putting a class on the calendar must not create earnings, and neither should
- * a session nobody attended. Two things earn:
- *
- *   1. the class ran — COMPLETED with somebody present;
- *   2. the class died to a late cancellation. A student who cancels inside the
- *      24-hour window is charged the full session, and the teacher who held
- *      that slot and turned up is owed it just the same. Without this the
- *      academy collected on the hour while the person who lost it got nothing.
- *
- * Cancelling with a day's notice is the other side of that bargain: the slot
- * can still be filled, the family is charged half, and the hour is not paid.
- * A session the academy itself cancelled has no cancellation rows at all, so it
- * earns nothing — which is right, nobody was kept waiting.
- *
- * The two branches can both match one session (a group class where one student
- * cancelled late and the rest showed up). That is fine: this selects sessions,
- * and each is priced once, by the hour.
+ * `date` is a DATE and `endTime` a TIME, and Postgres will not compare the pair
+ * of them against an instant — so the question is asked in the same two halves
+ * the columns are stored in: an earlier day, or today with an end time already
+ * behind us. Both halves come off the academy's wall clock (see
+ * academyNowParts), so a class that ends at 5 PM starts earning at 5 PM local
+ * and not at whatever hour UTC happens to agree.
  */
-const PAYABLE_SESSION = {
+const elapsed = (now) => {
+  const { date, time } = academyNowParts(now);
+  return { OR: [{ date: { lt: date } }, { AND: [{ date }, { endTime: { lte: time } }] }] };
+};
+
+/**
+ * Still worth paying for, despite being off the timetable.
+ *
+ * A cancelled session is not worked — except when the cancellation came too
+ * late to free the slot. A student who cancels inside the 24-hour window is
+ * charged the full session, and the teacher who held that hour is owed it just
+ * the same; without this the academy collected on the hour while the person who
+ * lost it got nothing. Cancelling with a day's notice is the other side of that
+ * bargain: the slot can be refilled, the family is charged half, nobody is paid.
+ */
+const stillWorked = {
   OR: [
-    { status: 'COMPLETED', attendance: { some: { status: 'PRESENT' } } },
+    { status: { not: 'CANCELLED' } },
     { cancellations: { some: { hoursBeforeClass: { lt: CANCELLATION_WINDOW_HOURS } } } },
-    // 3. an admin vouched for it. Teachers forget to close a class out, and the
-    //    hour was still taught — without this the only remedy was to pay them
-    //    outside the system. Listed last because it is the one branch backed by
-    //    somebody's word rather than a record: see Session.payApprovedById.
-    { payApprovedAt: { not: null } },
   ],
 };
 
-const paidSessionsWhere = (startDate, endDate) => ({
+/**
+ * Which sessions count as worked: the ones whose hour has passed.
+ *
+ * Pay comes off the calendar. Booking somebody for an hour is the act that
+ * decides they will be paid for it, and when that hour ends the money is owed —
+ * no register to save, no admin to sign it off, nothing anybody has to remember
+ * to do. The rule this replaces wanted a human to confirm every single class,
+ * and the humans forgot: hours that were genuinely taught sat unpaid behind a
+ * warning panel until someone noticed. That is not caution, it is paying people
+ * late.
+ *
+ * So three things decide it, and all three are visible on the calendar entry
+ * itself — which is exactly where anyone who wants to change the answer goes:
+ *
+ *   1. `elapsed` — next Tuesday's class earns nothing today;
+ *   2. `stillWorked` — cancelled means unpaid, unless it was cancelled too late;
+ *   3. `absentAt` — the teacher did not turn up. The one hand-operated switch
+ *      left in the whole rule, set from the calendar, and it beats the rest.
+ *
+ * `AND`, because two of the three are OR-groups and one object cannot hold two
+ * `OR` keys.
+ */
+export const payableSessionWhere = (now = new Date()) => ({
+  absentAt: null,
+  AND: [elapsed(now), stillWorked],
+});
+
+export const paidSessionsWhere = (startDate, endDate, now = new Date()) => ({
   date: { gte: startDate, lte: endDate },
-  ...PAYABLE_SESSION,
+  ...payableSessionWhere(now),
 });
 
 /**
- * Sessions that have already happened but that payroll cannot pay for.
+ * Hours that have passed but are deliberately not paid, because somebody said
+ * the person was not there.
  *
- * Payroll can only price what somebody confirmed, and the two ways to confirm a
- * class both go through a human: marking it COMPLETED, and saving the register.
- * When neither happened the hour isn't unpaid on purpose — it's unpaid because
- * nobody closed it out, and the old behaviour was to drop it from the query
- * entirely. That is the one failure mode a payroll screen must not have: an
- * hour that is missing and silent looks exactly like an hour that was never
- * worked, so the person it belongs to is the only one who will ever notice.
- *
- * Deliberately not paid, only counted. A class with no register is a class
- * nobody can say happened, and inventing earnings from a calendar entry is how
- * you pay for lessons that were quietly dropped. The number exists so an admin
- * sees the hole before releasing payroll, not so the system fills it in.
- *
- * Only past sessions: this month's remaining classes are unconfirmed because
- * they haven't happened yet, which is not a problem to flag.
+ * Listed, not silently dropped. An absence is money taken off a payslip, and
+ * the person it was taken from is the one least able to see it happen — so the
+ * payroll screen shows every one of them, with the reason given and the name of
+ * whoever marked it, next to the hours they cost.
  */
-const unconfirmedSessionsWhere = (startDate, endDate, today) => ({
-  date: { gte: startDate, lte: endDate, lt: today },
+export const absentSessionsWhere = (startDate, endDate, now = new Date()) => ({
+  date: { gte: startDate, lte: endDate },
+  absentAt: { not: null },
+  ...elapsed(now),
+});
+
+/**
+ * Which shifts count as worked. Same rule as a class, for the same reason: the
+ * shift was booked, its hour has passed, so it is owed. A cancelled shift is
+ * not worked, and neither is one whose person was marked absent.
+ *
+ * Shifts have no late-cancellation bargain to honour — nobody holds a front
+ * desk slot open for a student — so this is the plain version of the rule.
+ */
+export const paidShiftsWhere = (startDate, endDate, now = new Date()) => ({
+  date: { gte: startDate, lte: endDate },
   status: { not: 'CANCELLED' },
-  NOT: PAYABLE_SESSION,
+  absentAt: null,
+  ...elapsed(now),
 });
-
-/** Why an already-past session could not be paid. */
-const unconfirmedReason = (session) =>
-  session.status === 'COMPLETED' ? 'no_attendance' : 'not_completed';
-
-export const UNCONFIRMED_REASON_LABELS = {
-  no_attendance: 'Marked complete, but no register was saved',
-  not_completed: 'Never marked complete',
-};
 
 /**
- * Which shifts count as worked.
+ * The same rule as paidShiftsWhere, decided in memory.
  *
- * Nobody takes attendance at the front desk, so a shift is paid once someone
- * marks it COMPLETED — the same "a human confirmed this happened" that
- * attendance provides for a class.
+ * Both payroll screens fetch every shift in the range — they have to show the
+ * absent ones as well as the paid ones — so the split happens here rather than
+ * in a second query. Kept next to the `where` it mirrors: if one of the two
+ * ever changes, the other is the next thing you read.
  */
-const paidShiftsWhere = (startDate, endDate) => ({
-  date: { gte: startDate, lte: endDate },
-  status: 'COMPLETED',
-});
+export const isShiftPayable = (shift, now = new Date()) => {
+  if (shift.status === 'CANCELLED' || shift.absentAt) return false;
+  const { date, time } = academyNowParts(now);
+  const shiftDate = new Date(shift.date);
+  if (shiftDate < date) return true;
+  return shiftDate.getTime() === date.getTime() && new Date(shift.endTime) <= time;
+};
 
 /**
  * The session fields payroll prices an hour from.
@@ -440,8 +496,6 @@ const PAID_SESSION_SELECT = {
   id: true, date: true, startTime: true, endTime: true, status: true,
   meetingUrl: true, payCategoryKey: true, payRateOverride: true,
   paidRate: true, paidRateSource: true,
-  payApprovedAt: true,
-  payApprovedBy: { select: { fullName: true } },
   attendance: { where: { status: 'PRESENT' }, select: { id: true } },
   cancellations: {
     where: { hoursBeforeClass: { lt: CANCELLATION_WINDOW_HOURS } },
@@ -454,26 +508,13 @@ const wasLateCancelled = (session) =>
   (session.cancellations?.length ?? 0) > 0 && (session.attendance?.length ?? 0) === 0;
 
 /**
- * True when the only reason this hour is on the payslip is that an admin said so.
- *
- * Kept apart from the other two reasons because it is the one with no evidence
- * behind it — no register, no late cancellation, just somebody's word. A payslip
- * that shows it plainly is one an admin can defend; one that hides it is how a
- * mistaken approval survives every review.
- */
-const wasPayApproved = (session) =>
-  Boolean(session.payApprovedAt)
-  && (session.attendance?.length ?? 0) === 0
-  && (session.cancellations?.length ?? 0) === 0;
-
-/**
  * Turns one worked entry into a payslip line.
  *
  * Sessions and shifts differ in almost everything except the four numbers that
  * matter here — when, how long, at what rate, for how much — so they are
  * flattened into one shape and the screen renders a single list.
  */
-const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled, payApproved, payApprovedBy }, context, categories) => {
+const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled }, context, categories) => {
   const hours = sessionHours({ startTime, endTime });
   // A frozen rate wins outright: this hour was confirmed under a contract that
   // may since have changed, and re-resolving it would rewrite history.
@@ -494,10 +535,6 @@ const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categor
     // the class ran. Says so on the payslip so nobody reading it later has to
     // guess why an hour with no attendance was paid.
     lateCancelled: Boolean(lateCancelled),
-    // Paid on an admin's say-so, with no register behind it. Named on the line
-    // so the person who authorised it is visible months later.
-    payApproved: Boolean(payApproved),
-    payApprovedBy: payApprovedBy || null,
     category: categoryKey,
     categoryLabel: categories.get(categoryKey)?.label || (categoryKey ? categoryKey : 'Uncategorised'),
     categoryColor: categories.get(categoryKey)?.color || null,
@@ -566,7 +603,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
   const [startDate, endDate] = monthRange(targetMonth, targetYear);
   const paidSessions = paidSessionsWhere(startDate, endDate);
 
-  const [categoryList, teacher, unconfirmed] = await Promise.all([
+  const [categoryList, teacher, absences] = await Promise.all([
     loadPayCategories(),
     prisma.user.findUniqueOrThrow({
       where: { id: teacherId },
@@ -613,11 +650,16 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
             },
           },
         },
+        // Every shift in the range, not only the payable ones: the absent ones
+        // have to appear on the statement too, as hours that were dropped and
+        // by whom. Split by isShiftPayable below.
         workShifts: {
-          where: paidShiftsWhere(startDate, endDate),
+          where: { date: { gte: startDate, lte: endDate } },
           select: {
-            id: true, date: true, startTime: true, endTime: true, title: true,
+            id: true, date: true, startTime: true, endTime: true, title: true, status: true,
             payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true, notes: true,
+            absentAt: true, absentReason: true,
+            absentBy: { select: { fullName: true } },
           },
           orderBy: { date: 'desc' },
         },
@@ -629,18 +671,21 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
         },
       },
     }),
-    // Their own past sessions that nobody closed out. Queried from the session
-    // side rather than nested under the class lists, because "this person's
-    // hours" spans both the classes they own and the ones they cover.
+    // Their own hours that were dropped because somebody marked them absent.
+    // Queried from the session side rather than nested under the class lists,
+    // because "this person's hours" spans both the classes they own and the
+    // ones they cover.
     prisma.session.findMany({
       where: {
-        ...unconfirmedSessionsWhere(startDate, endDate, academyToday()),
+        ...absentSessionsWhere(startDate, endDate),
         class: {
           OR: [{ teacherId }, { coTeachers: { some: { id: teacherId } } }],
         },
       },
       select: {
-        id: true, date: true, startTime: true, endTime: true, status: true,
+        id: true, date: true, startTime: true, endTime: true,
+        absentAt: true, absentReason: true,
+        absentBy: { select: { fullName: true } },
         class: { select: { name: true } },
       },
       orderBy: { date: 'desc' },
@@ -650,12 +695,15 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
   const categories = categoryMap(categoryList);
   const context = rateContextFor(teacher, categories);
 
-  const unconfirmedSessions = unconfirmed.map((s) => ({
+  const absentEntries = absences.map((s) => ({
     id: s.id,
+    kind: 'session',
     date: s.date,
     title: s.class?.name || 'Session',
     hours: round2(sessionHours(s)),
-    reason: unconfirmedReason(s),
+    markedAt: s.absentAt,
+    markedBy: s.absentBy?.fullName || null,
+    reason: s.absentReason || null,
   }));
 
   const lines = [];
@@ -684,7 +732,6 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
           categoryKey: sessionCategory(s, cls),
           override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
           lateCancelled: wasLateCancelled(s),
-          payApproved: wasPayApproved(s), payApprovedBy: s.payApprovedBy?.fullName,
         },
         context,
         categories
@@ -708,7 +755,23 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
     });
   }
 
-  const shiftLines = teacher.workShifts.map((shift) =>
+  const paidShifts = teacher.workShifts.filter((s) => isShiftPayable(s));
+  for (const shift of teacher.workShifts) {
+    if (!shift.absentAt) continue;
+    absentEntries.push({
+      id: shift.id,
+      kind: 'shift',
+      date: shift.date,
+      title: shift.title || categories.get(shift.payCategoryKey)?.label || 'Shift',
+      hours: round2(sessionHours(shift)),
+      markedAt: shift.absentAt,
+      markedBy: shift.absentBy?.fullName || null,
+      reason: shift.absentReason || null,
+    });
+  }
+  absentEntries.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  const shiftLines = paidShifts.map((shift) =>
     lineItem(
       {
         id: shift.id,
@@ -790,10 +853,12 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
       // Surfaced rather than buried: a $0 total on a month with real work is
       // almost always a missing rate, not somebody who did nothing.
       unratedHours: round2(unratedHours),
-      // Past classes nobody closed out, so payroll can't pay them. Listed, not
-      // counted into any total — see unconfirmedSessionsWhere.
-      unconfirmedSessions,
-      unconfirmedHours: round2(unconfirmedSessions.reduce((n, s) => n + s.hours, 0)),
+      // Hours that passed and were deliberately not paid, because somebody
+      // marked this person absent. Listed with the name of whoever did it and
+      // never counted into a total — see absentSessionsWhere.
+      absences: absentEntries,
+      absenceCount: absentEntries.length,
+      absenceHours: round2(absentEntries.reduce((n, s) => n + s.hours, 0)),
       usedSickDays,
       totalSickDays: 8,
       usedPTODays,
@@ -815,13 +880,18 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
  * would be a round trip per person plus a time-off query nobody reads on a
  * summary screen, and it grows with every hire.
  */
-export const computePayrollSummary = async (targetMonth, targetYear) => {
-  const [startDate, endDate] = monthRange(targetMonth, targetYear);
+/**
+ * The shared body of computePayrollSummary and computeWeeklyPayrollSummary:
+ * everyone's pay for an arbitrary date range. The two exported functions only
+ * differ in how they name and label that range — a calendar month for one, a
+ * Monday-Sunday week for the other — so the range itself is computed once and
+ * both wrap this.
+ */
+const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = true } = {}) => {
   const paidSessions = paidSessionsWhere(startDate, endDate);
-  const paidShifts = paidShiftsWhere(startDate, endDate);
-  const unconfirmedSessions = unconfirmedSessionsWhere(startDate, endDate, academyToday());
+  const absentSessions = absentSessionsWhere(startDate, endDate);
 
-  const [categoryList, staff, unconfirmed] = await Promise.all([
+  const [categoryList, staff, absences] = await Promise.all([
     loadPayCategories(),
     prisma.user.findMany({
       where: {
@@ -850,12 +920,11 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
           // put the person on the screen before anyone gets round to marking it
           // worked, so a missing rate surfaces while it is still cheap to fix.
           { workShifts: { some: { date: { gte: startDate, lte: endDate }, status: { not: 'CANCELLED' } } } },
-          // Somebody whose only hours this month are ones nobody closed out.
-          // They earn nothing yet, which is exactly why they have to be on the
-          // screen: a warning about a person the roster omits is a warning
-          // nobody can see.
-          { taughtClasses: { some: { sessions: { some: unconfirmedSessions } } } },
-          { coTaughtClasses: { some: { sessions: { some: unconfirmedSessions } } } },
+          // Somebody whose only hours this month were marked absent. They earn
+          // nothing, which is exactly why they have to be on the screen: an
+          // absence nobody can see is an absence nobody can dispute.
+          { taughtClasses: { some: { sessions: { some: absentSessions } } } },
+          { coTaughtClasses: { some: { sessions: { some: absentSessions } } } },
         ],
       },
       orderBy: { fullName: 'asc' },
@@ -905,22 +974,28 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
             },
           },
         },
+        // Every shift in the range, not only the payable ones: the absent ones
+        // belong on the screen as dropped hours. Split by isShiftPayable below.
         workShifts: {
-          where: paidShifts,
+          where: { date: { gte: startDate, lte: endDate } },
           select: {
-            id: true, date: true, startTime: true, endTime: true, title: true,
+            id: true, date: true, startTime: true, endTime: true, title: true, status: true,
             payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true,
+            absentAt: true, absentReason: true,
+            absentBy: { select: { fullName: true } },
           },
         },
       },
     }),
-    // One flat query for the whole roster's unclosed sessions, grouped in
-    // memory below — the same reason the roster itself is one query rather
-    // than computeTeacherPayroll in a loop.
+    // One flat query for the whole roster's absences, grouped in memory below —
+    // the same reason the roster itself is one query rather than
+    // computeTeacherPayroll in a loop.
     prisma.session.findMany({
-      where: unconfirmedSessions,
+      where: absentSessions,
       select: {
-        id: true, date: true, startTime: true, endTime: true, status: true,
+        id: true, date: true, startTime: true, endTime: true,
+        absentAt: true, absentReason: true,
+        absentBy: { select: { fullName: true } },
         class: { select: { name: true, teacherId: true, coTeachers: { select: { id: true } } } },
       },
       orderBy: { date: 'desc' },
@@ -930,27 +1005,30 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
   const categories = categoryMap(categoryList);
 
   // Keyed by person, because one session belongs to its teacher and to every
-  // co-teacher on it — each of them has an hour nobody closed out.
-  const unconfirmedByPerson = new Map();
-  for (const s of unconfirmed) {
+  // co-teacher on it — each of them lost that hour.
+  const absencesByPerson = new Map();
+  for (const s of absences) {
     const entry = {
       id: s.id,
+      kind: 'session',
       date: s.date,
       title: s.class?.name || 'Session',
       hours: round2(sessionHours(s)),
-      reason: unconfirmedReason(s),
+      markedAt: s.absentAt,
+      markedBy: s.absentBy?.fullName || null,
+      reason: s.absentReason || null,
     };
     const owners = [s.class?.teacherId, ...(s.class?.coTeachers || []).map((t) => t.id)];
     for (const id of owners) {
       if (!id) continue;
-      if (!unconfirmedByPerson.has(id)) unconfirmedByPerson.set(id, []);
-      unconfirmedByPerson.get(id).push(entry);
+      if (!absencesByPerson.has(id)) absencesByPerson.set(id, []);
+      absencesByPerson.get(id).push(entry);
     }
   }
 
   const rows = staff.map((person) => {
     const context = rateContextFor(person, categories);
-    const personUnconfirmed = unconfirmedByPerson.get(person.id) || [];
+    const personAbsences = [...(absencesByPerson.get(person.id) || [])];
 
     const lines = [];
     for (const cls of [...person.taughtClasses, ...person.coTaughtClasses]) {
@@ -959,11 +1037,28 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
           id: s.id, kind: 'session', date: s.date, startTime: s.startTime, endTime: s.endTime,
           title: cls.name, categoryKey: sessionCategory(s, cls), override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
           lateCancelled: wasLateCancelled(s),
-          payApproved: wasPayApproved(s), payApprovedBy: s.payApprovedBy?.fullName,
         }, context, categories));
       }
     }
+    // A shift is paid once its hour has passed, exactly like a class — see
+    // isShiftPayable, which this uses rather than repeating.
+    const paidShifts = person.workShifts.filter((s) => isShiftPayable(s));
     for (const shift of person.workShifts) {
+      if (!shift.absentAt) continue;
+      personAbsences.push({
+        id: shift.id,
+        kind: 'shift',
+        date: shift.date,
+        title: shift.title || categories.get(shift.payCategoryKey)?.label || 'Shift',
+        hours: round2(sessionHours(shift)),
+        markedAt: shift.absentAt,
+        markedBy: shift.absentBy?.fullName || null,
+        reason: shift.absentReason || null,
+      });
+    }
+    personAbsences.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    for (const shift of paidShifts) {
       lines.push(lineItem({
         id: shift.id, kind: 'shift', date: shift.date, startTime: shift.startTime, endTime: shift.endTime,
         title: shift.title || categories.get(shift.payCategoryKey)?.label || 'Shift',
@@ -979,7 +1074,11 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
 
     // Null means unset, 0 means an agreed zero. See computeTeacherPayroll.
     const salaryAmount = person.baseSalary == null ? null : parseFloat(person.baseSalary);
-    const baseSalary = monthlySalary(person.baseSalary, person.salaryPeriod);
+    // A salary is a monthly figure, so it only belongs in a total that covers
+    // a month. Adding it to a week would bill a month's salary four times over
+    // — the weekly view settles hourly work, and says so on screen rather than
+    // quietly folding a number that doesn't fit the range into the total.
+    const baseSalary = includeSalary ? monthlySalary(person.baseSalary, person.salaryPeriod) : 0;
     const hourlyEarnings = lines.reduce((n, l) => n + l.amount, 0);
 
     return {
@@ -1016,11 +1115,11 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
       // Hours worked at no rate. Carried per row so the screen can point at the
       // person to fix, not just warn that something somewhere is unpriced.
       unratedHours: round2(lines.filter((l) => l.rateSource === 'unset').reduce((n, l) => n + l.hours, 0)),
-      // Past classes of theirs that nobody closed out. Not earnings — a list of
-      // what to chase before this month's total can be trusted.
-      unconfirmedSessions: personUnconfirmed,
-      unconfirmedCount: personUnconfirmed.length,
-      unconfirmedHours: round2(personUnconfirmed.reduce((n, s) => n + s.hours, 0)),
+      // Hours of theirs that passed and were struck off, with the name of
+      // whoever struck them. Not earnings, and never folded into one.
+      absences: personAbsences,
+      absenceCount: personAbsences.length,
+      absenceHours: round2(personAbsences.reduce((n, s) => n + s.hours, 0)),
     };
   });
 
@@ -1036,8 +1135,12 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
   }
 
   return {
-    month: targetMonth,
-    year: targetYear,
+    startDate: isoDate(startDate),
+    endDate: isoDate(endDate),
+    // Whether a salary is part of the totals below, so the screen can say
+    // "hourly only" rather than leaving an admin to wonder why a salaried
+    // person shows $0.
+    includesSalary: includeSalary,
     categories: categoryList,
     rows,
     totals: {
@@ -1053,10 +1156,39 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
       hourlyEarnings: sum((r) => r.hourlyEarnings),
       totalEarnings: sum((r) => r.totalEarnings),
       unratedHours: sum((r) => r.unratedHours),
-      // Counted off the sessions, not summed across rows: a co-taught class
-      // appears on two people's rows and is still one class to go and close.
-      unconfirmedCount: unconfirmed.length,
-      unconfirmedHours: round2(unconfirmed.reduce((n, s) => n + sessionHours(s), 0)),
+      // Summed across rows, unlike the session count above: a co-taught class
+      // marked absent costs two people an hour each, and the screen is showing
+      // what the absences cost, not how many calendar entries they were.
+      absenceCount: rows.reduce((n, r) => n + r.absenceCount, 0),
+      absenceHours: sum((r) => r.absenceHours),
     },
   };
+};
+
+/**
+ * Everyone's pay for one calendar month, on one screen. See
+ * computePayrollSummaryRange for the shared logic — this just names the
+ * range a month and keeps the month/year the screen already asks for.
+ */
+export const computePayrollSummary = async (targetMonth, targetYear) => {
+  const [startDate, endDate] = monthRange(targetMonth, targetYear);
+  const range = await computePayrollSummaryRange(startDate, endDate);
+  return { month: targetMonth, year: targetYear, ...range };
+};
+
+/**
+ * Everyone's pay for one Monday-Sunday week — the cadence payroll is
+ * actually settled on, as opposed to the monthly screen above, which is what
+ * an admin reviews rates and absences against.
+ *
+ * `weekStart` may be any date in the target week (a Date, ISO string, or
+ * omitted for the current week); it's snapped to that week's Monday so
+ * passing any day of the week gives the same result.
+ */
+export const computeWeeklyPayrollSummary = async (weekStart) => {
+  const startDate = mondayOf(weekStart);
+  const endDate = new Date(startDate);
+  endDate.setUTCDate(startDate.getUTCDate() + 6);
+  endDate.setUTCHours(23, 59, 59, 999);
+  return computePayrollSummaryRange(startDate, endDate, { includeSalary: false });
 };

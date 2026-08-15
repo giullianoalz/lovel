@@ -501,24 +501,12 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                         <span className="statement-cat">
                           <span className="cat-dot" style={item.categoryColor ? { background: item.categoryColor } : undefined} />
                           {item.categoryLabel}
-                          {/* No register stands behind this hour — it is paid
-                              because an admin said it ran. Named on the line so
-                              a payslip can be read back months later without
-                              anyone having to remember. */}
-                          {item.payApproved && (
-                            <span
-                              className="statement-vouched"
-                              title={item.payApprovedBy ? `Approved by ${item.payApprovedBy}` : 'Approved by an admin'}
-                            >
-                              approved{item.payApprovedBy ? ` by ${item.payApprovedBy}` : ''}
-                            </span>
-                          )}
                         </span>
                       </div>
                       <div className="statement-math">
                         <span>{item.hours} h × {money(item.rate)}</span>
                         <small>
-                          {/* Locked means this hour was confirmed and its rate
+                          {/* Locked means this hour has passed and its rate was
                               written down: changing the rate today cannot move
                               it. An unlocked line still prices live. */}
                           {item.locked && <Lock size={9} className="statement-lock" />}

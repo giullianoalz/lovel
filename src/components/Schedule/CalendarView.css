@@ -2936,3 +2936,63 @@ select.form-control {
   color: var(--primary, #6366f1);
   font-size: 11.5px;
 }
+
+/* ── "The teacher didn't attend" ──────────────────────────────
+   Pay accrues from the calendar, so this row is the only thing on the screen
+   that stops an hour being paid. Styled quiet until it has been used and loud
+   afterwards: before, it is one option among several and should not shout;
+   after, it is money missing from somebody's payslip and has to be impossible
+   to miss on the way past. */
+.cal-absent-row {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cal-absent-trigger {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.18s ease;
+}
+
+.cal-absent-trigger:hover {
+  color: #ef4444;
+}
+
+.cal-absent-reason {
+  flex: 1;
+  min-width: 180px;
+  height: 32px;
+  font-size: 13px;
+}
+
+.cal-absent-confirm,
+.cal-absent-undo {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.cal-absent-confirm {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
+/* Already marked: the row itself carries the warning. */
+.meta-item.cal-absent-row:has(.cal-absent-undo) {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.07);
+  color: #b91c1c;
+  animation: calAbsentIn 0.25s ease;
+}
+
+@keyframes calAbsentIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

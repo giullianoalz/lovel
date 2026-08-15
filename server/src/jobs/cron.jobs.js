@@ -3,6 +3,7 @@ import prisma from '../config/database.js';
 import { sendNotification, notifyAdmins } from './notification.helper.js';
 import { previousOccurrence } from './cronSchedule.js';
 import { runRecurringCharges } from '../services/recurringCharges.service.js';
+import { freezeSessionRates, freezeShiftRates } from '../services/payroll.service.js';
 import {
   getEventConfig,
   getAdminUserIds,
@@ -18,6 +19,7 @@ import { ACADEMY_TIMEZONE, academyToday, academyDayOffset, sessionStartInstant }
  *   - Absence alert trigger        → every day at 5:00 PM (after last class)
  *   - Low snack-punches alert      → every Monday at 7:00 AM
  *   - Class starting-soon reminder → every 5 minutes
+ *   - Pay accrual (rate stamping)  → every hour, five past
  *
  * All jobs are registered in the JOBS table at the bottom of this file and
  * started by calling startCronJobs() from index.js after the server starts.
@@ -349,6 +351,54 @@ const raiseRecurringCharges = async () => {
 // `name` is the CronJobRun key — renaming one resets its history, which only
 // costs a single skipped catch-up, but keep them stable anyway.
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// JOB 6 — Pay accrual
+// Every hour: stamp the rate onto the classes and shifts whose
+// hour has just ended, so a later raise cannot reprice them.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Pins the rate onto the hours that have just been earned.
+ *
+ * Pay accrues from the calendar now — an hour that has passed is an hour that
+ * is owed — which means there is no longer a moment when a human confirms a
+ * class and the rate can be stamped. The clock provides that moment instead:
+ * every hour, everything that ended since the last sweep gets today's rate
+ * written onto it, and from then on a raise cannot reach backwards and reprice
+ * work that was done under the old contract.
+ *
+ * A week's lookback rather than an hour's, because this must not depend on
+ * having run: a deploy, an outage or a clock skew would otherwise leave a band
+ * of hours pricing live forever. Re-stamping is free — freezeSessionRates only
+ * fills entries that have no rate yet — so a wide, dumb window is the cheap way
+ * to be sure nothing slips through.
+ */
+const accruePay = async () => {
+  const since = academyDayOffset(academyToday(), -7);
+
+  const [sessions, shifts] = await Promise.all([
+    prisma.session.findMany({
+      where: { date: { gte: since }, paidRate: null },
+      select: { id: true },
+    }),
+    prisma.workShift.findMany({
+      where: { date: { gte: since }, paidRate: null },
+      select: { id: true },
+    }),
+  ]);
+
+  // Both helpers re-check payability themselves, so anything in the window that
+  // is cancelled, absent or still in the future is skipped rather than paid.
+  const [sessionCount, shiftCount] = await Promise.all([
+    freezeSessionRates(sessions.map((s) => s.id)),
+    freezeShiftRates(shifts.map((s) => s.id)),
+  ]);
+
+  if (sessionCount || shiftCount) {
+    console.log(`[CRON] Pay accrual: priced ${sessionCount} session(s) and ${shiftCount} shift(s).`);
+  }
+};
+
 const JOBS = [
   {
     name: 'overdue-invoices',
@@ -374,6 +424,11 @@ const JOBS = [
     name: 'recurring-charges',
     schedule: '0 6 * * *', // every day at 6:00 AM
     handler: raiseRecurringCharges,
+  },
+  {
+    name: 'pay-accrual',
+    schedule: '5 * * * *', // every hour, just after the hour
+    handler: accruePay,
   },
 ];
 

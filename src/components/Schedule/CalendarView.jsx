@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
@@ -228,7 +228,7 @@ const JumpToDatePicker = ({ currentDate, view, onPick, onClose }) => {
 };
 
 const CalendarView = () => {
-  const { role, hasRole } = useAuth();
+  const { user, role, hasRole } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
@@ -249,6 +249,11 @@ const CalendarView = () => {
   const [saving, setSaving] = useState(false);
   const [isEditingLink, setIsEditingLink] = useState(false);
   const [editLink, setEditLink] = useState('');
+  // Marking "the teacher didn't turn up" on the open session. Open, because the
+  // reason is typed before it is saved and there is no point storing one for a
+  // session nobody is currently marking.
+  const [absenceOpen, setAbsenceOpen] = useState(false);
+  const [absenceReason, setAbsenceReason] = useState('');
   const [linkAppliesToSeries, setLinkAppliesToSeries] = useState(false);
   const [isEditingEvent, setIsEditingEvent] = useState(false);
   const [editEventForm, setEditEventForm] = useState({});
@@ -648,6 +653,13 @@ const CalendarView = () => {
     loadStaffEvents(view, currentDate);
   }, [view, currentDate, role]);
 
+  // A half-typed absence reason must never follow the admin to the next session
+  // they open — that is how the wrong person's hour gets a stranger's excuse.
+  useEffect(() => {
+    setAbsenceOpen(false);
+    setAbsenceReason('');
+  }, [selectedEvent?.id]);
+
   // Loaded once: the list is short, changes rarely, and every session opened
   // needs it to name the kind of work this hour is.
   useEffect(() => {
@@ -735,6 +747,13 @@ const CalendarView = () => {
           // edit here would change what was paid.
           paidRate: s.paidRate == null ? null : Number(s.paidRate),
           status: s.status,
+          // The teacher didn't turn up, so this hour isn't paid. The calendar
+          // is where that gets decided now — pay accrues from the schedule the
+          // moment an hour ends, and this is the only thing that takes it back
+          // off. Null on the calendars families see; see listSessions.
+          absentAt: s.absentAt || null,
+          absentReason: s.absentReason || '',
+          absentBy: s.absentBy?.fullName || '',
         };
       });
   }, [sessions, classesById]);
@@ -1209,6 +1228,40 @@ const CalendarView = () => {
         }
       }
     });
+  };
+
+  /**
+   * The teacher didn't turn up — take this hour off payroll (or put it back).
+   *
+   * Pay accrues from the calendar: an hour that has passed is an hour that is
+   * owed, with nobody asked to confirm it class by class. So this is the one
+   * correction there is, and it lives here because the calendar is where
+   * whoever knows about the absence already is.
+   *
+   * The session itself is untouched — it stays on the timetable, keeps its
+   * register and its notes, and the families' view doesn't change. This says
+   * something about pay, not about whether the class was ever scheduled.
+   */
+  const handleSetAbsence = async (absent) => {
+    if (!selectedEvent) return;
+    setSaving(true);
+    try {
+      const res = await database.setSessionAbsence([selectedEvent.id], absent, absenceReason);
+      toast.success(res.message);
+      setSelectedEvent(prev => ({
+        ...prev,
+        absentAt: absent ? new Date().toISOString() : null,
+        absentReason: absent ? absenceReason : '',
+        absentBy: absent ? (user?.fullName || 'You') : '',
+      }));
+      setAbsenceOpen(false);
+      setAbsenceReason('');
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not change this session's pay.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleToggleZoom = () => {
@@ -2787,13 +2840,13 @@ const CalendarView = () => {
                           </span>
                         </label>
 
-                        {/* Confirmed hours carry the rate they were worked at,
-                            so changing the category now cannot move what was
-                            already paid — better said here than discovered on
-                            the payslip. */}
+                        {/* An hour that has passed carries the rate it was
+                            worked at, so changing the category now cannot move
+                            what was already paid — better said here than
+                            discovered on the payslip. */}
                         <p className="cal-pay-hint">
                           {selectedEvent.paidRate != null
-                            ? `This session was already confirmed at $${selectedEvent.paidRate.toFixed(2)}/hr. Changing the category re-prices it at the new rate.`
+                            ? `This hour has already been priced at $${selectedEvent.paidRate.toFixed(2)}/hr. Changing the category re-prices it at the new rate.`
                             : 'Leave the rate empty to use the category’s rate, or the teacher’s own rate for that work.'}
                         </p>
                       </div>
@@ -2823,6 +2876,53 @@ const CalendarView = () => {
                           )}
                         </span>
                       </div>
+                    )}
+                    {/* Pay comes off the calendar now: this hour is paid once
+                        it has passed, and this is the only way to stop that.
+                        Admins only — it takes money off somebody's payslip. */}
+                    {canSetPay && (
+                      selectedEvent.absentAt ? (
+                        <div className="meta-item cal-absent-row">
+                          <UserX size={16} />
+                          <span>
+                            <strong>Not paid</strong> — the teacher didn't attend
+                            {selectedEvent.absentReason ? ` (${selectedEvent.absentReason})` : ''}
+                            {selectedEvent.absentBy ? `, marked by ${selectedEvent.absentBy}` : ''}
+                          </span>
+                          <button
+                            className="cancel-btn cal-absent-undo"
+                            disabled={saving}
+                            onClick={() => handleSetAbsence(false)}
+                          >
+                            Pay it after all
+                          </button>
+                        </div>
+                      ) : absenceOpen ? (
+                        <div className="meta-item cal-absent-row">
+                          <UserX size={16} />
+                          <input
+                            type="text"
+                            className="form-control cal-absent-reason"
+                            value={absenceReason}
+                            onChange={e => setAbsenceReason(e.target.value)}
+                            placeholder="Why? (optional — called in sick, no-show…)"
+                            autoFocus
+                          />
+                          <button className="save-btn cal-absent-confirm" disabled={saving} onClick={() => handleSetAbsence(true)}>
+                            Don't pay this hour
+                          </button>
+                          <button className="cancel-btn" onClick={() => { setAbsenceOpen(false); setAbsenceReason(''); }}>
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="meta-item cal-absent-row">
+                          <UserX size={16} />
+                          <button className="cal-absent-trigger" onClick={() => setAbsenceOpen(true)}>
+                            Teacher didn't attend — don't pay this hour
+                          </button>
+                        </div>
+                      )
                     )}
                     <div className={`meta-item${isEditingLink ? ' cal-link-cell' : ''}`} style={{ flexWrap: 'wrap', gap: '8px' }}>
                       {isEditingLink ? (

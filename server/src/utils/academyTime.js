@@ -86,6 +86,25 @@ export const academyToday = (now = new Date()) => {
   return new Date(Date.UTC(p.year, p.month - 1, p.day));
 };
 
+/**
+ * Now, split the way the calendar stores a booking: today's date at UTC
+ * midnight, and the current time of day on the 1970 placeholder day.
+ *
+ * `Session.date` is a DATE and `Session.endTime` a TIME, and Postgres will not
+ * compare a pair of them against an instant. Splitting the clock the same way
+ * the columns are split lets a query ask "has this hour finished?" directly:
+ * an earlier date, or today with an end time already behind us. Both halves
+ * come from the academy's wall clock, so the answer is the one an admin
+ * looking at the wall would give.
+ */
+export const academyNowParts = (now = new Date()) => {
+  const p = academyPartsAt(now);
+  return {
+    date: new Date(Date.UTC(p.year, p.month - 1, p.day)),
+    time: new Date(Date.UTC(1970, 0, 1, p.hour, p.minute, p.second)),
+  };
+};
+
 /** `academyToday` shifted by whole days — for windows that cross midnight. */
 export const academyDayOffset = (dateOnly, days) =>
   new Date(dateOnly.getTime() + days * 86_400_000);

@@ -140,6 +140,61 @@
   transform: translateY(-1px);
 }
 
+/* Pay goes out weekly; rates and unclosed hours are reviewed monthly. The two
+   sit on one bar so switching between them never moves the table underneath. */
+.po-period-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.po-view-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+}
+
+.po-view-toggle button {
+  padding: 7px 15px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted, #64748b);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.po-view-toggle button:hover { color: var(--text-main, #1e293b); }
+
+.po-view-toggle button.is-active {
+  background: var(--primary, #166534);
+  color: #fff;
+}
+
+.po-this-week {
+  padding: 7px 13px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 9px;
+  background: var(--card-bg, #fff);
+  color: var(--text-muted, #64748b);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.po-this-week:hover {
+  border-color: var(--primary, #166534);
+  color: var(--primary, #166534);
+  transform: translateY(-1px);
+}
+
 /* One dot per kind of work, in the colour it wears on the calendar, so a column
    header and a calendar block read as the same thing. */
 .po-cat-dot {
@@ -152,8 +207,8 @@
   vertical-align: middle;
 }
 
-/* The unconfirmed-hours warning is the one an admin can act on, so it carries
-   its own control instead of telling them to go and look somewhere else. */
+/* The absences warning is the one an admin can act on, so it carries its own
+   control instead of telling them to go and look somewhere else. */
 .po-warning-actionable { align-items: flex-start; }
 
 .po-warning-body { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }

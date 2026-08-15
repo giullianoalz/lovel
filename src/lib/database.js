@@ -318,8 +318,10 @@ export const database = {
     return response.data.shift;
   },
 
-  completeShifts: async (payload) => {
-    const response = await api.post('/shifts/complete', payload);
+  // Nobody worked this shift, so don't pay it. Shifts are paid once their hour
+  // passes, so this is the only thing left that changes what a shift costs.
+  setShiftAbsence: async (ids, absent = true, reason) => {
+    const response = await api.post('/shifts/absence', { ids, absent, reason });
     return response.data;
   },
 
@@ -675,15 +677,14 @@ export const database = {
     }
   },
 
-  // Marks the session COMPLETED server-side. Payroll only counts sessions in this
-  // status (plus real attendance), so scheduling a class must never pay a teacher —
-  // only actually finishing it does.
-  // Pay for classes nobody closed out. The admin is vouching that the hour was
-  // taught when no register exists to prove it, so this is deliberately a
-  // separate, explicit call rather than a quiet side effect of anything else.
-  // No mock fallback — it moves real money.
-  setSessionPayApproval: async (sessionIds, approved = true) => {
-    const response = await api.post('/sessions/pay-approval', { sessionIds, approved });
+  // The teacher didn't turn up, so this hour isn't paid.
+  //
+  // Pay accrues from the calendar — an hour that has passed is an hour that is
+  // owed — so this is the only thing that takes one back off. Deliberately a
+  // separate, explicit call rather than a quiet side effect of anything else,
+  // and no mock fallback: it moves real money.
+  setSessionAbsence: async (sessionIds, absent = true, reason) => {
+    const response = await api.post('/sessions/absence', { sessionIds, absent, reason });
     return response.data;
   },
 

@@ -5,7 +5,7 @@ import {
   listShifts,
   createShift,
   updateShift,
-  completeShifts,
+  setShiftAbsence,
   deleteShift,
 } from '../controllers/shifts.controller.js';
 
@@ -19,11 +19,11 @@ router.get('/', authenticate, listShifts);
 // an hour costs, so it is not delegated to the person being paid for it.
 router.post('/', authenticate, requireRole('ADMIN'), createShift);
 
-// POST /api/shifts/complete — Mark a batch worked (Admin only).
-// Declared before /:id so "complete" is never read as a shift id.
-router.post('/complete', authenticate, requireRole('ADMIN'), completeShifts);
+// POST /api/shifts/absence — nobody worked it, don't pay it (Admin only).
+// Declared before /:id so "absence" is never read as a shift id.
+router.post('/absence', authenticate, requireRole('ADMIN'), setShiftAbsence);
 
-// PUT /api/shifts/:id — Change one, or mark it worked (Admin only)
+// PUT /api/shifts/:id — Change one (Admin only)
 router.put('/:id', authenticate, requireRole('ADMIN'), updateShift);
 
 // DELETE /api/shifts/:id — Remove it, or cancel it if it already counted (Admin only)

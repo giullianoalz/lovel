@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Wallet, ChevronLeft, ChevronRight, AlertTriangle, Pencil, Users, Clock, DollarSign, Tags } from 'lucide-react';
 import PayCategoriesPanel from './PayCategoriesPanel';
-import UnconfirmedSessionsPanel from './UnconfirmedSessionsPanel';
+import AbsencesPanel from './AbsencesPanel';
 import { database } from '../../lib/database';
 import { useAsyncData } from '../../lib/useAsyncData';
 import ErrorBanner from '../Layout/ErrorBanner';
@@ -11,6 +11,28 @@ import './PayrollOverview.css';
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const money = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** The Monday of the week containing `date`, at UTC midnight. Mirrors the server. */
+const mondayOf = (date) => {
+  const d = new Date(date);
+  const day = d.getUTCDay();
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  monday.setUTCHours(0, 0, 0, 0);
+  return monday;
+};
+
+const isoDate = (d) => d.toISOString().slice(0, 10);
+
+/** "11 – 17 Aug 2026", or spanning two months, "28 Jul – 3 Aug 2026". */
+const weekLabel = (monday) => {
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const opts = { timeZone: 'UTC', day: 'numeric', month: 'short' };
+  const from = monday.toLocaleDateString('en-US', opts);
+  const to = sunday.toLocaleDateString('en-US', opts);
+  return `${from} – ${to}, ${sunday.getUTCFullYear()}`;
+};
 
 /**
  * Where a rate came from, in the few words that fit under it.
@@ -31,13 +53,6 @@ const RATE_SOURCE_TEXT = {
   mixed: 'mixed sources',
 };
 
-// Mirrors UNCONFIRMED_REASON_LABELS on the server — why a past class could not
-// be paid, worded for the person who has to go and fix it.
-const UNCONFIRMED_REASONS = {
-  no_attendance: 'marked complete, but no register was saved',
-  not_completed: 'never marked complete',
-};
-
 /**
  * The whole roster's pay for one month.
  *
@@ -50,13 +65,23 @@ const PayrollOverview = () => {
   const today = new Date();
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [year, setYear] = useState(today.getFullYear());
+  // Pay is settled weekly, but rates and unclosed hours are reviewed over a
+  // month, so the screen does both rather than forcing one to stand in for
+  // the other.
+  const [view, setView] = useState('month');
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [showCategories, setShowCategories] = useState(false);
-  const [approving, setApproving] = useState(false);
+  const [reviewingAbsences, setReviewingAbsences] = useState(false);
+
+  const isWeek = view === 'week';
+  const weekStartIso = isoDate(weekStart);
 
   const { data, loading, error, retry } = useAsyncData(
-    () => database.fetchPayrollSummary(month, year),
-    [month, year]
+    () => (isWeek
+      ? database.fetchWeeklyPayrollSummary(weekStartIso)
+      : database.fetchPayrollSummary(month, year)),
+    [view, weekStartIso, month, year]
   );
 
   const prevMonth = () => {
@@ -67,6 +92,12 @@ const PayrollOverview = () => {
     if (month === 12) { setMonth(1); setYear(y => y + 1); }
     else setMonth(m => m + 1);
   };
+
+  const shiftWeek = (weeks) => setWeekStart((current) => {
+    const next = new Date(current);
+    next.setUTCDate(current.getUTCDate() + weeks * 7);
+    return next;
+  });
 
   const rows = data?.rows || [];
   const totals = data?.totals;
@@ -94,7 +125,11 @@ const PayrollOverview = () => {
         <Wallet size={28} />
         <div>
           <h1>Payroll</h1>
-          <p>What everyone earned this month, and what the academy owes.</p>
+          <p>
+            {isWeek
+              ? 'What everyone earned this week, and what goes out on payday.'
+              : 'What everyone earned this month, and what the academy owes.'}
+          </p>
         </div>
         {/* The rates live behind this: set "front desk = $20" once, and every
             hour scheduled as front desk prices itself. */}
@@ -103,15 +138,50 @@ const PayrollOverview = () => {
         </button>
       </div>
 
-      <div className="month-navigator">
-        <button onClick={prevMonth} className="month-nav-btn" aria-label="Previous month"><ChevronLeft size={18} /></button>
-        <h3 className="month-label">{MONTH_NAMES[month - 1]} {year}</h3>
-        <button onClick={nextMonth} className="month-nav-btn" aria-label="Next month"><ChevronRight size={18} /></button>
+      <div className="po-period-bar">
+        <div className="po-view-toggle" role="tablist" aria-label="Payroll period">
+          <button
+            role="tab"
+            aria-selected={!isWeek}
+            className={!isWeek ? 'is-active' : ''}
+            onClick={() => setView('month')}
+          >
+            Monthly
+          </button>
+          <button
+            role="tab"
+            aria-selected={isWeek}
+            className={isWeek ? 'is-active' : ''}
+            onClick={() => setView('week')}
+          >
+            Weekly
+          </button>
+        </div>
+
+        {isWeek ? (
+          <div className="month-navigator">
+            <button onClick={() => shiftWeek(-1)} className="month-nav-btn" aria-label="Previous week"><ChevronLeft size={18} /></button>
+            <h3 className="month-label">{weekLabel(weekStart)}</h3>
+            <button onClick={() => shiftWeek(1)} className="month-nav-btn" aria-label="Next week"><ChevronRight size={18} /></button>
+          </div>
+        ) : (
+          <div className="month-navigator">
+            <button onClick={prevMonth} className="month-nav-btn" aria-label="Previous month"><ChevronLeft size={18} /></button>
+            <h3 className="month-label">{MONTH_NAMES[month - 1]} {year}</h3>
+            <button onClick={nextMonth} className="month-nav-btn" aria-label="Next month"><ChevronRight size={18} /></button>
+          </div>
+        )}
+
+        {isWeek && weekStartIso !== isoDate(mondayOf(new Date())) && (
+          <button className="po-this-week" onClick={() => setWeekStart(mondayOf(new Date()))}>
+            This week
+          </button>
+        )}
       </div>
 
       {loading ? (
         <div className="payroll-overview-state">
-          <div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">Adding up the month…</span></div>
+          <div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">Adding up the {isWeek ? 'week' : 'month'}…</span></div>
         </div>
       ) : error ? (
         <ErrorBanner message={error} onRetry={retry} />
@@ -124,6 +194,9 @@ const PayrollOverview = () => {
               <span className="po-stat-sub">
                 {money(totals.hourlyEarnings)} hourly
                 {totals.baseSalary > 0 && <> + {money(totals.baseSalary)} salary</>}
+                {/* A salary is a monthly figure and this column is a week, so
+                    it is left out rather than counted four times a month. */}
+                {data?.includesSalary === false && <> · hourly only, salaries run monthly</>}
               </span>
             </div>
             <div className="po-stat">
@@ -152,30 +225,32 @@ const PayrollOverview = () => {
             </div>
           )}
 
-          {totals.unconfirmedCount > 0 && (
+          {/* Everything on the calendar is paid the moment its hour ends, so
+              the only hours missing from the total are the ones somebody
+              struck off by hand. That is worth showing before the money goes
+              out — an absence is money off a payslip that the person it
+              belongs to never saw being taken. */}
+          {totals.absenceCount > 0 && (
             <div className="po-warning po-warning-actionable">
               <AlertTriangle size={16} />
               <div className="po-warning-body">
                 <span>
-                  <strong>{totals.unconfirmedCount} past class{totals.unconfirmedCount === 1 ? '' : 'es'}</strong>
-                  {' '}({totals.unconfirmedHours} h) {totals.unconfirmedCount === 1 ? 'was' : 'were'} never
-                  closed out — not marked complete, or complete with no register saved. They are not
-                  in the total above. Either the teacher closes them on the calendar, or you confirm
-                  here that the class ran and payroll pays for it.
+                  <strong>{totals.absenceCount} entr{totals.absenceCount === 1 ? 'y' : 'ies'}</strong>
+                  {' '}({totals.absenceHours} h) {totals.absenceCount === 1 ? 'is' : 'are'} not being paid,
+                  because somebody marked the person absent. Everything else on the calendar is in
+                  the total above.
                 </span>
-                {/* The way out of "the teacher forgot and payroll won't pay".
-                    Per person rather than one button for the month: an admin
-                    can vouch for Charmaine's Tuesdays without also vouching for
-                    hours belonging to somebody they haven't spoken to. */}
-                <button className="po-approve-open" onClick={() => setApproving(true)}>
-                  Review and pay these hours
+                <button className="po-approve-open" onClick={() => setReviewingAbsences(true)}>
+                  Review these hours
                 </button>
               </div>
             </div>
           )}
 
           {rows.length === 0 ? (
-            <p className="po-empty">Nobody worked a paid hour in {MONTH_NAMES[month - 1]}.</p>
+            <p className="po-empty">
+              Nobody worked a paid hour {isWeek ? `in the week of ${weekLabel(weekStart)}` : `in ${MONTH_NAMES[month - 1]}`}.
+            </p>
           ) : (
             <div className="po-table-wrap">
               <table className="po-table">
@@ -199,7 +274,7 @@ const PayrollOverview = () => {
                 </thead>
                 <tbody>
                   {rows.map(row => (
-                    <tr key={row.teacher.id} className={row.unratedHours > 0 || row.unconfirmedCount > 0 ? 'po-row-flagged' : ''}>
+                    <tr key={row.teacher.id} className={row.unratedHours > 0 || row.absenceCount > 0 ? 'po-row-flagged' : ''}>
                       <td>
                         <div className="po-teacher">
                           <span className="po-avatar">{row.teacher.fullName?.[0] || '?'}</span>
@@ -213,14 +288,14 @@ const PayrollOverview = () => {
                                 <AlertTriangle size={11} /> {row.unratedHours} h unpriced
                               </span>
                             )}
-                            {row.unconfirmedCount > 0 && (
+                            {row.absenceCount > 0 && (
                               <span
                                 className="po-flag"
-                                title={row.unconfirmedSessions
-                                  .map((s) => `${new Date(s.date).toLocaleDateString()} · ${s.title} · ${s.hours} h · ${UNCONFIRMED_REASONS[s.reason]}`)
+                                title={row.absences
+                                  .map((s) => `${new Date(s.date).toLocaleDateString()} · ${s.title} · ${s.hours} h · ${s.reason || 'no reason given'}${s.markedBy ? ` · marked by ${s.markedBy}` : ''}`)
                                   .join('\n')}
                               >
-                                <AlertTriangle size={11} /> {row.unconfirmedHours} h not closed out
+                                <AlertTriangle size={11} /> {row.absenceHours} h not paid
                               </span>
                             )}
                           </div>
@@ -285,6 +360,15 @@ const PayrollOverview = () => {
                             decision worth being able to read off the screen. */}
                         {row.salaryAmount == null
                           ? <span className="po-unset">—</span>
+                          /* A week never carries a salary, so this column is
+                             not a figure here. Saying "$0.00 no salary" would
+                             read as "we agreed nothing" about someone on
+                             $63,000 — the opposite of the truth. */
+                          : data?.includesSalary === false && row.salaryAmount > 0
+                            ? <span className="po-unset">
+                                —
+                                <span className="po-sub">paid monthly</span>
+                              </span>
                           : row.baseSalary > 0
                             ? <>
                                 {money(row.baseSalary)}
@@ -334,10 +418,12 @@ const PayrollOverview = () => {
           )}
 
           <p className="po-footnote">
-            Class sessions are paid once they're marked complete with at least one student
-            present; shifts once they're marked worked. Pay is per hour, at the rate for that
-            kind of work — set on the calendar entry, so the same person can be at the desk at
-            10 and teaching at 1 on two different rates.
+            Every class and shift on the calendar is paid the moment its hour ends — nothing to
+            mark complete, nothing to sign off. Mark a no-show on the calendar entry to take an
+            hour back off. Pay is per hour, at the rate for that kind of work, also set on the
+            calendar entry — so the same person can be at the desk at 10 and teaching at 1 on
+            two different rates.
+            {isWeek && ' Weeks run Monday to Sunday. Salaries are not in this total — they run monthly.'}
           </p>
         </>
       )}
@@ -367,15 +453,13 @@ const PayrollOverview = () => {
         />
       )}
 
-      {approving && (
-        <UnconfirmedSessionsPanel
+      {reviewingAbsences && (
+        <AbsencesPanel
           rows={rows}
-          month={month}
-          monthName={MONTH_NAMES[month - 1]}
-          year={year}
-          onClose={() => setApproving(false)}
-          // Approving turns unpaid hours into paid ones, so every total on the
-          // page behind is now wrong until it re-reads the month.
+          periodLabel={isWeek ? weekLabel(weekStart) : `${MONTH_NAMES[month - 1]} ${year}`}
+          onClose={() => setReviewingAbsences(false)}
+          // Restoring an hour turns unpaid hours into paid ones, so every total
+          // on the page behind is now wrong until it re-reads the period.
           onDone={retry}
         />
       )}

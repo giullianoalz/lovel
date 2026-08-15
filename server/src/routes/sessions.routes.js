@@ -20,11 +20,12 @@ import {
   checkInStudent,
   scanPickup,
   addSessionNote,
+  updateSessionNote,
   supervisionSessions,
   cancelStudentSession,
   listCancellations,
   resolveCancellation,
-  setSessionPayApproval,
+  setSessionAbsence,
 } from '../controllers/sessions.controller.js';
 
 const router = Router();
@@ -76,12 +77,15 @@ router.post('/:id/check-in', authenticate, requireRole('ADMIN', 'RECEPTIONIST'),
 // POST /api/sessions/:id/notes — Add session notes (Admin/Teacher)
 router.post('/:id/notes', authenticate, requireRole('ADMIN', 'TEACHER'), addSessionNote);
 
+// PATCH /api/sessions/:id/notes/:noteId — Edit a note in place (Admin/Teacher)
+router.patch('/:id/notes/:noteId', authenticate, requireRole('ADMIN', 'TEACHER'), updateSessionNote);
+
 // POST /api/sessions/:id/cancel-student — Cancel one student's spot (Admin/front desk)
 router.post('/:id/cancel-student', authenticate, requireRole('ADMIN'), validate(cancelStudentSchema), cancelStudentSession);
 
-// POST /api/sessions/pay-approval — Pay for classes nobody closed out (Admin only).
-// Authorising money against no register is an admin decision and nobody else's,
-// least of all the teacher being paid for the hour.
-router.post('/pay-approval', authenticate, requireRole('ADMIN'), setSessionPayApproval);
+// POST /api/sessions/absence — the teacher didn't turn up, don't pay it (Admin only).
+// Taking an hour off somebody's pay is an admin decision and nobody else's,
+// least of all the teacher whose hour it is.
+router.post('/absence', authenticate, requireRole('ADMIN'), setSessionAbsence);
 
 export default router;
