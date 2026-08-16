@@ -1,18 +1,18 @@
 /**
- * A photo row must never outlive the bytes it points at.
+ * A database row must never outlive the bytes it points at.
  *
- * `uploadPhotos` used to record every upload regardless of what happened to the
- * file: if the Drive upload failed it logged the error and created the row
- * anyway, "so the local file record is created". On Render local disk is wiped
- * on every restart, so those rows pointed at nothing the moment the dyno
- * recycled. That is not hypothetical — it destroyed all 35 marketing photos in
- * production, every one of them with a null driveFileId, and the gallery served
- * 404s in their place.
+ * Both upload paths — marketing photos and chat attachments — used to record
+ * the upload regardless of what happened to the file: if Drive refused it, they
+ * logged the error and wrote the row anyway, "so the local file record is
+ * created". On Render local disk is wiped on every restart, so those rows
+ * pointed at nothing the moment the dyno recycled. That is not hypothetical: it
+ * destroyed all 35 marketing photos AND all 3 chat attachments in production,
+ * every one with a null driveFileId, and the app served 404s in their place.
  *
- * The failure is silent by construction: the teacher gets a 201, the admin sees
- * a submission, and nothing looks wrong until the images stop loading days
- * later. So the guarantee is asserted directly — when nothing durable accepted
- * the file, no row may be written and the caller must be told.
+ * The failure is silent by construction: the sender gets a 201, the file looks
+ * delivered, and nothing seems wrong until it stops loading days later. So the
+ * guarantee is asserted directly — when nothing durable accepted the file, no
+ * row may be written and the caller must be told.
  *
  * Run with: npm test --prefix server
  */
@@ -35,6 +35,7 @@ process.env.DRIVE_PRIVATE_KEY = '';
 
 const { default: prisma } = await import('../src/config/database.js');
 const { uploadPhotos } = await import('../src/controllers/marketing.controller.js');
+const { uploadAttachment } = await import('../src/controllers/chat.controller.js');
 
 const SUBMISSION = { id: 'sub-1', teacherId: 'teacher-1' };
 
@@ -44,17 +45,29 @@ let created;
 before(() => {
   realMethods.findUnique = prisma.marketingSubmission.findUnique;
   realMethods.create = prisma.marketingPhoto.create;
+  realMethods.participantFindUnique = prisma.chatParticipant.findUnique;
+  realMethods.messageCreate = prisma.chatMessage.create;
 
   prisma.marketingSubmission.findUnique = async () => SUBMISSION;
   prisma.marketingPhoto.create = async ({ data }) => {
     created.push(data);
     return { id: `photo-${created.length}`, ...data };
   };
+
+  prisma.chatParticipant.findUnique = async () => ({
+    threadId: 'thread-1', userId: SUBMISSION.teacherId, isBlocked: false, thread: { isBot: false },
+  });
+  prisma.chatMessage.create = async ({ data }) => {
+    created.push(data);
+    return { id: 'msg-1', ...data, sentAt: new Date(), sender: { fullName: 'Test Teacher' } };
+  };
 });
 
 after(async () => {
   prisma.marketingSubmission.findUnique = realMethods.findUnique;
   prisma.marketingPhoto.create = realMethods.create;
+  prisma.chatParticipant.findUnique = realMethods.participantFindUnique;
+  prisma.chatMessage.create = realMethods.messageCreate;
   await prisma.$disconnect();
 });
 
@@ -103,6 +116,27 @@ test('reports which files were lost rather than failing anonymously', async () =
     'the teacher needs to know how many of their photos did not make it');
   assert.match(res.body.message, /not configured/,
     'the message must name the cause so the operator can act on it');
+});
+
+test('a chat attachment that cannot be stored is not sent at all', async () => {
+  // The chat copy of the same bug. Worse here than in marketing: the message
+  // becomes part of a supervised conversation record, so a dead attachment
+  // cannot simply be re-uploaded — it sits in the thread as evidence of a file
+  // nobody can open.
+  process.env.NODE_ENV = 'production';
+  created = [];
+  const res = makeRes();
+
+  await uploadAttachment({
+    params: { threadId: 'thread-1' },
+    user: { id: SUBMISSION.teacherId, role: 'TEACHER', secondaryRoles: [] },
+    file: { path: '/nonexistent/tmp/c.pdf', filename: 'c.pdf', originalname: 'c.pdf', mimetype: 'application/pdf' },
+    app: { get: () => null },
+  }, res, (err) => { throw err; });
+
+  assert.equal(created.length, 0, 'a message was created for a file that was never stored');
+  assert.equal(res.statusCode, 502);
+  assert.match(res.body.message, /not sent/, 'the sender must know the file did not go through');
 });
 
 test('still accepts local-disk-only storage in development', async () => {

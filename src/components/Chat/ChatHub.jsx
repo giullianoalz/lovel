@@ -364,7 +364,17 @@ const ChatHub = () => {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-    } catch (err) { console.error('Error downloading attachment:', err); }
+    } catch (err) {
+      console.error('Error downloading attachment:', err);
+      // Clicking a dead attachment used to do nothing at all, which reads as a
+      // broken button rather than a missing file. The response body is a Blob
+      // here (responseType), so there is no JSON message to unwrap.
+      setSendError(
+        err.response?.status === 404
+          ? `"${msg.fileName || 'This file'}" is no longer available.`
+          : 'Could not download that file. Please try again.'
+      );
+    }
   };
 
   const handleSetThreadStatus = async (threadId, status) => {

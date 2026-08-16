@@ -5,7 +5,7 @@ import { hasRole } from '../utils/roles.js';
 import { generateAssistantReply, isAssistantEnabled } from '../services/ai.service.js';
 import { findContactInfo } from '../utils/contentFilter.js';
 import { buildParentMaskMap, displayNameFor, masksParentIdentity } from '../utils/parentPrivacy.js';
-import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
+import { uploadFileToDrive, downloadFileFromDrive, drive, driveAuthMode } from '../config/drive.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 
 const CHAT_UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'chat');
@@ -842,9 +842,13 @@ export const uploadAttachment = async (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden', message: 'You have blocked this contact' });
     }
 
-    // Local disk is wiped on every Render restart — Drive is the durable copy.
-    // We still keep the local file as a fallback for the local-dev/no-Drive case.
+    // Local disk is wiped on every Render restart, so Drive is the only durable
+    // copy. Recording the message anyway when Drive refused the file is how
+    // every existing chat attachment ended up unreadable — the message sits in
+    // the thread forever, pointing at bytes that stopped existing at the next
+    // deploy. Send nothing rather than send a promise that expires.
     let driveFileId = null;
+    let driveError = null;
     if (drive) {
       try {
         const folderId = process.env.DRIVE_CHAT_FOLDER_ID || null;
@@ -852,7 +856,25 @@ export const uploadAttachment = async (req, res, next) => {
         driveFileId = driveFile?.id || null;
       } catch (driveErr) {
         console.error(`[Chat] Failed to upload attachment ${req.file.originalname} to Drive:`, driveErr.message);
+        driveError = driveErr.message;
       }
+    }
+
+    // A dev machine keeps its disk between restarts, so Drive isn't required
+    // there — otherwise chat would be unworkable offline.
+    if (!driveFileId && process.env.NODE_ENV !== 'development') {
+      await fs.promises.unlink(req.file.path).catch(() => {});
+
+      const reason = driveAuthMode === 'none'
+        ? 'File storage is not configured on the server.'
+        : driveAuthMode === 'service-account'
+          ? 'File storage is misconfigured (service account has no storage quota).'
+          : `File storage rejected the upload${driveError ? `: ${driveError}` : '.'}`;
+
+      return res.status(502).json({
+        error: 'Storage Error',
+        message: `Your file could not be saved, so it was not sent. ${reason}`,
+      });
     }
 
     const newMessage = await prisma.chatMessage.create({
