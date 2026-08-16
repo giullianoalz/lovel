@@ -1417,3 +1417,100 @@ const parseChargeRange = (from, to) => {
   }
   return { from: start.value, to: end.value };
 };
+
+/**
+ * PUT /api/billing/session-charges/override
+ * What one student pays for one meeting, when it isn't the meeting's price.
+ *
+ * The price on a calendar entry is a single number for the whole roster, which
+ * stops being right the moment somebody's fee already covers the room they are
+ * sitting in — an 8th grader on a $2,000 full-day programme is inside the same
+ * cove everyone else pays $400 for, and billing them again is charging twice for
+ * one seat.
+ *
+ * An amount rather than a flag: "free for her" and "reduced to $50" are the same
+ * decision at different numbers. Send `amount: null` to drop the override and
+ * put the student back on the meeting's own price.
+ *
+ * Body: { sessionId, studentIds: string[], amount: number|null, reason?: string }
+ * Takes a list of students because the reason for exempting one is almost always
+ * the reason for exempting the others.
+ */
+export const setSessionChargeOverride = async (req, res, next) => {
+  try {
+    const { sessionId, studentIds, amount, reason } = req.body;
+
+    if (!sessionId || !Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Send a sessionId and the students it applies to in studentIds.',
+      });
+    }
+
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { id: true },
+    });
+    if (!session) {
+      return res.status(404).json({ error: 'Not Found', message: 'That session does not exist.' });
+    }
+
+    // Clearing: the students go back to whatever the meeting charges.
+    if (amount === null || amount === undefined || amount === '') {
+      const { count } = await prisma.sessionChargeOverride.deleteMany({
+        where: { sessionId, studentId: { in: studentIds } },
+      });
+      return res.json({
+        message: count === 0
+          ? 'Those students were already on the meeting’s own price.'
+          : `${count} student${count === 1 ? '' : 's'} back on the meeting’s price.`,
+        cleared: count,
+      });
+    }
+
+    const n = typeof amount === 'number' ? amount : parseFloat(String(amount).replace(/[$,\s]/g, ''));
+    if (!Number.isFinite(n)) return res.status(400).json({ error: 'Validation Error', message: 'The amount must be a number.' });
+    if (n < 0) return res.status(400).json({ error: 'Validation Error', message: 'The amount cannot be negative.' });
+    if (n > 99999999.99) return res.status(400).json({ error: 'Validation Error', message: 'That amount is implausibly large.' });
+    const value = Math.round(n * 100) / 100;
+
+    // Upsert per student rather than deleteMany+createMany: re-pricing somebody
+    // who already had an override must not briefly leave them on the full price
+    // if the second half of the write fails.
+    await prisma.$transaction(
+      studentIds.map((studentId) =>
+        prisma.sessionChargeOverride.upsert({
+          where: { sessionId_studentId: { sessionId, studentId } },
+          create: {
+            sessionId,
+            studentId,
+            amount: value,
+            reason: reason?.trim()?.slice(0, 255) || null,
+            createdById: req.user.id,
+          },
+          update: {
+            amount: value,
+            reason: reason?.trim()?.slice(0, 255) || null,
+            createdById: req.user.id,
+          },
+        })
+      )
+    );
+
+    // The log is the only trace of who priced somebody differently, and by how
+    // much, until this is ever questioned.
+    console.log(
+      `[Billing] ${req.user.email} priced ${studentIds.length} student(s) at $${value.toFixed(2)} `
+      + `on session ${sessionId}${reason ? ` (${reason})` : ''}`
+    );
+
+    res.json({
+      message: value === 0
+        ? `${studentIds.length} student${studentIds.length === 1 ? '' : 's'} won’t be charged for this meeting.`
+        : `${studentIds.length} student${studentIds.length === 1 ? '' : 's'} priced at $${value.toFixed(2)} for this meeting.`,
+      updated: studentIds.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

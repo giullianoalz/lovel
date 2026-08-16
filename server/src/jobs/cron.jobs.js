@@ -4,6 +4,7 @@ import { sendNotification, notifyAdmins } from './notification.helper.js';
 import { previousOccurrence } from './cronSchedule.js';
 import { runRecurringCharges } from '../services/recurringCharges.service.js';
 import { freezeSessionRates, freezeShiftRates } from '../services/payroll.service.js';
+import { buildSessionCharges } from '../services/sessionCharges.service.js';
 import {
   getEventConfig,
   getAdminUserIds,
@@ -20,6 +21,7 @@ import { ACADEMY_TIMEZONE, academyToday, academyDayOffset, sessionStartInstant }
  *   - Low snack-punches alert      → every Monday at 7:00 AM
  *   - Class starting-soon reminder → every 5 minutes
  *   - Pay accrual (rate stamping)  → every hour, five past
+ *   - Weekly billing review        → every Monday at 9:00 AM
  *
  * All jobs are registered in the JOBS table at the bottom of this file and
  * started by calling startCronJobs() from index.js after the server starts.
@@ -399,6 +401,57 @@ const accruePay = async () => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
+// JOB 7 — Weekly billing review
+// Every Monday: count what the priced calendar entries are
+// waiting to charge, and put it in front of an admin. Never
+// charges anything on its own.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Tells an admin there is money waiting to be approved.
+ *
+ * Charging is weekly, and the approval is not optional: a price on a calendar
+ * entry is a draft until a person releases it, and nothing here changes that.
+ * What this job fixes is the other half of the problem — a review step nobody
+ * is reminded about is a review step that gets skipped, and the charges then sit
+ * unbilled for a month while the families who owe them forget the lesson ever
+ * happened.
+ *
+ * Deliberately only a notification. It would be a small change to have this
+ * raise the charges itself, and that is exactly the change that must not be
+ * made: the whole point of the gap between pricing and charging is that a
+ * human looks at the number first.
+ */
+const remindWeeklyBillingReview = async () => {
+  const { summary } = await buildSessionCharges({});
+
+  if (summary.billable === 0) {
+    console.log('[CRON] Weekly billing review: nothing waiting.');
+    return;
+  }
+
+  const waived = summary.waived > 0
+    ? ` ${summary.overridden} line${summary.overridden === 1 ? '' : 's'} priced down by $${summary.waived.toLocaleString()}.`
+    : '';
+
+  await notifyAdmins({
+    type: 'BILLING',
+    title: `$${summary.total.toLocaleString()} waiting to be charged`,
+    message:
+      `${summary.billable} charge${summary.billable === 1 ? '' : 's'} across ${summary.sessions} `
+      + `meeting${summary.sessions === 1 ? '' : 's'} are priced and waiting for approval.${waived} `
+      + `Review them under Billing → Calendar Charges. Nothing has been billed.`,
+    referenceType: 'billing',
+    // One reminder per week, not one per boot: the catch-up pass re-runs a
+    // missed job, and without this a Monday spent redeploying would stack up
+    // identical alerts.
+    dedupKey: `weekly-billing-review:${academyToday().toISOString().slice(0, 10)}`,
+  });
+
+  console.log(`[CRON] Weekly billing review: flagged $${summary.total} across ${summary.sessions} meeting(s).`);
+};
+
 const JOBS = [
   {
     name: 'overdue-invoices',
@@ -429,6 +482,11 @@ const JOBS = [
     name: 'pay-accrual',
     schedule: '5 * * * *', // every hour, just after the hour
     handler: accruePay,
+  },
+  {
+    name: 'weekly-billing-review',
+    schedule: '0 9 * * 1', // every Monday at 9:00 AM
+    handler: remindWeeklyBillingReview,
   },
 ];
 

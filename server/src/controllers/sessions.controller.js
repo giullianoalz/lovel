@@ -297,6 +297,13 @@ export const listSessions = async (req, res, next) => {
         // Who marked the teacher absent, so the calendar can name them on the
         // session rather than showing an anonymous "not paid" flag.
         absentBy: { select: { fullName: true } },
+        // What individual students pay instead of the meeting's price, so the
+        // calendar can show the roster with each person's real number — which
+        // is the whole reason pricing lives on the calendar rather than in a
+        // billing screen: this is where you can see who is in the room.
+        chargeOverrides: {
+          select: { studentId: true, amount: true, reason: true },
+        },
       },
     });
 
@@ -315,7 +322,7 @@ export const listSessions = async (req, res, next) => {
     const isAdmin = hasRole(req.user, 'ADMIN');
     res.json({
       sessions: sessions.map((s) => {
-        const visible = isAdmin ? s : { ...s, chargeAmount: null, chargeNote: null };
+        const visible = isAdmin ? s : { ...s, chargeAmount: null, chargeNote: null, chargeOverrides: [] };
         return isAdmin || s.class?.teacherId === req.user.id
           ? visible
           : { ...visible, payRateOverride: null, paidRate: null, absentAt: null, absentReason: null, absentBy: null };

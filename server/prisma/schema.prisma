@@ -127,6 +127,8 @@ model User {
   sessionPayApprovals    Session[]                 @relation("SessionPayApprovals")
   sessionAbsences        Session[]                 @relation("SessionAbsences")
   shiftAbsences          WorkShift[]               @relation("ShiftAbsences")
+  chargeOverrides        SessionChargeOverride[]   @relation("StudentChargeOverrides")
+  chargeOverridesCreated SessionChargeOverride[]   @relation("ChargeOverridesCreated")
   spaceReservations      SpaceReservation[]
   tempPickupAuths        TempPickupAuth[]
   pickupAuthsAsStudent   TempPickupAuth[]          @relation("PickupAuthStudent")
@@ -264,6 +266,44 @@ model Class {
   @@map("classes")
 }
 
+/// What one student pays for one meeting, when it isn't the meeting's price.
+///
+/// `Session.chargeAmount` is a single number for everybody on the roster, which
+/// is right until somebody's fee already covers the room they're sitting in. The
+/// 8th grade programme runs 10:00–17:00 Mon–Thu for $2,000 a quarter, and those
+/// students spend that day inside the same coves and electives everyone else is
+/// charged $400 and $130 for. Billing them again for a room their tuition
+/// already bought is the mistake this exists to prevent — it was worth $3,050
+/// across two students in the first term it applied.
+///
+/// An amount, not a boolean, because "this one is free for her" and "she pays a
+/// reduced $50" are the same decision at different numbers. 0 means charged
+/// nothing; no row at all means the meeting's own price applies.
+///
+/// Keyed by (session, student) so it survives the roster changing underneath it:
+/// a student added to a cove later still has to be exempted deliberately, which
+/// is the safe direction to fail.
+model SessionChargeOverride {
+  id          String   @id @default(uuid()) @db.Uuid
+  sessionId   String   @map("session_id") @db.Uuid
+  studentId   String   @map("student_id") @db.Uuid
+  amount      Decimal  @db.Decimal(10, 2)
+  // Why this student is priced differently — shown next to the money on the
+  // review screen, because an exemption nobody can explain is one nobody can
+  // defend months later.
+  reason      String?  @db.VarChar(255)
+  createdById String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student   User    @relation("StudentChargeOverrides", fields: [studentId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation("ChargeOverridesCreated", fields: [createdById], references: [id])
+
+  @@unique([sessionId, studentId])
+  @@index([studentId])
+  @@map("session_charge_overrides")
+}
+
 model ClassEnrollment {
   id         String   @id @default(uuid()) @db.Uuid
   classId    String   @map("class_id") @db.Uuid
@@ -366,6 +406,7 @@ model Session {
   // What the family sees on the invoice line. Falls back to the class name.
   chargeNote      String?               @map("charge_note") @db.VarChar(255)
   charges         Transaction[]         @relation("SessionCharges")
+  chargeOverrides SessionChargeOverride[]
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
   behaviorLogs    BehaviorLog[]

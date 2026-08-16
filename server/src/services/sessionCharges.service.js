@@ -58,6 +58,15 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
       endTime: true,
       chargeAmount: true,
       chargeNote: true,
+      // What individual students pay instead of the meeting's price. Almost
+      // always empty; when it isn't, it is because somebody's fee already covers
+      // the room — see SessionChargeOverride.
+      chargeOverrides: {
+        select: {
+          studentId: true, amount: true, reason: true,
+          createdBy: { select: { fullName: true } },
+        },
+      },
       class: {
         select: {
           id: true,
@@ -100,14 +109,21 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
 
   const lines = [];
   for (const session of sessions) {
-    const amount = round2(Number(session.chargeAmount) || 0);
+    const listPrice = round2(Number(session.chargeAmount) || 0);
     const description = session.chargeNote?.trim() || session.class?.name || 'Session';
+    const overrides = new Map((session.chargeOverrides || []).map((o) => [o.studentId, o]));
 
     for (const enrollment of session.class?.enrollments || []) {
       const student = enrollment.student;
       const key = chargedKey(session.id, student.id);
       const charged = alreadyCharged.has(key);
       if (charged && !includeCharged) continue;
+
+      // A student's own price beats the meeting's. Carried onto the line rather
+      // than silently swapped, so the review screen can show what the rest of
+      // the roster pays next to what this one does and why.
+      const override = overrides.get(student.id);
+      const amount = override ? round2(Number(override.amount)) : listPrice;
 
       lines.push({
         sessionId: session.id,
@@ -120,9 +136,14 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
         studentName: student.fullName,
         familyId: student.familyMembers[0]?.familyId || null,
         amount,
+        listPrice,
+        overridden: Boolean(override),
+        overrideReason: override?.reason || null,
+        overrideBy: override?.createdBy?.fullName || null,
         // Three reasons a line can't be raised, kept apart so the screen can
-        // say which: already billed, nobody to bill it to, or a price of zero
-        // that would put a $0 row on somebody's invoice for no reason.
+        // say which: already billed, nobody to bill it to, or priced at zero —
+        // either because the meeting is free or because this student was
+        // exempted. A $0 row on an invoice helps nobody either way.
         alreadyCharged: charged,
         chargedAmount: alreadyCharged.get(key) ?? null,
         missingFamily: !student.familyMembers[0]?.familyId,
@@ -139,17 +160,24 @@ export const isBillable = (line) =>
   !line.alreadyCharged && !line.missingFamily && !line.zeroAmount;
 
 const emptySummary = () => ({
-  sessions: 0, students: 0, billable: 0, alreadyCharged: 0, missingFamily: 0, total: 0,
+  sessions: 0, students: 0, billable: 0, alreadyCharged: 0, missingFamily: 0,
+  overridden: 0, waived: 0, total: 0,
 });
 
 const summarise = (lines) => {
   const billable = lines.filter(isBillable);
+  const overridden = lines.filter((l) => l.overridden);
   return {
     sessions: new Set(lines.map((l) => l.sessionId)).size,
     students: new Set(lines.map((l) => l.studentId)).size,
     billable: billable.length,
     alreadyCharged: lines.filter((l) => l.alreadyCharged).length,
     missingFamily: lines.filter((l) => l.missingFamily).length,
+    // Priced differently for one student, and of those the ones priced at
+    // nothing. Reported so a total that looks low has a visible reason on the
+    // same screen, rather than an admin wondering where the money went.
+    overridden: overridden.length,
+    waived: round2(overridden.reduce((sum, l) => sum + (l.listPrice - l.amount), 0)),
     total: round2(billable.reduce((sum, l) => sum + l.amount, 0)),
   };
 };

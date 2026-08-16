@@ -282,6 +282,10 @@ const CalendarView = () => {
   // session nobody is currently marking.
   const [absenceOpen, setAbsenceOpen] = useState(false);
   const [absenceReason, setAbsenceReason] = useState('');
+  // Which student on the open session is having their price rewritten, and to
+  // what. One at a time: this is a per-person decision and editing a column of
+  // them at once is how the wrong child gets somebody else's number.
+  const [priceEdit, setPriceEdit] = useState(null); // { studentId, value, reason }
   const [linkAppliesToSeries, setLinkAppliesToSeries] = useState(false);
   const [isEditingEvent, setIsEditingEvent] = useState(false);
   const [editEventForm, setEditEventForm] = useState({});
@@ -700,6 +704,9 @@ const CalendarView = () => {
   useEffect(() => {
     setAbsenceOpen(false);
     setAbsenceReason('');
+    // Same reason: a half-typed price must never follow the admin to the next
+    // session, where it would be sitting on a different child's row.
+    setPriceEdit(null);
   }, [selectedEvent?.id]);
 
   // Loaded once: the list is short, changes rarely, and every session opened
@@ -791,6 +798,15 @@ const CalendarView = () => {
           // Admin-only; the API nulls it for everybody else.
           chargeAmount: s.chargeAmount == null ? '' : String(s.chargeAmount),
           chargeNote: s.chargeNote || '',
+          // Students who don't pay this meeting's price — an 8th grader whose
+          // full-day fee already bought this room, a sibling on a concession.
+          // Keyed by student id so the roster below can show each real number.
+          chargeOverrides: Object.fromEntries(
+            (s.chargeOverrides || []).map(o => [o.studentId, { amount: Number(o.amount), reason: o.reason }])
+          ),
+          // The roster as ids+names, so the price panel can list who is actually
+          // being charged without waiting for the lazy per-event fetch.
+          rosterStudents: roster.map(en => ({ id: en.student?.id, name: en.student?.fullName })).filter(x => x.id),
           // Once the hour is confirmed its rate is written down and no longer
           // follows the category, so the picker says so instead of implying an
           // edit here would change what was paid.
@@ -1345,6 +1361,44 @@ const CalendarView = () => {
       loadSessions(view, currentDate);
     } catch (error) {
       toast.error(error.response?.data?.message || "Could not change this session's pay.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * Price one student differently for this meeting — usually to nothing.
+   *
+   * The price on a calendar entry is one number for the whole roster, which
+   * stops being right the moment somebody's fee already covers the room they
+   * are sitting in: an 8th grader on the full-day programme is inside the same
+   * cove everyone else pays $400 for, and charging them again is billing twice
+   * for one seat. This is where that gets fixed, on the entry, with the roster
+   * in front of you — which is the reason pricing lives on the calendar at all.
+   *
+   * `amount: null` drops the exception and puts them back on the full price.
+   */
+  const handleStudentPrice = async (studentId, amount, reason) => {
+    if (!selectedEvent) return;
+    setSaving(true);
+    try {
+      const res = await database.setStudentChargePrice({
+        sessionId: selectedEvent.id,
+        studentIds: [studentId],
+        amount,
+        reason,
+      });
+      toast.success(res.message);
+      setSelectedEvent(prev => {
+        const next = { ...(prev.chargeOverrides || {}) };
+        if (amount === null) delete next[studentId];
+        else next[studentId] = { amount: Number(amount), reason: reason || null };
+        return { ...prev, chargeOverrides: next };
+      });
+      setPriceEdit(null);
+      loadSessions(view, currentDate);
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Could not change what this student pays.");
     } finally {
       setSaving(false);
     }
@@ -3039,6 +3093,104 @@ const CalendarView = () => {
                             </button>
                           </span>
                         )}
+                      </div>
+                    )}
+
+                    {/* Who is actually being charged, and how much each.
+                        The price above is one number for the roster; this is
+                        where it stops being one number — a student whose fee
+                        already covers this room is set to $0 here, on the entry,
+                        with the roster in front of you. */}
+                    {canSetPay && selectedEvent.chargeAmount !== '' && selectedEvent.chargeAmount != null
+                      && (selectedEvent.rosterStudents?.length > 0) && (
+                      <div className="cal-charge-roster">
+                        {selectedEvent.rosterStudents.map(st => {
+                          const ov = selectedEvent.chargeOverrides?.[st.id];
+                          const listed = Number(selectedEvent.chargeAmount);
+                          const pays = ov ? ov.amount : listed;
+                          const editing = priceEdit?.studentId === st.id;
+
+                          // Editing this one: the amount becomes a box, with a
+                          // reason next to it — a number nobody can explain is
+                          // one nobody can defend when the family asks.
+                          if (editing) {
+                            return (
+                              <div className="cal-roster-row cal-roster-row-editing" key={st.id}>
+                                <span className="cal-roster-name">{st.name}</span>
+                                <div className="cal-roster-edit">
+                                  <span>$</span>
+                                  <input
+                                    type="number" min="0" step="0.01" inputMode="decimal"
+                                    className="form-control"
+                                    value={priceEdit.value}
+                                    autoFocus
+                                    onChange={e => setPriceEdit(p => ({ ...p, value: e.target.value }))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleStudentPrice(st.id, priceEdit.value, priceEdit.reason);
+                                      if (e.key === 'Escape') setPriceEdit(null);
+                                    }}
+                                  />
+                                  <input
+                                    type="text"
+                                    className="form-control cal-roster-reason"
+                                    placeholder="Why? (sibling, scholarship…)"
+                                    value={priceEdit.reason}
+                                    onChange={e => setPriceEdit(p => ({ ...p, reason: e.target.value }))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') handleStudentPrice(st.id, priceEdit.value, priceEdit.reason);
+                                      if (e.key === 'Escape') setPriceEdit(null);
+                                    }}
+                                  />
+                                  <button
+                                    className="cal-roster-save"
+                                    disabled={saving}
+                                    onClick={() => handleStudentPrice(st.id, priceEdit.value, priceEdit.reason)}
+                                  >
+                                    Save
+                                  </button>
+                                  <button className="cal-roster-btn" onClick={() => setPriceEdit(null)}>cancel</button>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className={`cal-roster-row${ov ? ' cal-roster-row-exempt' : ''}`} key={st.id}>
+                              <span className="cal-roster-name">{st.name}</span>
+                              {/* The amount is the control: click it to price
+                                  this student at anything. The links beside it
+                                  are only shortcuts for the two commonest
+                                  answers, nothing and the full price. */}
+                              <button
+                                className="cal-roster-amount cal-roster-amount-btn"
+                                title={ov?.reason ? `${ov.reason} — click to change` : 'Click to price this student differently'}
+                                onClick={() => setPriceEdit({ studentId: st.id, value: String(pays), reason: ov?.reason || '' })}
+                              >
+                                ${pays.toFixed(2)}
+                                {ov && <s>${listed.toFixed(2)}</s>}
+                              </button>
+                              {ov ? (
+                                <button
+                                  className="cal-roster-btn"
+                                  disabled={saving}
+                                  title="Put this student back on the meeting's own price"
+                                  onClick={() => handleStudentPrice(st.id, null)}
+                                >
+                                  charge full price
+                                </button>
+                              ) : (
+                                <button
+                                  className="cal-roster-btn"
+                                  disabled={saving}
+                                  title="Their fee already covers this — don't charge it again"
+                                  onClick={() => handleStudentPrice(st.id, 0, 'Already covered by another fee')}
+                                >
+                                  don't charge
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                     {/* Pay comes off the calendar now: this hour is paid once

@@ -3107,3 +3107,120 @@ select.form-control {
   line-height: 1.45;
   color: var(--text-muted, #94a3b8);
 }
+
+/* Who is actually being charged for this meeting, and how much each.
+   The price above is one number for the whole roster; this is where it stops
+   being one number. Indented under it so it reads as a breakdown rather than a
+   separate feature. */
+.cal-charge-roster {
+  grid-column: 1 / -1;
+  margin: -4px 0 0 24px;
+  padding: 8px 10px;
+  border-left: 2px solid rgba(16, 185, 129, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.cal-roster-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 2px;
+  font-size: 12.5px;
+  border-radius: 6px;
+}
+
+.cal-roster-row:hover { background: rgba(148, 163, 184, 0.09); }
+
+.cal-roster-name { color: var(--text-main, #1e293b); }
+
+.cal-roster-amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted, #64748b);
+}
+
+.cal-roster-amount s { margin-left: 6px; opacity: 0.55; }
+
+/* Not paying this one. Muted rather than alarming — an exemption is a normal
+   decision, and the struck-through list price next to it says what changed. */
+.cal-roster-row-exempt .cal-roster-name { color: var(--text-muted, #94a3b8); }
+.cal-roster-row-exempt .cal-roster-amount { color: #059669; font-weight: 600; }
+
+.cal-roster-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+/* Revealed on hover: eleven of these on a big cove would otherwise be a wall of
+   links competing with the names they belong to. */
+.cal-roster-row:hover .cal-roster-btn,
+.cal-roster-row-exempt .cal-roster-btn { opacity: 1; }
+.cal-roster-btn:hover { color: #059669; }
+.cal-roster-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* The amount is the control, not just a readout: clicking it prices that one
+   student at anything. Styled as text until hovered so the roster still reads
+   as a list rather than a form. */
+.cal-roster-amount-btn {
+  border: none;
+  background: none;
+  padding: 2px 5px;
+  margin: -2px -5px;
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cal-roster-amount-btn:hover {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--border, #e2e8f0);
+}
+
+.cal-roster-row-editing {
+  grid-template-columns: 1fr;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.06);
+  padding: 8px;
+}
+
+.cal-roster-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.cal-roster-edit .form-control { height: 30px; font-size: 12.5px; }
+.cal-roster-edit input[type="number"] { width: 88px; }
+.cal-roster-reason { flex: 1; min-width: 150px; }
+
+.cal-roster-save {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 7px;
+  background: #059669;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cal-roster-save:hover:not(:disabled) { background: #047857; }
+.cal-roster-save:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -496,6 +496,16 @@ export const database = {
     return response.data;
   },
 
+  // What one student pays for one meeting, when the meeting's own price doesn't
+  // apply to them. `amount: null` puts them back on the full price. Charges
+  // nobody on its own — it changes what the pending charge will be.
+  setStudentChargePrice: async ({ sessionId, studentIds, amount, reason }) => {
+    const response = await api.put('/billing/session-charges/override', {
+      sessionId, studentIds, amount, reason,
+    });
+    return response.data;
+  },
+
   generateInvoice: async (familyId, transactionIds) => {
     const response = await api.post('/billing/invoices', { familyId, transactionIds });
     return response.data.invoice;

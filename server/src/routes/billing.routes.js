@@ -19,6 +19,7 @@ import {
   refundPayment,
   previewSessionCharges,
   generateSessionCharges,
+  setSessionChargeOverride,
 } from '../controllers/billing.controller.js';
 import {
   listRecurringCharges,
@@ -91,5 +92,9 @@ router.get('/session-charges', authenticate, requireRole('ADMIN'), previewSessio
 // POST /api/billing/session-charges — Raise those charges into the ledger (Admin).
 // Committing money to real families is an admin decision and nobody else's.
 router.post('/session-charges', authenticate, requireRole('ADMIN'), generateSessionCharges);
+
+// PUT /api/billing/session-charges/override — what one student pays for one
+// meeting, when the meeting's own price doesn't apply to them (Admin only).
+router.put('/session-charges/override', authenticate, requireRole('ADMIN'), setSessionChargeOverride);
 
 export default router;
