@@ -2,7 +2,7 @@ import prisma from '../config/database.js';
 import { hasRole, isOnly } from '../utils/roles.js';
 import path from 'path';
 import fs from 'fs';
-import { uploadFileToDrive, downloadFileFromDrive, drive } from '../config/drive.js';
+import { uploadFileToDrive, downloadFileFromDrive, drive, driveAuthMode } from '../config/drive.js';
 
 // Ensure upload directory exists
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'marketing');
@@ -174,35 +174,66 @@ export const uploadPhotos = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: 'No files uploaded.' });
     }
 
-    const photos = await Promise.all(
+    // Local disk only survives where the process does. On Render it is wiped on
+    // every restart, so a photo that never reached Drive is already lost the
+    // moment it is written — recording it anyway is what produced 35 rows
+    // pointing at bytes that no longer exist. A row is therefore only created
+    // once the file is somewhere durable.
+    const folderId = process.env.DRIVE_MARKETING_FOLDER_ID || null;
+    const localDiskIsDurable = process.env.NODE_ENV === 'development';
+
+    let driveError = null;
+
+    const results = await Promise.all(
       req.files.map(async (file) => {
         let driveFileId = null;
-        
-        // Attempt to upload to Google Drive if configured
+
         if (drive) {
           try {
-            // Optional: specify a folder ID if you have one configured
-            const folderId = process.env.DRIVE_MARKETING_FOLDER_ID || null;
             const driveFile = await uploadFileToDrive(file.path, file.originalname, file.mimetype, folderId);
-            if (driveFile) {
-              driveFileId = driveFile.id;
-            }
+            driveFileId = driveFile?.id || null;
           } catch (driveErr) {
-            console.error(`Failed to upload ${file.originalname} to drive:`, driveErr);
-            // We continue even if drive upload fails, so the local file record is created
+            console.error(`[Marketing] Drive upload failed for ${file.originalname}:`, driveErr.message);
+            driveError = driveErr.message;
           }
         }
 
-        return prisma.marketingPhoto.create({
+        if (!driveFileId && !localDiskIsDurable) {
+          // Nothing durable holds this file, so drop the upload rather than
+          // promise the teacher it was saved.
+          await fs.promises.unlink(file.path).catch(() => {});
+          return { ok: false, fileName: file.originalname };
+        }
+
+        const photo = await prisma.marketingPhoto.create({
           data: {
             submissionId: id,
             fileUrl: `/uploads/marketing/${file.filename}`,
             fileName: file.originalname,
-            driveFileId: driveFileId,
+            driveFileId,
           },
         });
+        return { ok: true, photo };
       })
     );
+
+    const photos = results.filter(r => r.ok).map(r => r.photo);
+    const failed = results.filter(r => !r.ok).map(r => r.fileName);
+
+    if (failed.length > 0) {
+      const reason = driveAuthMode === 'none'
+        ? 'Google Drive is not configured on the server.'
+        : driveAuthMode === 'service-account'
+          ? 'Google Drive is using a service account, which has no storage quota. Set DRIVE_REFRESH_TOKEN.'
+          : `Google Drive rejected the upload${driveError ? `: ${driveError}` : '.'}`;
+
+      return res.status(502).json({
+        error: 'Storage Error',
+        message: `${failed.length} of ${req.files.length} photo(s) could not be stored. ${reason}`,
+        failed,
+        photos,
+      });
+    }
 
     res.status(201).json({ photos });
   } catch (error) {
