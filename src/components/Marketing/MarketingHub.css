@@ -82,6 +82,8 @@
 
 .photo-count { text-align: center; margin-top: 10px; font-size: 12px; color: var(--text-muted); font-weight: 600; }
 
+.photos-card textarea.form-control { margin-top: 12px; width: 100%; box-sizing: border-box; resize: vertical; }
+
 /* Mini Form (SOTW/AOTW) */
 .mini-form { display: flex; flex-direction: column; gap: 10px; }
 
@@ -94,6 +96,13 @@
 .mini-upload-btn:hover { background: #e2e8f0; color: var(--text-main); }
 
 /* Submit Footer */
+.submit-warnings {
+  background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px;
+  padding: 14px 18px; margin-bottom: 16px;
+}
+.submit-warnings p { margin: 0 0 6px; font-size: 13px; color: #92400e; line-height: 1.5; }
+.submit-warnings p:last-child { margin-bottom: 0; }
+
 .submit-footer {
   display: flex; justify-content: space-between; align-items: center;
   padding: 20px 24px; background: white; border-radius: 14px;
@@ -124,6 +133,17 @@
 .btn-clear-filter {
   padding: 8px 16px; background: #f1f5f9; border: 1px solid var(--border-light);
   border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--text-muted);
+}
+
+.status-group { margin-bottom: 32px; }
+.status-group:last-child { margin-bottom: 0; }
+
+.status-group-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+}
+
+.status-group-count {
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
 }
 
 .gallery-grid {

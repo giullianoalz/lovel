@@ -8,6 +8,7 @@ import {
   listSubmissions,
   getSubmission,
   updateSubmission,
+  deleteSubmission,
   uploadPhotos,
   getPhotoFile,
 } from '../controllers/marketing.controller.js';
@@ -51,6 +52,10 @@ router.get('/submissions/:id', authenticate, requireRole('ADMIN', 'TEACHER'), ge
 
 // PATCH /api/marketing/submissions/:id — Approve/update (Admin)
 router.patch('/submissions/:id', authenticate, requireRole('ADMIN'), updateSubmission);
+
+// DELETE /api/marketing/submissions/:id — discard a submission left empty by a
+// failed photo upload (Teacher may only discard their own; see controller)
+router.delete('/submissions/:id', authenticate, requireRole('ADMIN', 'TEACHER'), deleteSubmission);
 
 // POST /api/marketing/submissions/:id/photos — Upload photos (Teacher/Admin)
 router.post(

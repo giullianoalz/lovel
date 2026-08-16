@@ -23,13 +23,22 @@ export const createSubmission = async (req, res, next) => {
       });
     }
 
+    // Marketing can't use a submission it can't interpret, so a description of
+    // the activity is mandatory — blank ones are what made the gallery unreadable.
+    if (!description || !description.trim()) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'A description of the activity is required.',
+      });
+    }
+
     const submission = await prisma.marketingSubmission.create({
       data: {
         teacherId,
         weekOf: new Date(weekOf),
         type,
-        title: title || null,
-        description: description || null,
+        title: title?.trim() || null,
+        description: description.trim(),
       },
       include: {
         teacher: { select: { id: true, fullName: true } },
@@ -58,6 +67,16 @@ export const listSubmissions = async (req, res, next) => {
     if (weekOf) where.weekOf = new Date(weekOf);
     if (type) where.type = type;
     if (status) where.status = status;
+
+    // Hide submissions that carry neither photos nor a description — they say
+    // nothing and can't be reviewed or posted. These piled up whenever a photo
+    // upload failed after the record had already been created. A text-only
+    // Student/Activity of the Week is still real content, so a description
+    // alone is enough to keep a submission visible.
+    where.OR = [
+      { photos: { some: {} } },
+      { AND: [{ description: { not: null } }, { description: { not: '' } }] },
+    ];
 
     const submissions = await prisma.marketingSubmission.findMany({
       where,
@@ -94,6 +113,40 @@ export const updateSubmission = async (req, res, next) => {
     });
 
     res.json({ submission: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// DELETE /api/marketing/submissions/:id — roll back a submission whose photo
+// upload failed. Deliberately refuses once photos exist, so a partial upload
+// keeps whatever made it through and this can never destroy real content.
+export const deleteSubmission = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const submission = await prisma.marketingSubmission.findUnique({
+      where: { id },
+      include: { _count: { select: { photos: true } } },
+    });
+
+    if (!submission) {
+      return res.status(404).json({ error: 'Not Found', message: 'Submission not found.' });
+    }
+
+    if (!hasRole(req.user, 'ADMIN') && submission.teacherId !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden', message: 'You can only delete your own submissions.' });
+    }
+
+    if (submission._count.photos > 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'This submission already has photos and cannot be discarded.',
+      });
+    }
+
+    await prisma.marketingSubmission.delete({ where: { id } });
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

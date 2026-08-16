@@ -17,6 +17,7 @@ const MarketingHub = () => {
   // Submit form state
   const [photoFiles, setPhotoFiles] = useState([]);
   const [photoPreviews, setPhotoPreviews] = useState([]);
+  const [photoDescription, setPhotoDescription] = useState('');
   const [sotwForm, setSotwForm] = useState({ title: '', description: '', photos: [], previews: [] });
   const [aotwForm, setAotwForm] = useState({ title: '', description: '', photos: [], previews: [] });
   const [submitting, setSubmitting] = useState(false);
@@ -85,6 +86,31 @@ const MarketingHub = () => {
     }
   };
 
+  // Every submission must say what the activity was; blank ones are what filled
+  // the gallery with "Weekly Photos" entries nobody could interpret.
+  // `requiresPhotos` marks the block whose photos ARE the content — a Weekly
+  // Photos card without images is the blank entry that made the gallery
+  // unreadable. Student/Activity of the Week carry their meaning in the text,
+  // so there photos stay optional.
+  const blocks = [
+    { key: 'photos', label: 'Weekly Photos', type: 'PHOTOS', title: 'Weekly Photos', description: photoDescription, photos: photoFiles, requiresPhotos: true },
+    { key: 'sotw', label: 'Student of the Week', type: 'STUDENT_OF_WEEK', title: sotwForm.title, description: sotwForm.description, photos: sotwForm.photos, requiresPhotos: false },
+    { key: 'aotw', label: 'Activity of the Week', type: 'ACTIVITY_OF_WEEK', title: aotwForm.title, description: aotwForm.description, photos: aotwForm.photos, requiresPhotos: false },
+  ];
+  // "Started" = the teacher put something in this card, so it must be completed
+  // rather than silently skipped. The photos card has no title of its own.
+  const isStarted = (b) => b.photos.length > 0 || !!b.description.trim() || (b.key !== 'photos' && !!b.title.trim());
+  const missingFor = (b) => {
+    const missing = [];
+    if (b.requiresPhotos && b.photos.length === 0) missing.push('at least one photo');
+    if (!b.title.trim()) missing.push(b.key === 'sotw' ? "the student's name" : 'a title');
+    if (!b.description.trim()) missing.push('a description of the activity');
+    return missing;
+  };
+  const startedBlocks = blocks.filter(isStarted);
+  const incompleteBlocks = startedBlocks.filter(b => missingFor(b).length > 0);
+  const canSubmit = startedBlocks.length > 0 && incompleteBlocks.length === 0;
+
   const uploadPhotosForSubmission = async (submissionId, files) => {
     if (files.length === 0) return;
     const formData = new FormData();
@@ -94,44 +120,46 @@ const MarketingHub = () => {
     });
   };
 
+  // Create-then-upload isn't atomic, so a failed upload used to leave a blank
+  // submission behind forever. Discard it when the photos were the whole point;
+  // otherwise keep the record — its text is still worth posting — and warn.
+  const submitBlock = async (weekOf, block) => {
+    const res = await api.post('/marketing/submissions', {
+      weekOf,
+      type: block.type,
+      title: block.title.trim(),
+      description: block.description.trim(),
+    });
+    const submissionId = res.data.submission.id;
+    try {
+      await uploadPhotosForSubmission(submissionId, block.photos);
+    } catch (uploadError) {
+      if (!block.requiresPhotos) {
+        toast.error(`${block.label} was saved, but its photos could not be uploaded.`);
+        return;
+      }
+      try {
+        await api.delete(`/marketing/submissions/${submissionId}`);
+      } catch (cleanupError) {
+        console.error('Could not roll back the empty submission:', cleanupError);
+      }
+      throw uploadError;
+    }
+  };
+
   const handleSubmitAll = async () => {
+    if (!canSubmit) return;
     const weekOf = getThisFriday();
     setSubmitting(true);
     setSubmitSuccess(false);
 
     try {
-      // 1. Bulk photos
-      if (photoFiles.length > 0) {
-        const res = await api.post('/marketing/submissions', { weekOf, type: 'PHOTOS', title: 'Weekly Photos' });
-        await uploadPhotosForSubmission(res.data.submission.id, photoFiles);
-      }
-
-      // 2. Student of the Week
-      if (sotwForm.title) {
-        const res = await api.post('/marketing/submissions', {
-          weekOf, type: 'STUDENT_OF_WEEK',
-          title: sotwForm.title,
-          description: sotwForm.description,
-        });
-        if (sotwForm.photos.length > 0) {
-          await uploadPhotosForSubmission(res.data.submission.id, sotwForm.photos);
-        }
-      }
-
-      // 3. Activity of the Week
-      if (aotwForm.title) {
-        const res = await api.post('/marketing/submissions', {
-          weekOf, type: 'ACTIVITY_OF_WEEK',
-          title: aotwForm.title,
-          description: aotwForm.description,
-        });
-        if (aotwForm.photos.length > 0) {
-          await uploadPhotosForSubmission(res.data.submission.id, aotwForm.photos);
-        }
+      for (const block of startedBlocks) {
+        await submitBlock(weekOf, block);
       }
 
       // Reset all
-      setPhotoFiles([]); setPhotoPreviews([]);
+      setPhotoFiles([]); setPhotoPreviews([]); setPhotoDescription('');
       setSotwForm({ title: '', description: '', photos: [], previews: [] });
       setAotwForm({ title: '', description: '', photos: [], previews: [] });
       setSubmitSuccess(true);
@@ -139,7 +167,7 @@ const MarketingHub = () => {
       await loadSubmissions();
     } catch (error) {
       console.error('Error submitting:', error);
-      toast.error('Error submitting content. Please try again.');
+      toast.error(error.response?.data?.message || 'Error submitting content. Please try again.');
     }
     setSubmitting(false);
   };
@@ -169,10 +197,11 @@ const MarketingHub = () => {
   };
 
   const statusStyles = {
-    submitted: { label: 'Submitted', color: '#64748b', bg: '#f1f5f9' },
+    submitted: { label: 'Pending Review', color: '#64748b', bg: '#f1f5f9' },
     approved: { label: 'Approved', color: '#10b981', bg: '#d1fae5' },
     posted: { label: 'Posted', color: '#6366f1', bg: '#e0e7ff' },
   };
+  const statusOrder = ['submitted', 'approved', 'posted'];
 
   return (
     <div className="marketing-container">
@@ -236,6 +265,14 @@ const MarketingHub = () => {
                 </div>
               )}
               <div className="photo-count">{photoFiles.length} photo{photoFiles.length !== 1 ? 's' : ''} selected</div>
+
+              <textarea
+                className="form-control"
+                rows="3"
+                placeholder="What activity are these photos from? Which class or group?"
+                value={photoDescription}
+                onChange={(e) => setPhotoDescription(e.target.value)}
+              />
             </div>
 
             {/* Student of the Week */}
@@ -321,6 +358,14 @@ const MarketingHub = () => {
             </div>
           </div>
 
+          {incompleteBlocks.length > 0 && (
+            <div className="submit-warnings">
+              {incompleteBlocks.map(b => (
+                <p key={b.key}><strong>{b.label}</strong> still needs {missingFor(b).join(', ')}.</p>
+              ))}
+            </div>
+          )}
+
           <div className="submit-footer">
             <div className="week-indicator">
               <Calendar size={14} />
@@ -329,7 +374,7 @@ const MarketingHub = () => {
             <button
               className="submit-all-btn"
               onClick={handleSubmitAll}
-              disabled={submitting || (photoFiles.length === 0 && !sotwForm.title && !aotwForm.title)}
+              disabled={submitting || !canSubmit}
             >
               {submitting ? 'Submitting...' : 'Submit All Content'}
             </button>
@@ -359,63 +404,75 @@ const MarketingHub = () => {
               <p>No submissions found for this period.</p>
             </div>
           ) : (
-            <div className="gallery-grid">
-              {submissions.map(sub => {
-                const tc = typeConfig[sub.type] || typeConfig.PHOTOS;
-                const ss = statusStyles[sub.status] || statusStyles.submitted;
-                const date = new Date(sub.createdAt);
+            // Grouped by status (not one flat grid) so approving/posting visibly
+            // moves a card into the next column instead of just relabeling it in place.
+            statusOrder.map(statusKey => {
+              const group = submissions.filter(s => s.status === statusKey);
+              if (group.length === 0) return null;
+              const ss = statusStyles[statusKey];
 
-                return (
-                  <div key={sub.id} className="gallery-card">
-                    <div className="gallery-card-header">
-                      <span className="type-label" style={{ background: tc.bg, color: tc.color }}>
-                        {tc.icon} {tc.label}
-                      </span>
-                      <span className="status-label" style={{ background: ss.bg, color: ss.color }}>
-                        {ss.label}
-                      </span>
-                    </div>
+              return (
+                <div key={statusKey} className="status-group">
+                  <div className="status-group-header">
+                    <span className="status-label" style={{ background: ss.bg, color: ss.color }}>{ss.label}</span>
+                    <span className="status-group-count">{group.length}</span>
+                  </div>
+                  <div className="gallery-grid">
+                    {group.map(sub => {
+                      const tc = typeConfig[sub.type] || typeConfig.PHOTOS;
+                      const date = new Date(sub.createdAt);
 
-                    {sub.title && <h4 className="gallery-title">{sub.title}</h4>}
-                    {sub.description && <p className="gallery-desc">{sub.description}</p>}
+                      return (
+                        <div key={sub.id} className="gallery-card">
+                          <div className="gallery-card-header">
+                            <span className="type-label" style={{ background: tc.bg, color: tc.color }}>
+                              {tc.icon} {tc.label}
+                            </span>
+                          </div>
 
-                    {sub.photos && sub.photos.length > 0 && (
-                      <div className="gallery-photos">
-                        {sub.photos.slice(0, 4).map((photo, i) => (
-                          <div key={photo.id} className="gallery-photo-thumb">
-                            <ProtectedImage apiPath={`/marketing/photos/${photo.id}/file`} alt={photo.fileName} />
-                            {i === 3 && sub.photos.length > 4 && (
-                              <div className="more-overlay">+{sub.photos.length - 4}</div>
+                          {sub.title && <h4 className="gallery-title">{sub.title}</h4>}
+                          {sub.description && <p className="gallery-desc">{sub.description}</p>}
+
+                          {sub.photos && sub.photos.length > 0 && (
+                            <div className="gallery-photos">
+                              {sub.photos.slice(0, 4).map((photo, i) => (
+                                <div key={photo.id} className="gallery-photo-thumb">
+                                  <ProtectedImage apiPath={`/marketing/photos/${photo.id}/file`} alt={photo.fileName} />
+                                  {i === 3 && sub.photos.length > 4 && (
+                                    <div className="more-overlay">+{sub.photos.length - 4}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="gallery-card-footer">
+                            <div className="gallery-meta">
+                              <span><User size={12} /> {sub.teacher?.fullName}</span>
+                              <span><Clock size={12} /> {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                            </div>
+                            {hasRole('ADMIN') && (
+                              <div className="gallery-actions">
+                                {sub.status === 'submitted' && (
+                                  <button className="approve-btn" onClick={() => handleApprove(sub.id)}>
+                                    <Check size={14} /> Approve
+                                  </button>
+                                )}
+                                {sub.status === 'approved' && (
+                                  <button className="posted-btn" onClick={() => handleMarkPosted(sub.id)}>
+                                    Mark as Posted
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="gallery-card-footer">
-                      <div className="gallery-meta">
-                        <span><User size={12} /> {sub.teacher?.fullName}</span>
-                        <span><Clock size={12} /> {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                      </div>
-                      {hasRole('ADMIN') && (
-                        <div className="gallery-actions">
-                          {sub.status === 'submitted' && (
-                            <button className="approve-btn" onClick={() => handleApprove(sub.id)}>
-                              <Check size={14} /> Approve
-                            </button>
-                          )}
-                          {sub.status === 'approved' && (
-                            <button className="posted-btn" onClick={() => handleMarkPosted(sub.id)}>
-                              Mark as Posted
-                            </button>
-                          )}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })
           )}
         </div>
       )}
