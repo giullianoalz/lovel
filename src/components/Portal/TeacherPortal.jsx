@@ -38,6 +38,12 @@ const fmtDayLabel = (dayStr) => {
 
 const fmtTime = formatTimeOfDay;
 
+// For the desk's check-in stamps, which are real instants (timestamptz) — not
+// the TIME-of-day columns fmtTime reads in UTC. Formatting these the same way
+// would shift every arrival by the browser's offset.
+const fmtStamp = (value) =>
+  value ? new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+
 /* ============================================================ */
 const TeacherPortal = () => {
   const { user, hasRole } = useAuth();
@@ -998,6 +1004,24 @@ const TeacherPortal = () => {
                             <Clock size={13} />
                           </button>
                         </div>
+                        {/* What the desk saw, right under the buttons: marking a
+                            child absent is what opens a suggested charge against
+                            the family, so the evidence that they walked in
+                            belongs next to the decision, not on another screen.
+                            Absent when nobody was on the door. */}
+                        {student.checkedAt && (
+                          <div className="att-desk-stamp" title="Recorded at the front desk">
+                            <DoorOpen size={11} />
+                            {student.checkedOutAt ? (
+                              <>
+                                In {fmtStamp(student.checkedAt)} · out {fmtStamp(student.checkedOutAt)}
+                                {student.checkedOutTo && ` to ${student.checkedOutTo}`}
+                              </>
+                            ) : (
+                              <>In {fmtStamp(student.checkedAt)}</>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <input type="checkbox" className="custom-checkbox"

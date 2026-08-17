@@ -3,9 +3,13 @@
    that happen to share a date". */
 
 .charges-panel {
+  background: var(--card-bg, #ffffff);
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
   max-width: 780px;
   width: 100%;
   padding: 28px;
+  position: relative;
   animation: charges-rise 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 

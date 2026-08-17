@@ -5,12 +5,13 @@ import ErrorBanner from '../Layout/ErrorBanner';
 import './AttendanceLog.css';
 
 /**
- * The door, read back.
+ * Attendance, read back.
  *
  * The board above it shows where everyone stands now; this shows what happened,
- * in order, including the trips out and back that the board overwrites. Every
- * row names the staff member who recorded it — that is the question this exists
- * to answer, and the reason it is worth a screen rather than a database query.
+ * in order — including the trips out and back that the board overwrites, and
+ * the marks a teacher made on the sheet afterwards. Every row names the person
+ * who recorded it, which is the question this exists to answer and the reason
+ * it is worth a screen rather than a database query.
  */
 
 const SOURCE_META = {
@@ -46,7 +47,7 @@ const AttendanceLog = ({ date }) => {
       setEvents(data.events);
       setError(null);
     } catch (err) {
-      setError(err.response?.data?.message || 'Could not load the door log.');
+      setError(err.response?.data?.message || 'Could not load the attendance log.');
     } finally {
       setLoading(false);
     }
@@ -54,7 +55,7 @@ const AttendanceLog = ({ date }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div className="al-loading">Loading the door log&hellip;</div>;
+  if (loading) return <div className="al-loading">Loading the attendance log&hellip;</div>;
 
   return (
     <section className="al-panel">
@@ -62,12 +63,12 @@ const AttendanceLog = ({ date }) => {
 
       <header className="al-head">
         <ScrollText size={15} />
-        <h3>Door log</h3>
+        <h3>Attendance log</h3>
         <span className="al-count">{events.length} event{events.length === 1 ? '' : 's'}</span>
       </header>
 
       {events.length === 0 ? (
-        <p className="al-empty">Nothing has been recorded at the door yet.</p>
+        <p className="al-empty">Nothing has been recorded yet — no arrivals, and no sheet saved.</p>
       ) : (
         <ul className="al-list">
           {events.map((e) => {

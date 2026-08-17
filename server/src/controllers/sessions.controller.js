@@ -497,10 +497,11 @@ export const bulkScheduleSessions = async (req, res, next) => {
     // when the session actually happens (see updateAttendance below). Payroll
     // only pays for sessions with a real PRESENT record, so scheduling a
     // class must not fabricate attendance on its own.
+    const { chargeAllSessions } = req.body;
     const createdSessions = await prisma.$transaction(
-      newDates.map((date) =>
+      newDates.map((date, index) =>
         prisma.session.create({
-          data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED', ...pay.data, ...charge.data },
+          data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED', ...pay.data, ...(index === 0 || chargeAllSessions ? charge.data : {}) },
         })
       )
     );
@@ -969,6 +970,18 @@ export const scanFamilyCode = async (req, res, next) => {
     });
 
     if (!family) {
+      // Give a helpful error if they pointed the check-in scanner at a pickup QR
+      const isPickup = await prisma.tempPickupAuth.findUnique({
+        where: { qrCodeHash: String(code) },
+        select: { id: true },
+      });
+      if (isPickup) {
+        return res.status(400).json({
+          error: 'Wrong Scanner',
+          message: 'This is a pickup authorisation code. Please close this and use "Scan pickup code" instead.',
+        });
+      }
+
       return res.status(404).json({
         error: 'Not Found',
         message: 'This code is not recognised. It may have been replaced — ask the family to reopen their portal.',
@@ -1078,6 +1091,18 @@ export const scanPickup = async (req, res, next) => {
     });
 
     if (!auth) {
+      // Give a helpful error if they pointed the pickup scanner at a check-in QR
+      const isFamily = await prisma.family.findUnique({
+        where: { checkInCode: String(token) },
+        select: { id: true },
+      });
+      if (isFamily) {
+        return res.status(400).json({
+          error: 'Wrong Scanner',
+          message: 'This is a family check-in code. Please close this and use "Scan family code" instead.',
+        });
+      }
+
       return res.status(404).json({
         error: 'Not Found',
         message: 'This QR code is not recognised. Ask the parent to generate a new one.',

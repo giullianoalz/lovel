@@ -440,6 +440,7 @@ const CalendarView = () => {
     // `chargeAmount` on every session this form creates; approving it in
     // Billing is what turns it into money.
     price: '',
+    chargeAllSessions: false,
 
     // Legacy / Shared
     tutor: '',
@@ -1539,17 +1540,20 @@ const CalendarView = () => {
             // hour can cost different amounts — falling back to the form's
             // single price when the row leaves it blank.
             ...priceFields(row.price !== '' && row.price != null ? row.price : newEventForm.price),
+            chargeAllSessions: newEventForm.chargeAllSessions,
           });
         }
       } else {
         const dates = newEventForm.classDates.length ? newEventForm.classDates : [newEventForm.date];
-        for (const dateStr of dates) {
+        for (let i = 0; i < dates.length; i++) {
+          const dateStr = dates[i];
+          const shouldCharge = newEventForm.chargeAllSessions || i === 0;
           await api.post('/sessions', {
             classId,
             date: dateStr,
             startTime: newEventForm.time,
             endTime: addMinutesToTime(newEventForm.time, duration),
-            ...priceFields(newEventForm.price),
+            ...(shouldCharge ? priceFields(newEventForm.price) : {}),
           });
         }
       }
@@ -2620,10 +2624,11 @@ const CalendarView = () => {
 
                 {/* Instructors Columns */}
                 {uniqueTeachers.map(teacher => {
-                  const teacherEvents = dayEventsList.filter(e => 
-                    (e.allTeacherNames && e.allTeacherNames.includes(teacher)) || 
-                    (!e.allTeacherNames && e.teacher === teacher)
-                  );
+                  const teacherEvents = dayEventsList.filter(e => {
+                    // Only render the class in the primary teacher's column to avoid visual duplication
+                    const primary = e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames[0] : e.teacher;
+                    return primary === teacher;
+                  });
                   const teacherLayout = layoutOverlaps(teacherEvents);
                   // PTO has no time-of-day, so it can't be positioned on the
                   // timeline like a real session — it shows as a badge on the
@@ -3707,12 +3712,6 @@ const CalendarView = () => {
                           <label>Price per family ($)</label>
                           <input className="form-control" type="number" placeholder="0.00" value={newEventForm.price} onChange={e => setNewEventForm({...newEventForm, price: e.target.value})} />
                         </div>
-                        {/* This used to be a "Billing Frequency" picker offering
-                            Weekly and Start of Cycle. Neither was ever built —
-                            it set a field nobody read — so it promised a billing
-                            schedule that silently never happened. A price on a
-                            calendar entry charges for that entry, and now the
-                            form says so instead of implying otherwise. */}
                         <div className="form-group half">
                           <label>How it's billed</label>
                           <p className="cal-price-note">
@@ -3720,6 +3719,16 @@ const CalendarView = () => {
                             you approve it under <strong>Billing → Calendar Charges</strong>.
                           </p>
                         </div>
+                    </div>
+                    <div className="form-group" style={{ marginTop: '-8px' }}>
+                      <label className="checkbox-label" style={{ fontWeight: 'normal' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={newEventForm.chargeAllSessions} 
+                          onChange={e => setNewEventForm({...newEventForm, chargeAllSessions: e.target.checked})} 
+                        /> 
+                        Charge this amount for EVERY session in the series (Default is only the first session)
+                      </label>
                     </div>
                   </div>
                 </>

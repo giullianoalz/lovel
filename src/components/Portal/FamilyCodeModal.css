@@ -2,6 +2,21 @@
    pulling in the other one's sheet — and held at the size a phone screen can
    actually be read from across a counter. */
 
+/* The overlay the modal sits on — defined here so it works even when no other
+   CSS that supplies .modal-overlay is loaded (e.g. standalone Parent Portal). */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  animation: fcm-overlay-in 0.2s ease-out;
+}
+@keyframes fcm-overlay-in { from { opacity: 0; } }
+
 .fcm-modal {
   position: relative;
   width: min(400px, 94vw);
@@ -10,7 +25,7 @@
   background: var(--card-bg, #ffffff);
   border-radius: 20px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
-  animation: fadeIn 0.25s ease-out;
+  animation: fcm-modal-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   text-align: center;
 }
 
