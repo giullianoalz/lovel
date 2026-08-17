@@ -105,27 +105,6 @@ export const academyNowParts = (now = new Date()) => {
   };
 };
 
-/**
- * An instant as "2:10 PM" on the academy's wall clock.
- *
- * `Date.prototype.toLocaleTimeString()` with no zone uses the *server's* zone,
- * and Render runs in UTC — every timestamp it rendered came out four hours
- * ahead of the front desk in summer, three in winter.
- */
-const clockFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: ACADEMY_TIMEZONE,
-  hour: 'numeric',
-  minute: '2-digit',
-  hour12: true,
-});
-export const formatAcademyClock = (instant) => clockFormatter.format(new Date(instant));
-
-/** Midnight tonight-just-gone on the academy's clock, as a real instant. */
-export const academyStartOfDay = (now = new Date()) => {
-  const p = academyPartsAt(now);
-  return academyWallClockToInstant(p.year, p.month, p.day, 0, 0, 0);
-};
-
 /** `academyToday` shifted by whole days — for windows that cross midnight. */
 export const academyDayOffset = (dateOnly, days) =>
   new Date(dateOnly.getTime() + days * 86_400_000);

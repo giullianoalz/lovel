@@ -52,18 +52,6 @@ export const formatDateOnly = (value, options = { month: 'short', day: 'numeric'
   return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).toLocaleDateString('en-US', options);
 };
 
-/**
- * A real instant (chat `sentAt`, `createdAt`…) as "2:10 PM" on the viewer's own
- * clock. Unlike the helpers above this one is NOT for date-only/time-only
- * columns — those are wall clocks with no zone and must go through the UTC
- * getters. Use this only for values that are a genuine point in time.
- */
-export const formatClockTime = (value) => {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-};
-
 /** Minutes since midnight for right now, in the viewer's own timezone. */
 export const nowMinutes = () => {
   const now = new Date();

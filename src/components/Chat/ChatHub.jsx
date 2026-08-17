@@ -6,29 +6,9 @@ import { useAuth } from '../../context/AuthContext';
 import { getSocket, SOCKET_URL } from '../../lib/socket';
 import { useNotifications } from '../../hooks/useNotifications';
 import ProtectedImage from '../Layout/ProtectedImage';
-import { formatClockTime } from '../../lib/time';
 import './ChatHub.css';
 
 const MEDIA_BASE = SOCKET_URL;
-
-// Always render the clock from the instant, never from the string the API
-// happened to build: the server renders in the academy's timezone and the
-// browser in the reader's, so a message would change hour on reload. `time`
-// stays as the fallback for payloads that predate `sentAt`.
-const clockOf = (item) => (item?.sentAt ? formatClockTime(item.sentAt) : (item?.time || ''));
-const threadClock = (thread) => (thread?.timestamp ? formatClockTime(thread.timestamp) : (thread?.time || ''));
-
-// Messages are grouped under a day heading; "Today" used to be hard-coded above
-// the whole list, so a year-old conversation opened as if it all happened today.
-const dayKeyOf = (msg) => (msg?.sentAt ? new Date(msg.sentAt).toDateString() : null);
-const dayLabel = (key) => {
-  if (!key) return 'Today';
-  const today = new Date().toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString();
-  if (key === today) return 'Today';
-  if (key === yesterday) return 'Yesterday';
-  return new Date(key).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
-};
 
 const ChatHub = () => {
   const { user, hasRole, role } = useAuth();
@@ -79,25 +59,14 @@ const ChatHub = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkedRef = useRef(false);
 
-  // The inbox is filtered client-side by `threadFilter`, but the API returns
-  // one status at a time and defaults to ACTIVE — so the Resolved tab used to
-  // be permanently empty (nothing in the list ever had status RESOLVED after a
-  // reload). Load both and let the tabs split them.
   const loadThreads = async () => {
     try {
-      const [active, resolved] = await Promise.all([
-        api.get('/chat', { params: { status: 'ACTIVE' } }),
-        api.get('/chat', { params: { status: 'RESOLVED' } }),
-      ]);
-      const threads = [
-        ...(active.data.threads || []).map(t => ({ ...t, status: t.status || 'ACTIVE' })),
-        ...(resolved.data.threads || []).map(t => ({ ...t, status: t.status || 'RESOLVED' })),
-      ].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      setChatThreads(threads);
-
+      const response = await api.get('/chat');
+      setChatThreads(response.data.threads);
+      
       // Join all rooms to receive incoming messages for threads we are not currently viewing
       if (socketRef.current) {
-        threads.forEach(thread => {
+        response.data.threads.forEach(thread => {
           socketRef.current.emit('join_room', thread.id);
         });
       }
@@ -159,7 +128,7 @@ const ChatHub = () => {
         const updated = {
           ...touched,
           lastMsg: previewText,
-          timestamp: message.sentAt ? Date.parse(message.sentAt) : Date.now(),
+          time: message.time,
           unread: activeChatRef.current === threadId ? 0 : (touched.unread || 0) + 1,
         };
         return [updated, ...prevThreads.filter(t => t.id !== threadId)];
@@ -277,7 +246,7 @@ const ChatHub = () => {
       id: Date.now(),
       sender: "Me",
       text: sentText,
-      sentAt: new Date().toISOString(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: "sent"
     };
 
@@ -289,7 +258,7 @@ const ChatHub = () => {
     setChatThreads(prevThreads =>
       prevThreads.map(t =>
         t.id === activeChat
-          ? { ...t, lastMsg: sentText, timestamp: Date.parse(optimisticMessage.sentAt) }
+          ? { ...t, lastMsg: sentText, time: optimisticMessage.time }
           : t
       )
     );
@@ -344,7 +313,7 @@ const ChatHub = () => {
       fileUrl: localPreviewUrl,
       fileName: file.name,
       fileType: file.type,
-      sentAt: new Date().toISOString(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       type: 'sent',
     };
     setMessages(prev => ({
@@ -353,7 +322,7 @@ const ChatHub = () => {
     }));
     setChatThreads(prevThreads =>
       prevThreads.map(t =>
-        t.id === activeChat ? { ...t, lastMsg: `📎 ${file.name}`, timestamp: Date.parse(optimisticMessage.sentAt) } : t
+        t.id === activeChat ? { ...t, lastMsg: `📎 ${file.name}`, time: optimisticMessage.time } : t
       )
     );
 
@@ -555,7 +524,7 @@ const ChatHub = () => {
               <div className="thread-info">
                 <div className="thread-top">
                   <span className="thread-name">{thread.name}</span>
-                  <span className="thread-time">{threadClock(thread)}</span>
+                  <span className="thread-time">{thread.time}</span>
                 </div>
                 <div className="thread-bottom">
                   <p className="thread-last-msg">{thread.lastMsg}</p>
@@ -652,19 +621,15 @@ const ChatHub = () => {
             </div>
             
             <div className="messages-area">
-              {(messages[activeChat] || []).map((msg, i, all) => {
+              <div className="message-date-divider"><span>Today</span></div>
+              
+              {(messages[activeChat] || []).map(msg => {
                 // A message just sent by this tab still shows its local blob:
                 // preview until the server round-trip replaces it with the
                 // real persisted message (fetched through the protected route).
                 const isLocalPreview = msg.fileUrl?.startsWith('blob:');
-                const key = dayKeyOf(msg);
-                const showDivider = i === 0 || key !== dayKeyOf(all[i - 1]);
                 return (
-                <React.Fragment key={msg.id}>
-                {showDivider && (
-                  <div className="message-date-divider"><span>{dayLabel(key)}</span></div>
-                )}
-                <div className={`message ${msg.type}`}>
+                <div key={msg.id} className={`message ${msg.type}`}>
                   <div className="msg-bubble">
                     {msg.fileUrl && (
                       msg.fileType?.startsWith('image/') ? (
@@ -694,7 +659,7 @@ const ChatHub = () => {
                     )}
                     {msg.text}
                     <span className="msg-time">
-                      {clockOf(msg)}
+                      {msg.time}
                       {msg.type === 'sent' && !currentChatData?.isBot && (
                         (threadReadAt[activeChat] && msg.sentAt && new Date(msg.sentAt) <= new Date(threadReadAt[activeChat]))
                           ? <span className="msg-receipt seen" title="Seen"><CheckCheck size={13} /> Visto</span>
@@ -703,7 +668,6 @@ const ChatHub = () => {
                     </span>
                   </div>
                 </div>
-                </React.Fragment>
                 );
               })}
 
