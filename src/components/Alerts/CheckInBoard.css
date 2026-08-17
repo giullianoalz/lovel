@@ -4,7 +4,7 @@
 
 .checkin-panel { display: flex; flex-direction: column; gap: 20px; }
 
-.checkin-toolbar { display: flex; justify-content: flex-end; }
+.checkin-toolbar { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 
 .checkin-loading { padding: 40px; text-align: center; color: var(--text-muted); font-size: 13px; }
 

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   Shell, Gift, BookOpen, Calendar, Award, AlertTriangle, ThumbsUp,
-  Clock, Download, Eye, FileText, Bell, TrendingUp, Star, ChevronRight,
+  Clock, Download, Eye, FileText, Bell, TrendingUp, Star, ChevronRight, DoorOpen,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { formatTimeOfDay, formatDateOnly } from '../../lib/time';
 import ErrorBanner from '../Layout/ErrorBanner';
 import StatHistoryModal from './StatHistoryModal';
+import FamilyCodeModal from './FamilyCodeModal';
 import './StudentPortal.css';
 
 const TABS = [
@@ -25,6 +26,7 @@ const StudentPortal = () => {
   const [error, setError]     = useState(null);
   const [tab, setTab]         = useState('home');
   const [statModal, setStatModal] = useState(null); // 'seashells' | 'punches' | 'positive' | 'warnings'
+  const [showFamilyCode, setShowFamilyCode] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -64,6 +66,13 @@ const StudentPortal = () => {
             <h1>Hi, {firstName}! 👋</h1>
             <p>Keep earning seashells and shine in class</p>
           </div>
+          {/* Same household code the parent carries — for the student who
+              arrives on their own and has to be checked in at the door. */}
+          {student.isInPerson && (
+            <button type="button" className="sp-checkin-btn" onClick={() => setShowFamilyCode(true)}>
+              <DoorOpen size={15} /> Check-In QR
+            </button>
+          )}
         </div>
 
         {/* Stat pills — tap any to see its history and the reason behind each entry */}
@@ -311,6 +320,8 @@ const StudentPortal = () => {
           </div>
         )}
       </div>
+
+      {showFamilyCode && <FamilyCodeModal onClose={() => setShowFamilyCode(false)} />}
 
       <StatHistoryModal
         kind={statModal}

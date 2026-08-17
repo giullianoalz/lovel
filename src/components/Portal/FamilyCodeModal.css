@@ -1,0 +1,74 @@
+/* Family check-in QR. Self-contained so both portals can show it without
+   pulling in the other one's sheet — and held at the size a phone screen can
+   actually be read from across a counter. */
+
+.fcm-modal {
+  position: relative;
+  width: min(400px, 94vw);
+  max-height: 90vh; overflow-y: auto;
+  padding: 22px;
+  background: var(--card-bg, #ffffff);
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  animation: fadeIn 0.25s ease-out;
+  text-align: center;
+}
+
+.fcm-close {
+  position: absolute; top: 14px; right: 14px;
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%; cursor: pointer;
+  background: rgba(148, 163, 184, 0.15); color: var(--text-muted);
+  transition: background 0.15s ease;
+}
+.fcm-close:hover { background: rgba(148, 163, 184, 0.3); }
+
+.fcm-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; text-align: left; }
+.fcm-header h2 { margin: 0 0 2px; font-size: 18px; font-weight: 700; color: var(--text-main); }
+.fcm-header p { margin: 0; font-size: 12.5px; color: var(--text-muted); }
+
+.fcm-icon {
+  width: 44px; height: 44px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: white; border-radius: 13px;
+}
+
+.fcm-body { animation: fadeIn 0.25s ease-out; }
+
+.fcm-select {
+  width: 100%; margin-bottom: 14px;
+  padding: 9px 11px; border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: white; font-size: 13px; color: var(--text-main);
+}
+
+.fcm-family { margin: 0 0 14px; font-size: 17px; font-weight: 700; color: var(--text-main); }
+
+.fcm-qr {
+  display: inline-flex; padding: 14px;
+  background: white; border-radius: 16px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+}
+
+.fcm-note {
+  margin: 16px 0 0; font-size: 12.5px; line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.fcm-actions { display: flex; gap: 10px; margin-top: 20px; }
+
+.fcm-btn {
+  flex: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 12px; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(148, 163, 184, 0.4); background: white;
+  font-size: 13.5px; font-weight: 600; color: var(--text-main);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.fcm-btn:hover { background: rgba(241, 245, 249, 0.9); }
+.fcm-btn:active { transform: translateY(1px); }
+.fcm-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.fcm-btn-primary { background: #4f46e5; border-color: #4f46e5; color: white; }
+.fcm-btn-primary:hover { background: #4338ca; }

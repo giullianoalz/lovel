@@ -84,6 +84,8 @@ model User {
   staffNotes             String?                   @map("staff_notes")
   authoredAnnouncements  Announcement[]
   attendance             Attendance[]
+  doorEventsAsStudent    AttendanceEvent[]         @relation("DoorEventStudent")
+  doorEventsRecorded     AttendanceEvent[]         @relation("DoorEventStaff")
   behaviorLogsAsStudent  BehaviorLog[]             @relation("StudentBehaviors")
   behaviorLogsAsTeacher  BehaviorLog[]             @relation("TeacherBehaviors")
   sentMessages           ChatMessage[]
@@ -157,6 +159,15 @@ model Family {
   // Residential address, asked on the registration form. Lives on the family
   // rather than the user because siblings share a household.
   address      String?
+  // The household's standing check-in QR — the one a parent keeps on their
+  // phone and shows at the door every day. Unlike TempPickupAuth (one named
+  // person, one date, and only ever a release) this never expires, because the
+  // family arriving is not an exception that needs authorising.
+  //
+  // Nullable: minted the first time the portal is asked for it, so the import
+  // of 64 existing households didn't have to be rewritten. Rotating it is a
+  // matter of writing a new value — the old QR stops resolving at once.
+  checkInCode  String?                   @unique @map("check_in_code") @db.VarChar(64)
   tags         String[]                  @default([])
   createdAt    DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
   members      FamilyMember[]
@@ -409,6 +420,7 @@ model Session {
   chargeOverrides SessionChargeOverride[]
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   attendance      Attendance[]
+  doorEvents      AttendanceEvent[]
   behaviorLogs    BehaviorLog[]
   classFitReports ClassFitReport[]
   materials       SessionMaterial[]
@@ -582,12 +594,62 @@ model Attendance {
   @@map("attendance")
 }
 
+/**
+ * Append-only log of the door: every arrival and every departure, as it
+ * happened, with who recorded it.
+ *
+ * Attendance above is *state* — one row per child per session, overwritten. A
+ * child who leaves for a dentist appointment and comes back leaves no trace of
+ * the trip there: re-checking in clears the departure stamp on purpose, because
+ * the sheet has to answer "is this child here now". This table is the other
+ * question, the one that gets asked days later: who let them out, at what time,
+ * and on whose word.
+ *
+ * Nothing reads it to make a decision, and nothing should. It is a record.
+ */
+model AttendanceEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  sessionId String   @map("session_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  // IN or OUT. The direction as recorded, not a state to be reconciled.
+  direction String   @db.VarChar(10)
+  // The arrival status written (PRESENT / LATE); null on a departure.
+  status    AttendanceStatus?
+  // How it was done: MANUAL (someone tapped a name on the board), FAMILY_QR
+  // (the household code was shown), PICKUP_QR (a temporary authorisation was
+  // scanned). This is the difference between "the desk says he arrived" and
+  // "the family presented their code", and it is the whole reason to log.
+  source    String   @db.VarChar(20)
+  // The staff member at the door. Nullable so the row survives their account
+  // being deleted — losing the log because someone left the academy would
+  // defeat the point of keeping it.
+  byUserId  String?  @map("by_user_id") @db.Uuid
+  // Who the child was handed to, when that is known — the name off a scanned
+  // pickup authorisation. Free text, same reasoning as Attendance.checkedOutTo.
+  releasedTo String? @map("released_to") @db.VarChar(255)
+  at        DateTime @default(now()) @db.Timestamptz(6)
+
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student   User     @relation("DoorEventStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  by        User?    @relation("DoorEventStaff", fields: [byUserId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([studentId, at])
+  @@index([at])
+  @@map("attendance_events")
+}
+
 model SessionNote {
   id           String   @id @default(uuid()) @db.Uuid
   sessionId    String   @map("session_id") @db.Uuid
   notes        String?
   visibility   String   @default("all") @db.VarChar(20)
   recordingUrl String?  @map("recording_url")
+  // "teacher" for what a teacher writes by hand after class; "lesson_plan_summary"
+  // for the preview auto-generated the moment an admin approves that week's lesson
+  // plan. Kept separate so re-approving can safely replace just its own note
+  // without touching anything the teacher wrote themselves.
+  source       String   @default("teacher") @db.VarChar(30)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   session      Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 

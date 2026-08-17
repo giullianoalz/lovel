@@ -21,6 +21,7 @@ const StudentPortal = lazy(() => import('./components/Portal/StudentPortal'))
 const ParentPortal = lazy(() => import('./components/Portal/ParentPortal'))
 const BehaviorTracker = lazy(() => import('./components/Behavior/BehaviorTracker'))
 const FrontDeskAlerts = lazy(() => import('./components/Alerts/FrontDeskAlerts'))
+const FrontDeskStation = lazy(() => import('./components/Alerts/FrontDeskStation'))
 const MarketingHub = lazy(() => import('./components/Marketing/MarketingHub'))
 const TeacherPortal = lazy(() => import('./components/Portal/TeacherPortal'))
 const MyPayroll = lazy(() => import('./components/Payroll/MyPayroll'))
@@ -237,6 +238,17 @@ function App() {
                         element={
                           <ProtectedRoute allowedRoles={['ADMIN', 'RECEPTIONIST']}>
                             <FrontDeskAlerts />
+                          </ProtectedRoute>
+                        }
+                      />
+                      {/* The door, for any staff member covering it — a teacher
+                          reaches this from their portal. Only the check-in
+                          board; the queues on /alerts stay where they were. */}
+                      <Route
+                        path="/front-desk"
+                        element={
+                          <ProtectedRoute allowedRoles={['ADMIN', 'RECEPTIONIST', 'TEACHER']}>
+                            <FrontDeskStation />
                           </ProtectedRoute>
                         }
                       />

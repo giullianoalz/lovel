@@ -674,6 +674,15 @@ const TeacherPortal = () => {
               ? `${schedule.length} class${schedule.length !== 1 ? 'es' : ''} ${isToday ? 'today' : `on ${fmtDayLabel(selectedDate)}`}`
               : `No classes scheduled ${isToday ? 'today' : `on ${fmtDayLabel(selectedDate)}`}`}
           </span>
+          {/* Covering reception for an hour is ordinary here, so the door is one
+              tap from the portal rather than a role an admin has to grant. */}
+          <button
+            className="tp-frontdesk-btn"
+            onClick={() => navigate('/front-desk')}
+            title="Check students in and out at the door"
+          >
+            <DoorOpen size={14} /> Connect to Front Desk
+          </button>
         </div>
         <div className="tp-day-picker">
           <button className="tp-day-nav" onClick={() => setSelectedDate((d) => shiftDay(d, -1))}

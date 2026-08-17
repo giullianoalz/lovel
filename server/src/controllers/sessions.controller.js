@@ -804,6 +804,188 @@ export const checkInBoard = async (req, res, next) => {
 };
 
 /**
+ * GET /api/sessions/door-log
+ *
+ * The door, read back: every arrival and departure, newest first, each naming
+ * the staff member who recorded it and how.
+ *
+ * Defaults to today because that is the shift being worked. `date` reads one
+ * past day and `studentId` narrows to one child, which between them cover the
+ * two questions actually asked of this log — "what happened at the door on
+ * Tuesday" and "when has this child been signed out, and by whom".
+ */
+export const doorLog = async (req, res, next) => {
+  try {
+    const { date, studentId } = req.query;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+
+    const where = {};
+
+    // Without a student the window is a single day: unbounded, this is a table
+    // that only grows, and the desk screen would drag the whole term over the
+    // wire. Asking about one child is the case where the history is the point,
+    // so that one is capped by `limit` instead.
+    if (date || !studentId) {
+      const day = date ? new Date(`${date}T00:00:00`) : new Date();
+      if (Number.isNaN(day.getTime())) {
+        return res.status(400).json({ error: 'Validation Error', message: 'date must be YYYY-MM-DD.' });
+      }
+      day.setHours(0, 0, 0, 0);
+      const next = new Date(day);
+      next.setDate(next.getDate() + 1);
+      where.at = { gte: day, lt: next };
+    }
+    if (studentId) where.studentId = studentId;
+
+    const events = await prisma.attendanceEvent.findMany({
+      where,
+      orderBy: { at: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        direction: true,
+        status: true,
+        source: true,
+        releasedTo: true,
+        at: true,
+        student: { select: { id: true, fullName: true } },
+        by: { select: { id: true, fullName: true } },
+        session: { select: { id: true, class: { select: { name: true } } } },
+      },
+    });
+
+    res.json({
+      events: events.map((e) => ({
+        id: e.id,
+        direction: e.direction,
+        status: e.status,
+        source: e.source,
+        releasedTo: e.releasedTo,
+        at: e.at,
+        studentId: e.student?.id || null,
+        studentName: e.student?.fullName || null,
+        // Null once the staff member's account is gone — the event survives
+        // them on purpose, so this reads as "we no longer know who".
+        byName: e.by?.fullName || null,
+        className: e.session?.class?.name || null,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/sessions/front-desk/scan
+ *
+ * Read the household's standing QR and answer with who it covers and where each
+ * child stands today — arrived, still to come, already gone home.
+ *
+ * Writes nothing on purpose, which is the difference between this and the
+ * pickup scan. That code names one person and one date, so acting on it is
+ * safe; a family code is permanent and covers every sibling, and a parent
+ * dropping off one child would otherwise mark the other one present from home.
+ * The desk taps the child in front of them and the ordinary check-in route does
+ * the writing.
+ */
+export const scanFamilyCode = async (req, res, next) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ error: 'Validation Error', message: 'code is required.' });
+    }
+
+    const family = await prisma.family.findUnique({
+      where: { checkInCode: String(code) },
+      select: {
+        id: true,
+        name: true,
+        members: {
+          where: { user: { role: 'STUDENT' } },
+          select: { user: { select: { id: true, fullName: true, avatarUrl: true } } },
+        },
+      },
+    });
+
+    if (!family) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'This code is not recognised. It may have been replaced — ask the family to reopen their portal.',
+      });
+    }
+
+    const studentIds = family.members.map((m) => m.user.id);
+    if (studentIds.length === 0) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: `${family.name} has no students on record.`,
+      });
+    }
+
+    const { gte, lt } = todayRange();
+    const sessions = await prisma.session.findMany({
+      where: {
+        date: { gte, lt },
+        status: { not: 'CANCELLED' },
+        class: { enrollments: { some: { status: 'active', studentId: { in: studentIds } } } },
+      },
+      orderBy: [{ startTime: 'asc' }],
+      select: {
+        id: true,
+        startTime: true,
+        endTime: true,
+        class: {
+          select: {
+            name: true,
+            teacher: { select: { fullName: true } },
+            enrollments: {
+              where: { status: 'active', studentId: { in: studentIds } },
+              select: { studentId: true },
+            },
+          },
+        },
+        attendance: {
+          where: { studentId: { in: studentIds } },
+          select: { studentId: true, status: true, checkedAt: true, checkedOutAt: true, checkedOutTo: true },
+        },
+      },
+    });
+
+    // One row per child per class today: a sibling in two blocks is checked in
+    // to each on its own, and the desk has to be able to tell them apart.
+    const byStudent = new Map(
+      family.members.map((m) => [m.user.id, { ...m.user, sessions: [] }])
+    );
+
+    for (const session of sessions) {
+      const marks = new Map(session.attendance.map((a) => [a.studentId, a]));
+      for (const { studentId } of session.class?.enrollments || []) {
+        const mark = marks.get(studentId);
+        byStudent.get(studentId)?.sessions.push({
+          sessionId: session.id,
+          className: session.class?.name || 'Class',
+          teacherName: session.class?.teacher?.fullName || null,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          status: mark?.status || null,
+          checkedAt: mark?.checkedAt || null,
+          checkedOutAt: mark?.checkedOutAt || null,
+          checkedOutTo: mark?.checkedOutTo || null,
+        });
+      }
+    }
+
+    res.json({
+      familyId: family.id,
+      familyName: family.name,
+      students: [...byStudent.values()].sort((a, b) => a.fullName.localeCompare(b.fullName)),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/sessions/pickup/scan
  *
  * The desk scans the QR a parent generated and the children it covers are
@@ -891,6 +1073,17 @@ export const scanPickup = async (req, res, next) => {
         where: { id: { in: toRelease.map((a) => a.id) } },
         data: { checkedOutAt, checkedOutTo: auth.pickupPerson },
       });
+      // The releases this scan performed, each naming the adult it was performed
+      // for. This is the row that answers "who took this child home".
+      logDoorEvents(toRelease.map((a) => ({
+        sessionId: a.sessionId,
+        studentId: a.studentId,
+        direction: 'OUT',
+        source: 'PICKUP_QR',
+        byUserId: req.user.id,
+        releasedTo: auth.pickupPerson,
+        at: checkedOutAt,
+      })));
     }
 
     res.json({
@@ -930,11 +1123,33 @@ export const scanPickup = async (req, res, next) => {
  */
 const CHECK_IN_STATUSES = ['PRESENT', 'LATE'];
 
+/** How a door event was recorded. See AttendanceEvent.source. */
+const DOOR_SOURCES = ['MANUAL', 'FAMILY_QR', 'PICKUP_QR'];
+
+/**
+ * Append to the door log.
+ *
+ * Deliberately never blocks the door: a failed log is worth a line in the
+ * server output, not a parent left standing at the counter while the desk
+ * retries. Fired without awaiting for the same reason.
+ */
+const logDoorEvents = (rows) => {
+  if (rows.length === 0) return;
+  prisma.attendanceEvent
+    .createMany({ data: rows })
+    .catch((err) => console.error('[Door log] could not record event:', err.message));
+};
+
 export const checkInStudent = async (req, res, next) => {
   try {
-    const { studentId, action = 'IN', status = 'PRESENT' } = req.body;
+    const { studentId, action = 'IN', status = 'PRESENT', source = 'MANUAL' } = req.body;
     const direction = String(action).toUpperCase();
     const arriving = direction === 'IN';
+    // Whitelisted rather than trusted: this ends up in the record as the answer
+    // to "did the family show their code, or did we just tap the name?".
+    const doorSource = DOOR_SOURCES.includes(String(source).toUpperCase())
+      ? String(source).toUpperCase()
+      : 'MANUAL';
 
     if (!studentId) {
       return res.status(400).json({ error: 'Validation Error', message: 'studentId is required.' });
@@ -991,16 +1206,33 @@ export const checkInStudent = async (req, res, next) => {
         where: key,
         data: { checkedOutAt: new Date(), checkedOutTo: null },
       });
+      logDoorEvents([{
+        sessionId: session.id,
+        studentId,
+        direction: 'OUT',
+        source: doorSource,
+        byUserId: req.user.id,
+      }]);
       return res.json({ message: 'Checked out.', attendance });
     }
 
     const attendance = await prisma.attendance.upsert({
       where: key,
       // Re-checking someone in clears a departure stamp: children leave for a
-      // pickup and come back, and the desk shouldn't have to explain that.
+      // pickup and come back, and the desk shouldn't have to explain that. The
+      // trip out is not lost — the door log below keeps both legs of it.
       update: { status: arrivalStatus, checkedAt: new Date(), checkedOutAt: null, checkedOutTo: null },
       create: { sessionId: session.id, studentId, status: arrivalStatus },
     });
+
+    logDoorEvents([{
+      sessionId: session.id,
+      studentId,
+      direction: 'IN',
+      status: arrivalStatus,
+      source: doorSource,
+      byUserId: req.user.id,
+    }]);
 
     res.json({ message: 'Checked in.', attendance });
   } catch (error) {

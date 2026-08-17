@@ -5,13 +5,14 @@ import {
   Shell, AlertTriangle, ThumbsUp, Clock, Calendar, Gift, BookOpen,
   CreditCard, Receipt, CheckCircle, AlertCircle, ExternalLink, Download,
   ChevronDown, ChevronUp, Bell, Award, GraduationCap, Smartphone, Landmark, Copy,
-  ClipboardList, Lock, Star, Hourglass, FileSignature,
+  ClipboardList, Lock, Star, Hourglass, FileSignature, DoorOpen,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import ErrorBanner from '../Layout/ErrorBanner';
 import StatHistoryModal from './StatHistoryModal';
+import FamilyCodeModal from './FamilyCodeModal';
 import WaiverForm from '../Waiver/WaiverForm';
 import './ParentPortal.css';
 
@@ -435,6 +436,7 @@ const ParentPortal = () => {
   const [statModal, setStatModal] = useState(null); // 'seashells' | 'punches' | 'positive' | 'warnings'
   const [pickupAuths, setPickupAuths] = useState([]);
   const [showPickupModal, setShowPickupModal] = useState(false);
+  const [showFamilyCode, setShowFamilyCode] = useState(false);
   const [paying, setPaying]         = useState(null);
   const [payError, setPayError]     = useState(null);
   const [showHowToPay, setShowHowToPay] = useState(false);
@@ -642,10 +644,17 @@ const ParentPortal = () => {
         </div>
         <div className="pp-hero-actions">
           {inPersonChildren.length > 0 && (
-            <button className="pp-hero-btn" onClick={() => setShowPickupModal(true)}>
-              <QrCode size={15} /> Authorize Pickup
-              {activeAuths.length > 0 && <span className="pp-auth-badge">{activeAuths.length}</span>}
-            </button>
+            <>
+              {/* The everyday code comes first — authorising someone else is
+                  the exception, and it reads as one sitting next to this. */}
+              <button className="pp-hero-btn" onClick={() => setShowFamilyCode(true)}>
+                <DoorOpen size={15} /> Check-In QR
+              </button>
+              <button className="pp-hero-btn" onClick={() => setShowPickupModal(true)}>
+                <QrCode size={15} /> Authorize Pickup
+                {activeAuths.length > 0 && <span className="pp-auth-badge">{activeAuths.length}</span>}
+              </button>
+            </>
           )}
           <button className="pp-hero-btn" onClick={() => navigate('/chat')}>
             <MessageSquare size={15} /> Chat with Teachers
@@ -1163,6 +1172,10 @@ const ParentPortal = () => {
           onClose={() => setShowPickupModal(false)}
           onCreated={handlePickupCreated}
         />
+      )}
+
+      {showFamilyCode && (
+        <FamilyCodeModal canRotate onClose={() => setShowFamilyCode(false)} />
       )}
 
       {waiverChild && (

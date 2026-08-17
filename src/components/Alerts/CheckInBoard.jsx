@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { LogIn, LogOut, Clock, DoorOpen, CheckCircle2, Phone, QrCode } from 'lucide-react';
+import { LogIn, LogOut, Clock, DoorOpen, CheckCircle2, Phone, QrCode, Users, ScrollText } from 'lucide-react';
 import api from '../../lib/api';
 import ErrorBanner from '../Layout/ErrorBanner';
 import PickupScanner from './PickupScanner';
+import FamilyScanner from './FamilyScanner';
+import DoorLog from './DoorLog';
 import './CheckInBoard.css';
 
 /**
@@ -42,6 +44,8 @@ const CheckInBoard = ({ canSeeParentPhone = false }) => {
   const [pending, setPending] = useState({});
   const [phones, setPhones] = useState({});
   const [scanning, setScanning] = useState(false);
+  const [scanningFamily, setScanningFamily] = useState(false);
+  const [showLog, setShowLog] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -113,10 +117,31 @@ const CheckInBoard = ({ canSeeParentPhone = false }) => {
       {error && <ErrorBanner message={error} onRetry={load} />}
 
       <div className="checkin-toolbar">
-        <button className="checkin-btn primary" onClick={() => setScanning(true)}>
+        {/* Arrivals first: it is the scan the desk reaches for all afternoon,
+            and the pickup code only exists for someone who isn't the family. */}
+        <button className="checkin-btn primary" onClick={() => setScanningFamily(true)}>
+          <Users size={15} /> Scan family QR
+        </button>
+        <button className="checkin-btn" onClick={() => setScanning(true)}>
           <QrCode size={15} /> Scan pickup code
         </button>
+        {/* Mounted only while open: it fetches on mount, and the log is read
+            when a question comes up, not watched all afternoon. */}
+        <button className="checkin-btn ghost" onClick={() => setShowLog((v) => !v)}>
+          <ScrollText size={15} /> {showLog ? 'Hide log' : 'Door log'}
+        </button>
       </div>
+
+      {showLog && <DoorLog />}
+
+      {scanningFamily && (
+        <FamilyScanner
+          onClose={() => setScanningFamily(false)}
+          // The scanner writes one child at a time and patches its own view, so
+          // this only brings the board behind it back in step.
+          onChanged={load}
+        />
+      )}
 
       {scanning && (
         <PickupScanner

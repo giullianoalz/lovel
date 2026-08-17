@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import prisma from '../config/database.js';
 
 /**
@@ -22,4 +23,38 @@ export const childIdsOfParent = async (parentId) => {
     select: { userId: true },
   });
   return [...new Set(children.map((c) => c.userId))];
+};
+
+/** Every family this user belongs to, parent or child alike. */
+export const familyIdsOfUser = async (userId) => {
+  const rows = await prisma.familyMember.findMany({
+    where: { userId },
+    select: { familyId: true },
+  });
+  return rows.map((r) => r.familyId);
+};
+
+/**
+ * The household's standing check-in code, minted on first use.
+ *
+ * From the random source, not a digest of the family's name or id: this code is
+ * the whole proof at the door, and a guessable one would let a stranger present
+ * somebody else's household. 32 bytes for the same reason the pickup token is.
+ *
+ * Pass `rotate` to burn the old code — the previous QR stops resolving the
+ * moment the new value is written, which is the point of rotating it.
+ */
+export const ensureFamilyCheckInCode = async (familyId, { rotate = false } = {}) => {
+  const family = await prisma.family.findUnique({
+    where: { id: familyId },
+    select: { id: true, name: true, checkInCode: true },
+  });
+  if (!family) return null;
+  if (family.checkInCode && !rotate) return family;
+
+  return prisma.family.update({
+    where: { id: familyId },
+    data: { checkInCode: crypto.randomBytes(32).toString('hex') },
+    select: { id: true, name: true, checkInCode: true },
+  });
 };

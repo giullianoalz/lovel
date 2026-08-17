@@ -19,6 +19,8 @@ import {
   checkInBoard,
   checkInStudent,
   scanPickup,
+  scanFamilyCode,
+  doorLog,
   addSessionNote,
   updateSessionNote,
   supervisionSessions,
@@ -39,13 +41,32 @@ router.get('/cancellations', authenticate, requireRole('ADMIN'), listCancellatio
 // PATCH /api/sessions/cancellations/:id/resolve — Admin decides the final charge
 router.patch('/cancellations/:id/resolve', authenticate, requireRole('ADMIN'), validate(resolveCancellationSchema), resolveCancellation);
 
-// GET /api/sessions/check-in-board — Today's rosters for the door (Admin/front
-// desk). Above '/:id' so "check-in-board" isn't read as a session id.
-router.get('/check-in-board', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), checkInBoard);
+/**
+ * The door, for whoever is standing at it.
+ *
+ * Teachers are on this list alongside admins and the desk: covering reception
+ * for an hour is ordinary here, and a teacher who can't check anyone in has to
+ * fetch someone who can while a parent waits. What they may write is unchanged
+ * — arrivals and departures for today, never an absence (see checkInStudent).
+ *
+ * All three sit above '/:id' so "check-in-board", "pickup" and "front-desk"
+ * aren't read as session ids.
+ */
+const DESK_ROLES = ['ADMIN', 'RECEPTIONIST', 'TEACHER'];
+
+// GET /api/sessions/check-in-board — Today's rosters for the door
+router.get('/check-in-board', authenticate, requireRole(...DESK_ROLES), checkInBoard);
 
 // POST /api/sessions/pickup/scan — Validate a pickup QR and release the child
-// (Admin/front desk). Above '/:id' so "pickup" isn't read as a session id.
-router.post('/pickup/scan', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), scanPickup);
+router.post('/pickup/scan', authenticate, requireRole(...DESK_ROLES), scanPickup);
+
+// POST /api/sessions/front-desk/scan — Resolve a family's standing QR into who
+// it covers and where they stand today. Read-only; the check-in route writes.
+router.post('/front-desk/scan', authenticate, requireRole(...DESK_ROLES), scanFamilyCode);
+
+// GET /api/sessions/door-log — Arrivals and departures as they happened, with
+// who recorded each one. Whoever may work the door may read what it recorded.
+router.get('/door-log', authenticate, requireRole(...DESK_ROLES), doorLog);
 
 // GET /api/sessions — List sessions for calendar (All auth users)
 router.get('/', authenticate, listSessions);
@@ -69,10 +90,10 @@ router.put('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), updateSession)
 router.put('/:id/attendance', authenticate, requireRole('ADMIN', 'TEACHER'), validate(updateAttendanceSchema), updateAttendance);
 
 // POST /api/sessions/:id/check-in — Record one arrival/departure at the door
-// (Admin/front desk). Narrower than the attendance sheet above on purpose: it
-// only writes PRESENT/LATE for today, so the desk can never trip the no-show
-// review that suggests a charge. See checkInStudent.
-router.post('/:id/check-in', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), checkInStudent);
+// (see DESK_ROLES). Narrower than the attendance sheet above on purpose: it
+// only writes PRESENT/LATE for today, so whoever is on the door can never trip
+// the no-show review that suggests a charge. See checkInStudent.
+router.post('/:id/check-in', authenticate, requireRole(...DESK_ROLES), checkInStudent);
 
 // POST /api/sessions/:id/notes — Add session notes (Admin/Teacher)
 router.post('/:id/notes', authenticate, requireRole('ADMIN', 'TEACHER'), addSessionNote);

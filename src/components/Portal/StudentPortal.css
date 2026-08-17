@@ -56,6 +56,28 @@
   position: relative;
 }
 
+/* Sits on the hero's own artwork, so it carries its own surface rather than
+   borrowing the page background. */
+.sp-checkin-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 15px;
+  border-radius: 22px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.sp-checkin-btn:hover { background: rgba(255, 255, 255, 0.3); }
+.sp-checkin-btn:active { transform: translateY(1px); }
+
 .sp-avatar {
   width: 64px;
   height: 64px;

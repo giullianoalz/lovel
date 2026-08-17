@@ -5,7 +5,7 @@ import { invalidate } from '../middleware/cache.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 import { getAdminUserIds } from '../services/notificationConfig.service.js';
 import { isOnly } from '../utils/roles.js';
-import { childIdsOfParent } from '../utils/family.js';
+import { childIdsOfParent, familyIdsOfUser, ensureFamilyCheckInCode } from '../utils/family.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 
 // Shape a behavior log for the student/parent portals — exposes the reason
@@ -390,6 +390,57 @@ export const deletePickupAuth = async (req, res, next) => {
     if (!auth) return res.status(404).json({ error: 'Not Found' });
     await prisma.tempPickupAuth.delete({ where: { id } });
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/portal/family/check-in-code
+ *
+ * The household's standing QR, for the parent's phone and for a student old
+ * enough to carry their own. Open to both roles because both walk through the
+ * same door — a teenager arriving alone should not need a parent present to be
+ * checked in.
+ *
+ * Returns every family the caller belongs to: a child of separated parents sits
+ * in two households, and each one has its own code.
+ */
+export const getFamilyCheckInCode = async (req, res, next) => {
+  try {
+    const familyIds = await familyIdsOfUser(req.user.id);
+    if (familyIds.length === 0) return res.json({ families: [] });
+
+    const families = await Promise.all(familyIds.map((id) => ensureFamilyCheckInCode(id)));
+
+    res.json({
+      families: families.filter(Boolean).map((f) => ({ id: f.id, name: f.name, code: f.checkInCode })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/portal/family/check-in-code/rotate
+ *
+ * Issue a new code and void the old one — for a lost phone, or a screenshot
+ * that ended up somewhere it shouldn't have. Parents only: replacing the code
+ * logs out every other copy of it, and that is the household's call, not a
+ * child's.
+ */
+export const rotateFamilyCheckInCode = async (req, res, next) => {
+  try {
+    const { familyId } = req.body;
+    const familyIds = await familyIdsOfUser(req.user.id);
+    const target = familyId || familyIds[0];
+
+    if (!target || !familyIds.includes(target)) {
+      return res.status(403).json({ error: 'Forbidden', message: 'That is not your family.' });
+    }
+
+    const family = await ensureFamilyCheckInCode(target, { rotate: true });
+    res.json({ id: family.id, name: family.name, code: family.checkInCode });
   } catch (error) {
     next(error);
   }

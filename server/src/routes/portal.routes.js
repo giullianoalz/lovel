@@ -13,6 +13,8 @@ import {
   getParentBilling,
   createPaymentSession,
   decideSnackReload,
+  getFamilyCheckInCode,
+  rotateFamilyCheckInCode,
 } from '../controllers/portal.controller.js';
 
 const router = Router();
@@ -45,6 +47,11 @@ router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'),
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);
 router.post('/parent/pickup', authenticate, requireRole('PARENT'), validate(createPickupAuthSchema), createPickupAuth);
 router.delete('/parent/pickup/:id', authenticate, requireRole('PARENT'), deletePickupAuth);
+
+// The household's standing check-in QR. Students get it too — the one arriving
+// is often the one holding the phone. Only a parent may void it and reissue.
+router.get('/family/check-in-code', authenticate, requireRole('PARENT', 'STUDENT'), getFamilyCheckInCode);
+router.post('/family/check-in-code/rotate', authenticate, requireRole('PARENT'), rotateFamilyCheckInCode);
 
 // Snack-punch reload approval
 router.patch('/parent/snack-reloads/:id', authenticate, requireRole('PARENT'), decideSnackReload);
