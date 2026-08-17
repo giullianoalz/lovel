@@ -470,7 +470,14 @@ const JOBS = [
   },
   {
     name: 'class-reminders',
-    schedule: '*/5 * * * *', // every 5 minutes
+    // Classes run 8 AM - 8 PM, so there is nothing to remind anyone about
+    // overnight. The window matters beyond wasted work: a query every 5
+    // minutes never lets Neon's compute autosuspend, and an always-on
+    // instance burns ~180 CU-hours against a 100 CU-hour monthly allowance.
+    // Starting at 7 rather than 8 is deliberate — minutesBefore is
+    // admin-configurable, and at its 60-minute ceiling an 8:00 class has to
+    // be reminded on the 7:00 tick.
+    schedule: '*/10 7-20 * * *', // every 10 minutes, 7 AM - 8:59 PM
     handler: sendClassStartingSoonReminders,
   },
   {
@@ -480,7 +487,11 @@ const JOBS = [
   },
   {
     name: 'pay-accrual',
-    schedule: '5 * * * *', // every hour, just after the hour
+    // Every run re-sweeps the last 7 days, so skipping the overnight hours
+    // costs nothing but a few minutes of latency — whatever is missed is
+    // picked up by the next morning's first pass. Running through 9 PM so a
+    // class that ends at 8:00 is priced the same evening.
+    schedule: '5 7-21 * * *', // just after the hour, 7 AM - 9 PM
     handler: accruePay,
   },
   {
