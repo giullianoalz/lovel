@@ -67,7 +67,7 @@ router.post('/front-desk/scan', authenticate, requireRole(...DESK_ROLES), scanFa
 // GET /api/sessions/attendance-log — Door arrivals/departures and sheet marks,
 // as they happened, with who recorded each one. Whoever may work the door or
 // the sheet may read what either one wrote.
-router.get('/attendance-log', authenticate, requireRole(...DESK_ROLES, 'ADMIN'), attendanceLog);
+router.get('/attendance-log', authenticate, requireRole(...DESK_ROLES), attendanceLog);
 
 // GET /api/sessions — List sessions for calendar (All auth users)
 router.get('/', authenticate, listSessions);

@@ -23,6 +23,7 @@ import {
   BookOpen,
   Megaphone,
   Plug,
+  DoorOpen,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { requestAndSaveFcmToken, listenForForegroundMessages } from '../../lib/fcm';
@@ -213,6 +214,16 @@ const Sidebar = () => {
                 <Bell size={20} />
                 <span>Front Desk Alerts</span>
                 {alertsUnread > 0 && <span className="nav-item-badge">{alertsUnread > 9 ? '9+' : alertsUnread}</span>}
+              </NavLink>
+            )}
+            {/* Anyone who may work the door gets it in the sidebar, not buried
+                one screen deep: covering reception is something staff step into
+                mid-afternoon, usually because a parent is already waiting. The
+                roles here match DESK_ROLES on the server. */}
+            {hasRole('ADMIN', 'TEACHER', 'RECEPTIONIST') && (
+              <NavLink to="/front-desk" onClick={closeMenu} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+                <DoorOpen size={20} />
+                <span>Front Desk</span>
               </NavLink>
             )}
             {hasRole('TEACHER', 'ADMIN') && (
