@@ -4,6 +4,7 @@ import { database } from '../../lib/database';
 import api from '../../lib/api';
 import SnackCabinetModal from './SnackCabinetModal';
 import EditStudentModal from './EditStudentModal';
+import EditFamilyModal from './EditFamilyModal';
 import { useToast } from '../Layout/ToastProvider';
 import { useAuth } from '../../context/AuthContext';
 import './StudentProfileModal.css';
@@ -21,6 +22,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const [, setLoading] = useState(true);
   const [showCabinet, setShowCabinet] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showEditFamily, setShowEditFamily] = useState(false);
   const [materialSearch, setMaterialSearch] = useState('');
 
   // Redeem state
@@ -276,7 +278,12 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                   the data is what lets a teacher-parent see her own family. */}
               {(!isTeacher || student.parentName) && (
                 <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border-light)' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--text-main)' }}>Parent / Guardian</h4>
+                    {!isTeacher && student.familyId && (
+                      <button className="staff-note-edit" onClick={() => setShowEditFamily(true)}>Edit</button>
+                    )}
+                  </div>
                   <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'No Parent Assigned'}</p>
                   <p style={{ marginBottom: '4px' }}><strong>Phone:</strong> {student.parentPhone || 'N/A'}</p>
                   <p style={{ marginBottom: '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
@@ -594,6 +601,29 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               };
               setStudent(next);
               onUpdate?.(next);
+            }}
+          />
+        )}
+
+        {showEditFamily && (
+          <EditFamilyModal
+            familyId={student.familyId}
+            onClose={() => setShowEditFamily(false)}
+            onSaved={async () => {
+              // Guardian name/phone just changed server-side — re-pull this
+              // student so the flattened parentName/parentPhone shown above
+              // (and the roster behind this modal) catch up.
+              try {
+                const res = await api.get(`/students/${student.id}`);
+                const full = res.data?.student;
+                if (full) {
+                  const next = { ...student, parentName: full.parentName, parentPhone: full.parentPhone, parentEmail: full.parentEmail };
+                  setStudent(next);
+                  onUpdate?.(next);
+                }
+              } catch {
+                onUpdate?.();
+              }
             }}
           />
         )}

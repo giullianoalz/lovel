@@ -187,6 +187,7 @@ export const database = {
           parentPhone: dbStudent.parentPhone || 'N/A',
           parentEmail: dbStudent.parentEmail || 'N/A',
           allergies: dbStudent.allergies || 'None',
+          accommodationNotes: dbStudent.accommodationNotes || '',
           snackAuthorized: dbStudent.snackAuthorized,
           snackPunches: dbStudent.snackPunches,
           snackHistory: [],
