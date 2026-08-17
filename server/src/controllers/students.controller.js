@@ -361,6 +361,48 @@ export const updateStudentHealth = async (req, res, next) => {
 };
 
 /**
+ * PUT /api/students/:id/info
+ * Edit a student's core profile fields (name, contact, status, birthday,
+ * allergies). ADMIN only — the directory's "Edit Student" action.
+ */
+export const updateStudentInfo = async (req, res, next) => {
+  try {
+    const { fullName, email, phone, status, birthday, allergies, accommodationNotes } = req.body;
+
+    if (fullName !== undefined && !fullName.trim()) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Full name cannot be empty.' });
+    }
+    if (email !== undefined && !email.trim()) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Email cannot be empty.' });
+    }
+    if (status !== undefined && !['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(status)) {
+      return res.status(400).json({ error: 'Validation Error', message: 'status must be ACTIVE, INACTIVE or SUSPENDED.' });
+    }
+
+    // Same target as every other student write: an id must resolve to an
+    // actual STUDENT row, not any user, before it's touched.
+    await prisma.user.findFirstOrThrow({ where: { id: req.params.id, role: 'STUDENT' } });
+
+    const student = await prisma.user.update({
+      where: { id: req.params.id },
+      data: {
+        ...(fullName !== undefined && { fullName: fullName.trim() }),
+        ...(email !== undefined && { email: email.trim().toLowerCase() }),
+        ...(phone !== undefined && { phone: phone.trim() || null }),
+        ...(status !== undefined && { status }),
+        ...(birthday !== undefined && { birthday: birthday ? new Date(`${birthday}T00:00:00.000Z`) : null }),
+        ...(allergies !== undefined && { allergies }),
+        ...(accommodationNotes !== undefined && { accommodationNotes }),
+      },
+    });
+
+    res.json({ message: 'Student updated.', student });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * PUT /api/students/:id/staff-notes
  * Back-office notes about a student. ADMIN only, both to write and to read
  * back — the route is gated, and every other student response strips the field.

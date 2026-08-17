@@ -4,6 +4,7 @@ import { requireRole, requireSelfOrRole } from '../middleware/roles.js';
 import {
   listStudents,
   getStudent,
+  updateStudentInfo,
   updateStudentHealth,
   updateStaffNotes,
   updateSnackPunches,
@@ -25,6 +26,9 @@ router.get('/export', authenticate, requireRole('ADMIN'), exportStudentsCsv);
 
 // GET /api/students/:id — Get student detail (Admin/Teacher or self)
 router.get('/:id', authenticate, requireSelfOrRole('ADMIN', 'TEACHER'), getStudent);
+
+// PUT /api/students/:id/info — Edit core profile fields (Admin)
+router.put('/:id/info', authenticate, requireRole('ADMIN'), updateStudentInfo);
 
 // PUT /api/students/:id/health — Update health info (Admin)
 router.put('/:id/health', authenticate, requireRole('ADMIN'), updateStudentHealth);

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse } from 'lucide-react';
+import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse, Pencil } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import SnackCabinetModal from './SnackCabinetModal';
+import EditStudentModal from './EditStudentModal';
 import { useToast } from '../Layout/ToastProvider';
 import { useAuth } from '../../context/AuthContext';
 import './StudentProfileModal.css';
@@ -19,6 +20,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const [student, setStudent] = useState(initialStudent);
   const [, setLoading] = useState(true);
   const [showCabinet, setShowCabinet] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [materialSearch, setMaterialSearch] = useState('');
 
   // Redeem state
@@ -198,6 +200,11 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
             </div>
           </div>
           <div className="profile-header-actions">
+            {!isTeacher && (
+              <button className="report-btn edit-report-btn" onClick={() => setShowEdit(true)}>
+                <Pencil size={15} /> Edit
+              </button>
+            )}
             <button className="report-btn medical-report-btn" onClick={() => setReportType('medical')}>
               <HeartPulse size={15} /> Medical
             </button>
@@ -569,6 +576,27 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
             </div>
           </div>
         </div>
+
+        {showEdit && (
+          <EditStudentModal
+            student={student}
+            onClose={() => setShowEdit(false)}
+            onSaved={(saved) => {
+              const next = {
+                ...student,
+                name: saved.fullName,
+                email: saved.email,
+                phone: saved.phone,
+                status: saved.status?.charAt(0).toUpperCase() + saved.status?.slice(1).toLowerCase(),
+                birthday: saved.birthday,
+                allergies: saved.allergies,
+                accommodationNotes: saved.accommodationNotes,
+              };
+              setStudent(next);
+              onUpdate?.(next);
+            }}
+          />
+        )}
 
         {/* Snack Cabinet Pop-up Overlay */}
         {showCabinet && (

@@ -371,6 +371,8 @@
   padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
   cursor: pointer; border: 1px solid; transition: all 0.15s;
 }
+.edit-report-btn { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+.edit-report-btn:hover { background: #dbeafe; }
 .medical-report-btn { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
 .medical-report-btn:hover { background: #fee2e2; }
 .behavior-report-btn { background: #fefce8; color: #ca8a04; border-color: #fde68a; }

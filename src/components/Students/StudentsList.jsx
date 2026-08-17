@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, UserPlus, AlertCircle, Cookie, Mail, Phone, CalendarDays, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy, Shell, Check, X } from 'lucide-react';
+import { Search, UserPlus, AlertCircle, Cookie, Mail, Phone, CalendarDays, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy, Shell, Check, X, Pencil } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -9,6 +9,7 @@ import StudentProfileModal from './StudentProfileModal';
 import TeacherProfileModal from './TeacherProfileModal';
 import SnackCabinetModal from './SnackCabinetModal';
 import AddStudentModal from './AddStudentModal';
+import EditStudentModal from './EditStudentModal';
 import AddFamilyMemberModal from './AddFamilyMemberModal';
 import ImportStudentsModal from './ImportStudentsModal';
 import BulkInviteModal from './BulkInviteModal';
@@ -29,6 +30,7 @@ const StudentsList = () => {
   const [loadError, setLoadError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [editingStudent, setEditingStudent] = useState(null);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [isSnackManagerOpen, setIsSnackManagerOpen] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -515,6 +517,16 @@ const StudentsList = () => {
                     >
                       <CalendarDays size={18} />
                     </button>
+                    {hasRole('ADMIN') && (
+                      <button
+                        className="icon-btn"
+                        title={`Edit ${student.name}`}
+                        aria-label={`Edit ${student.name}`}
+                        onClick={() => setEditingStudent(student)}
+                      >
+                        <Pencil size={18} />
+                      </button>
+                    )}
                     {canOpenProfile && (
                       <button className="action-btn" onClick={() => setSelectedStudent({ ...student })}>View Profile</button>
                     )}
@@ -754,6 +766,14 @@ const StudentsList = () => {
         <SnackCabinetModal 
           mode="manage"
           onClose={() => setIsSnackManagerOpen(false)}
+        />
+      )}
+
+      {editingStudent && (
+        <EditStudentModal
+          student={editingStudent}
+          onClose={() => setEditingStudent(null)}
+          onSaved={loadData}
         />
       )}
 
