@@ -122,7 +122,8 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
             <h2>Charges priced on the calendar</h2>
             <p>
               Every meeting you gave a price to. Nothing here has been billed yet —
-              approving is what puts it on the family's account.
+              approving raises the charge <strong>and its invoice</strong>, so the family
+              can pay it. The invoice is not emailed; send it when you're ready.
             </p>
           </div>
         </header>

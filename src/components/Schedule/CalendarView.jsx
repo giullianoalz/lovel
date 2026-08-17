@@ -3040,7 +3040,7 @@ const CalendarView = () => {
                         <p className="cal-pay-hint">
                           {editEventForm.chargeAmount === '' || editEventForm.chargeAmount == null
                             ? 'Leave this empty and the meeting charges nothing — the term’s tuition is billed separately.'
-                            : `Charges each of the ${selectedEvent.students} enrolled ${selectedEvent.students === 1 ? 'family' : 'families'} $${Number(editEventForm.chargeAmount || 0).toFixed(2)}. Nothing is billed until you approve it in Billing.`}
+                            : `Charges each of the ${selectedEvent.students} enrolled ${selectedEvent.students === 1 ? 'family' : 'families'} $${Number(editEventForm.chargeAmount || 0).toFixed(2)}. Nothing is billed until you approve it under Billing → Calendar Charges, which also raises the invoice.`}
                         </p>
                       </div>
                     )}
@@ -3083,7 +3083,7 @@ const CalendarView = () => {
                           <span>
                             <strong>${Number(selectedEvent.chargeAmount).toFixed(2)}</strong> per family
                             {selectedEvent.chargeNote ? ` — ${selectedEvent.chargeNote}` : ''}
-                            <small className="cal-charge-pending">approve in Billing to charge it</small>
+                            <small className="cal-charge-pending">approve in Billing to charge and invoice it</small>
                           </span>
                         ) : (
                           <span className="cal-charge-unset">
