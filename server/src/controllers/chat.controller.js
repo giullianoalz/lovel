@@ -7,6 +7,7 @@ import { findContactInfo } from '../utils/contentFilter.js';
 import { buildParentMaskMap, displayNameFor, masksParentIdentity } from '../utils/parentPrivacy.js';
 import { uploadFileToDrive, downloadFileFromDrive, drive, driveAuthMode } from '../config/drive.js';
 import { sendNotification } from '../jobs/notification.helper.js';
+import { formatAcademyClock, academyStartOfDay, academyNowParts } from '../utils/academyTime.js';
 
 const CHAT_UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'chat');
 
@@ -117,14 +118,22 @@ async function broadcastMessage({ io, threadId, message, senderId }) {
   }));
 }
 
-/** Returns true if `now` (HH:MM, local) falls within a quiet-hours window that may wrap midnight. */
+/**
+ * Returns true if `now` falls within a quiet-hours window that may wrap midnight.
+ *
+ * The teacher typed "21:00" meaning nine at night in Florida, so the comparison
+ * has to be against the academy's wall clock. Reading `now.getHours()` gave the
+ * server's, which on Render is UTC — a 9 PM–7 AM window was silently being
+ * applied from 5 PM to 3 AM local.
+ */
 function isWithinQuietHours(start, end, now = new Date()) {
   if (!start || !end) return false;
   const toMinutes = (hhmm) => {
     const [h, m] = hhmm.split(':').map(Number);
     return h * 60 + m;
   };
-  const cur = now.getHours() * 60 + now.getMinutes();
+  const local = academyNowParts(now).time;
+  const cur = local.getUTCHours() * 60 + local.getUTCMinutes();
   const s = toMinutes(start);
   const e = toMinutes(end);
   if (s === e) return false;
@@ -259,7 +268,7 @@ export const getThreads = async (req, res, next) => {
         roles: roles,
         lastMsg: lastMsg ? (lastMsg.text || (lastMsg.fileName ? `📎 ${lastMsg.fileName}` : 'Attachment')) : (thread.isBot ? 'Hello! I am your Academy Assistant.' : 'No messages yet'),
         timestamp: lastMsg ? lastMsg.sentAt.getTime() : thread.createdAt.getTime(),
-        time: lastMsg ? lastMsg.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        time: lastMsg ? formatAcademyClock(lastMsg.sentAt) : '',
         unread: unreadCounts[idx],
       };
     });
@@ -560,7 +569,7 @@ export const getMessages = async (req, res, next) => {
         sender: isMe ? 'Me' : (msg.sender ? displayNameFor(maskMap, msg.sender) : 'System'),
         text: msg.text,
         ...formatAttachment(msg),
-        time: msg.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: formatAcademyClock(msg.sentAt),
         sentAt: msg.sentAt,
         type: isMe ? 'sent' : 'received'
       };
@@ -659,7 +668,7 @@ export const sendMessage = async (req, res, next) => {
       sender: newMessage.sender.fullName,
       text: newMessage.text,
       ...formatAttachment(newMessage),
-      time: newMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: formatAcademyClock(newMessage.sentAt),
       sentAt: newMessage.sentAt,
       type: 'received' // from the perspective of others
     };
@@ -700,14 +709,17 @@ export const sendMessage = async (req, res, next) => {
           );
           if (!quietTeacher) return;
 
-          const today = new Date().toISOString().slice(0, 10);
+          // "Once per day" means the academy's day, not UTC's — otherwise the
+          // counter rolls over at 8 PM local and the auto-reply fires twice.
+          const dayStart = academyStartOfDay();
+          const today = academyNowParts().date.toISOString().slice(0, 10);
           const dedupKey = `quiet-hours-autoreply:${threadId}:${quietTeacher.userId}:${today}`;
 
           const alreadySentToday = await prisma.chatMessage.findFirst({
             where: {
               threadId,
               senderId: null,
-              sentAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+              sentAt: { gte: dayStart },
               text: { contains: quietTeacher.user.autoResponderMessage || 'quiet hours' },
             },
           });
@@ -728,7 +740,8 @@ export const sendMessage = async (req, res, next) => {
                 senderId: null,
                 sender: 'Auto-response',
                 text: autoMessage.text,
-                time: autoMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                time: formatAcademyClock(autoMessage.sentAt),
+                sentAt: autoMessage.sentAt,
                 type: 'received',
               },
             });
@@ -790,7 +803,8 @@ export const sendMessage = async (req, res, next) => {
                 senderId: null,
                 sender: 'Academy Assistant',
                 text: botMessage.text,
-                time: botMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                time: formatAcademyClock(botMessage.sentAt),
+                sentAt: botMessage.sentAt,
                 type: 'received',
               },
             });
@@ -805,7 +819,8 @@ export const sendMessage = async (req, res, next) => {
                 senderId: null,
                 sender: 'Academy Assistant',
                 text: "Sorry, I had trouble responding just now. Please try again or contact the Love Learning team.",
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                time: formatAcademyClock(new Date()),
+                sentAt: new Date(),
                 type: 'received',
               },
             });
@@ -896,7 +911,7 @@ export const uploadAttachment = async (req, res, next) => {
       sender: newMessage.sender.fullName,
       text: newMessage.text,
       ...formatAttachment(newMessage),
-      time: newMessage.sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: formatAcademyClock(newMessage.sentAt),
       type: 'received'
     };
 
