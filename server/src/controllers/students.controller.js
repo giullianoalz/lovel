@@ -367,7 +367,7 @@ export const updateStudentHealth = async (req, res, next) => {
  */
 export const updateStudentInfo = async (req, res, next) => {
   try {
-    const { fullName, email, phone, status, birthday, allergies, accommodationNotes } = req.body;
+    const { fullName, email, phone, status, birthday, allergies, accommodationNotes, familyId } = req.body;
 
     if (fullName !== undefined && !fullName.trim()) {
       return res.status(400).json({ error: 'Validation Error', message: 'Full name cannot be empty.' });
@@ -382,6 +382,31 @@ export const updateStudentInfo = async (req, res, next) => {
     // Same target as every other student write: an id must resolve to an
     // actual STUDENT row, not any user, before it's touched.
     await prisma.user.findFirstOrThrow({ where: { id: req.params.id, role: 'STUDENT' } });
+
+    // Update family assignment if provided
+    if (familyId) {
+      const familyExists = await prisma.family.findUnique({ where: { id: familyId } });
+      if (!familyExists) {
+        return res.status(400).json({ error: 'Validation Error', message: 'Family not found.' });
+      }
+
+      const existingMember = await prisma.familyMember.findFirst({
+        where: { userId: req.params.id }
+      });
+
+      if (existingMember) {
+        if (existingMember.familyId !== familyId) {
+          await prisma.familyMember.update({
+            where: { id: existingMember.id },
+            data: { familyId }
+          });
+        }
+      } else {
+        await prisma.familyMember.create({
+          data: { familyId, userId: req.params.id, role: 'STUDENT' }
+        });
+      }
+    }
 
     const student = await prisma.user.update({
       where: { id: req.params.id },

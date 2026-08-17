@@ -1,22 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Check } from 'lucide-react';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
 import './AddStudentModal.css';
 
-// Birthday comes back as UTC midnight (a pure DATE column) — slicing to the
-// first 10 chars keeps the day from rolling over into the input, same fix as
-// StudentProfileModal's formatBirthday.
 const toDateInput = (value) => (value ? String(value).slice(0, 10) : '');
-
-// StudentsList replaces missing phone/email with the literal string 'N/A' for
-// display — strip that sentinel back out so it doesn't get typed into a real
-// field and saved as the student's actual phone number.
 const orBlank = (value) => (value && value !== 'N/A' ? value : '');
 
 const EditStudentModal = ({ student, onClose, onSaved }) => {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
+  const [families, setFamilies] = useState([]);
+  
   const [form, setForm] = useState({
     fullName: student.name || '',
     email: orBlank(student.email),
@@ -25,7 +20,18 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
     birthday: toDateInput(student.birthday),
     allergies: student.allergies === 'None' ? '' : (student.allergies || ''),
     accommodationNotes: student.accommodationNotes || '',
+    familyId: student.familyId || '',
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/families').then(res => {
+      if (!cancelled) {
+        setFamilies(res.data.families || []);
+      }
+    }).catch(err => console.error("Error loading families:", err));
+    return () => { cancelled = true; };
+  }, []);
 
   const update = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
@@ -43,6 +49,7 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
         birthday: form.birthday,
         allergies: form.allergies.trim(),
         accommodationNotes: form.accommodationNotes.trim(),
+        familyId: form.familyId || undefined,
       });
       toast.success('Student updated.');
       await onSaved?.(res.data.student);
@@ -99,6 +106,16 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
                 <label>Allergies</label>
                 <input type="text" placeholder="e.g. Peanuts, Shellfish (or leave blank)" value={form.allergies} onChange={e => update('allergies', e.target.value)} />
               </div>
+            </div>
+
+            <div className="asm-field">
+              <label>Family Assignment</label>
+              <select value={form.familyId} onChange={e => update('familyId', e.target.value)}>
+                <option value="">No Family</option>
+                {families.map(f => (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                ))}
+              </select>
             </div>
 
             <div className="asm-field">

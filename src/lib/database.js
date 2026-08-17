@@ -196,6 +196,7 @@ export const database = {
           familyId: dbStudent.familyMembers?.[0]?.familyId || null,
           // Formatear estado (ej. "ACTIVE" -> "Active")
           status: dbStudent.status.charAt(0).toUpperCase() + dbStudent.status.slice(1).toLowerCase(),
+          hasActiveClasses: dbStudent.enrollments && dbStudent.enrollments.length > 0,
           materials: []
         };
       });

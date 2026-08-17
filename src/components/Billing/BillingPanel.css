@@ -8,18 +8,66 @@
 .billing-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 30px;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
-.billing-header h1 {
+.billing-header-title h1 {
   font-size: 2rem;
   color: var(--text-main);
   margin-bottom: 4px;
 }
 
-.billing-header p {
+.billing-header-title p {
   color: var(--text-muted);
+}
+
+.billing-quick-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.btn-action.outline {
+  background: white;
+  color: #059669;
+  border-color: #059669;
+}
+.btn-action.outline:hover {
+  background: #ecfdf5;
+}
+
+.btn-action.primary {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}
+.btn-action.primary:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+}
+
+.btn-action.secondary {
+  background: #0f172a;
+  color: white;
+}
+.btn-action.secondary:hover {
+  background: #1e293b;
 }
 
 /* Metrics Row */
@@ -44,15 +92,21 @@
 }
 
 .metric-icon {
-  background: var(--bg-sidebar);
-  color: var(--primary);
-  padding: 12px;
+  padding: 16px;
   border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.metric-card.warning .metric-icon {
-  background: #fee2e2;
+.metric-icon.alert {
+  background: #fef2f2;
   color: #dc2626;
+}
+
+.metric-icon.success {
+  background: #ecfdf5;
+  color: #059669;
 }
 
 .metric-info h3 {
@@ -112,6 +166,13 @@
   font-weight: 600;
   color: var(--text-main);
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-filter.active {
+  background: var(--primary-light);
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 .table-scroll {
@@ -120,12 +181,90 @@
   position: relative;
 }
 
+.clickable-row {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
 
+.clickable-row:hover {
+  background: #f8fafc !important;
+}
+
+.tags-container-inline {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.icon-btn.ghost {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.clickable-row:hover .icon-btn.ghost {
+  color: var(--primary);
+  background: var(--primary-light);
+}
 
 .billing-table {
   width: 100%;
   min-width: 900px;
   border-collapse: collapse;
+}
+
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ledger-table th {
+  text-align: left;
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  font-weight: 700;
+  border-bottom: 2px solid var(--border-light);
+}
+
+.ledger-table td {
+  padding: 20px 16px;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-main);
+  font-size: 14px;
+}
+
+.ledger-table tr {
+  transition: background-color 0.2s;
+}
+
+.ledger-table tr:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Color coding for ledger rows */
+.ledger-table tr.charge-row .charge-col {
+  color: #b91c1c;
+  font-weight: 600;
+  background: #fef2f2;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.ledger-table tr.payment-row .payment-col {
+  color: #047857;
+  font-weight: 600;
+  background: #ecfdf5;
+  padding: 4px 8px;
+  border-radius: 8px;
 }
 
 .billing-table th {
@@ -375,31 +514,39 @@
 }
 
 .family-sidebar {
-  background: white;
-  border-radius: 20px;
-  border: 1px solid var(--border-light);
-  padding: 32px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+  background: transparent;
   position: sticky;
   top: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .family-sidebar h2 {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   color: var(--text-main);
-  margin-bottom: 24px;
+  margin-bottom: 8px;
+  padding-left: 8px;
 }
 
-.sidebar-section {
-  margin-bottom: 24px;
+.sidebar-section.styled-card {
+  background: white;
+  border-radius: 20px;
+  border: 1px solid var(--border-light);
+  padding: 24px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+  margin-bottom: 0;
 }
 
 .sidebar-section h3 {
-  font-size: 12px;
+  font-size: 13px;
   text-transform: uppercase;
   color: var(--text-muted);
   font-weight: 700;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .students-list {
@@ -521,6 +668,38 @@
   overflow: hidden;
 }
 
+.billing-tabs-modern {
+  display: flex;
+  gap: 8px;
+  background: #f1f5f9;
+  padding: 6px;
+  border-radius: 16px;
+  margin: 16px;
+  width: fit-content;
+}
+
+.tab-btn-modern {
+  padding: 10px 24px;
+  border: none;
+  background: transparent;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  font-size: 14px;
+}
+
+.tab-btn-modern:hover {
+  color: var(--text-main);
+}
+
+.tab-btn-modern.active {
+  background: white;
+  color: var(--primary);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
 .billing-tabs {
   display: flex;
   border-bottom: 1px solid var(--border-light);
@@ -549,6 +728,51 @@
 .tab-pane {
   padding: 24px;
   overflow-x: auto;
+}
+
+.account-status-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 16px 24px 16px;
+  padding: 24px 32px;
+  background: white;
+  border-radius: 20px;
+  border: 1px solid var(--border-light);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.02);
+}
+
+.status-balance-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-label {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-amount {
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.status-amount.text-danger {
+  color: #dc2626;
+}
+
+.status-amount.text-success {
+  color: #059669;
+}
+
+/* Reusing action-btn from the header for consistency */
+.status-actions .btn-action {
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
 .balance-header {

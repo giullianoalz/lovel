@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
-  CreditCard, History, ChevronLeft, Plus, MoreVertical, Calendar as CalendarIcon, Search,
+  CreditCard, History, ChevronLeft, ChevronRight, Plus, MoreVertical, Calendar as CalendarIcon, Search,
   UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -35,6 +35,7 @@ const BillingPanel = () => {
   const [activeTab, setActiveTab] = useState('Account'); // 'Account' | 'Invoices'
   const [familySearch, setFamilySearch] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(false);
+  const [onlyActive, setOnlyActive] = useState(false);
 
   // Modal States
   const [isAddTxModalOpen, setIsAddTxModalOpen] = useState(false);
@@ -639,24 +640,36 @@ const BillingPanel = () => {
     return (
       <div className="billing-container">
         <header className="billing-header">
-          <div>
+          <div className="billing-header-title">
+            <h1>Billing & Invoices</h1>
             <p>Manage family accounts, process payments, and generate invoices.</p>
+          </div>
+          <div className="billing-quick-actions">
+            <button className="btn-action outline" onClick={() => setIsSessionChargesOpen(true)}>
+              <Receipt size={16} /> Calendar Charges
+            </button>
+            <button className="btn-action primary" onClick={() => setIsEmaModalOpen(true)}>
+              <UploadCloud size={16} /> EMA Auto-Sync
+            </button>
+            <button className="btn-action secondary" onClick={() => setIsReconcileOpen(true)}>
+              <CheckCircle size={16} /> Reconcile Payment
+            </button>
           </div>
         </header>
 
         <div className="billing-metrics">
           <div className="metric-card">
-            <div className="metric-icon"><DollarSign size={24} /></div>
+            <div className="metric-icon alert"><DollarSign size={24} /></div>
             <div className="metric-info">
-              <h3>Total Balance Owing (All Families)</h3>
+              <h3>Total Balance Owing</h3>
               <p>${totalOwing.toFixed(2)}</p>
             </div>
           </div>
           <div className="metric-card">
-            <div className="metric-icon" style={{background:'#dcfce7', color:'#166534'}}><CheckCircle size={24} /></div>
+            <div className="metric-icon success"><CheckCircle size={24} /></div>
             <div className="metric-info">
               <h3>Active Families</h3>
-              <p>{families.length}</p>
+              <p>{families.filter(f => students.some(s => s.familyId === f.id && s.hasActiveClasses)).length}</p>
             </div>
           </div>
         </div>
@@ -665,19 +678,16 @@ const BillingPanel = () => {
           <div className="table-header">
             <h2>Family Accounts</h2>
             <div className="table-actions">
-              <button className="btn-export" style={{background: '#059669', color: 'white', borderColor: '#059669'}} onClick={() => setIsSessionChargesOpen(true)}>
-                <Receipt size={16} /> Calendar Charges
-              </button>
-              <button className="btn-export" style={{background: 'var(--primary)', color: 'white', borderColor: 'var(--primary)'}} onClick={() => setIsEmaModalOpen(true)}>
-                <UploadCloud size={16} /> EMA Auto-Sync
-              </button>
-              <button className="btn-export" style={{background: '#0369a1', color: 'white', borderColor: '#0369a1'}} onClick={() => setIsReconcileOpen(true)}>
-                <CheckCircle size={16} /> Reconcile Payment
+              <button
+                className={`btn-filter ${onlyActive ? 'active' : ''}`}
+                onClick={() => setOnlyActive(v => !v)}
+                title="Show only active families"
+              >
+                <User size={16} /> {onlyActive ? 'Active only ✓' : 'Active only'}
               </button>
               <button
-                className="btn-filter"
+                className={`btn-filter ${onlyOwing ? 'active' : ''}`}
                 onClick={() => setOnlyOwing(v => !v)}
-                style={onlyOwing ? { background: 'var(--primary-light)', color: 'var(--primary)', borderColor: 'var(--primary)' } : undefined}
                 title="Show only families with a balance owing"
               >
                 <Filter size={16} /> {onlyOwing ? 'Owing only ✓' : 'Owing only'}
@@ -700,14 +710,15 @@ const BillingPanel = () => {
                 <tr>
                   <th>Family Name</th>
                   <th>Primary Contact</th>
-                  <th>Group Tags</th>
                   <th>Balance Owing</th>
-                  <th>Actions</th>
+                  <th style={{ width: '60px', textAlign: 'center' }}></th>
                 </tr>
               </thead>
               <tbody>
                 {families.filter(f => {
                   if (onlyOwing && calculateFamilyBalance(f.id) <= 0) return false;
+                  if (onlyActive && !students.some(s => s.familyId === f.id && s.hasActiveClasses)) return false;
+                  
                   const q = familySearch.trim().toLowerCase();
                   if (!q) return true;
                   return (
@@ -719,18 +730,13 @@ const BillingPanel = () => {
                   const bal = calculateFamilyBalance(f.id);
                   const primary = f.contacts.find(c => c.isInvoiceRecipient) || f.contacts[0];
                   return (
-                    <tr key={f.id} onClick={() => setSelectedFamily(f)} style={{cursor: 'pointer'}}>
+                    <tr key={f.id} onClick={() => setSelectedFamily(f)} className="clickable-row">
                       <td style={{fontWeight: 600, color: 'var(--primary)'}}>{f.name}</td>
                       <td>{primary ? primary.name : 'N/A'}</td>
-                      <td>
-                        <div style={{display:'flex', gap:'4px'}}>
-                          {f.tags.map(t => <span key={t} className="tag-ema">{t}</span>)}
-                        </div>
-                      </td>
                       <td style={{fontWeight: 700, color: bal > 0 ? '#dc2626' : 'var(--text-main)'}}>${bal.toFixed(2)}</td>
-                      <td>
-                        <button className="btn-mark-paid" onClick={(e) => { e.stopPropagation(); setSelectedFamily(f); }}>
-                          View Account
+                      <td style={{ textAlign: 'center' }}>
+                        <button className="icon-btn ghost" onClick={(e) => { e.stopPropagation(); setSelectedFamily(f); }}>
+                          <ChevronRight size={20} />
                         </button>
                       </td>
                     </tr>
@@ -993,15 +999,15 @@ const BillingPanel = () => {
 
       <div className="family-billing-layout">
         {/* Left Sidebar */}
+        {/* Left Sidebar */}
         <div className="family-sidebar">
           <h2>{selectedFamily.name}</h2>
           
-          <div className="sidebar-section">
-            <h3>Students</h3>
+          <div className="sidebar-section styled-card">
+            <h3><User size={16} /> Students</h3>
             <div className="students-list">
               {familyStudents.map((s, idx) => (
                 <div key={idx} className="billing-student-row">
-                  <User size={14} className="icon-mr" />
                   <span>{s.name}</span>
                   <span className={`badge-status ${s.status.toLowerCase()}`}>{s.status}</span>
                 </div>
@@ -1009,47 +1015,49 @@ const BillingPanel = () => {
             </div>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Family Contacts</h3>
+          <div className="sidebar-section styled-card">
+            <h3><Mail size={16} /> Contacts</h3>
             <div className="billing-contact-row">
-              <User size={14} className="icon-mr" />
               <span>{primaryContact ? primaryContact.name : 'Unknown'}</span>
               <span className="badge-recipient">Invoice Recipient</span>
             </div>
           </div>
-
-          <div className="sidebar-section">
-            <h3>Group Tags</h3>
-            <div className="tags-container">
-              {selectedFamily.tags.map(t => <span key={t} className="tag-ema">{t}</span>)}
-            </div>
-          </div>
-
         </div>
 
         {/* Right Main Content */}
         <div className="family-main-content">
-          <div className="billing-tabs">
-            <button className={`tab-btn ${activeTab === 'Account' ? 'active' : ''}`} onClick={() => setActiveTab('Account')}>Account</button>
-            <button className={`tab-btn ${activeTab === 'Invoices' ? 'active' : ''}`} onClick={() => setActiveTab('Invoices')}>Invoices</button>
+          <div className="billing-tabs-modern">
+            <button className={`tab-btn-modern ${activeTab === 'Account' ? 'active' : ''}`} onClick={() => setActiveTab('Account')}>Account Ledger</button>
+            <button className={`tab-btn-modern ${activeTab === 'Invoices' ? 'active' : ''}`} onClick={() => setActiveTab('Invoices')}>Invoices</button>
           </div>
 
           {activeTab === 'Account' && (
             <div className="tab-pane">
-              <div className="balance-header">
-                {currentBalance > 0 ? (
-                  <h2>Balance Owing: <span style={{color: '#dc2626'}}>${currentBalance.toFixed(2)}</span></h2>
-                ) : currentBalance < 0 ? (
-                  <h2>Credit on Account: <span style={{color: '#166534'}}>${Math.abs(currentBalance).toFixed(2)}</span></h2>
-                ) : (
-                  <h2>Balance: <span style={{color: '#166534'}}>Paid in Full</span></h2>
-                )}
-              </div>
-
-              <div className="ledger-actions">
-                <button className="action-btn primary" onClick={() => setIsAddTxModalOpen(true)}>
-                  <Plus size={16} /> Add Transaction
-                </button>
+              
+              <div className="account-status-card">
+                <div className="status-balance-info">
+                  {currentBalance > 0 ? (
+                    <>
+                      <span className="status-label">Balance Owing</span>
+                      <span className="status-amount text-danger">${currentBalance.toFixed(2)}</span>
+                    </>
+                  ) : currentBalance < 0 ? (
+                    <>
+                      <span className="status-label">Credit on Account</span>
+                      <span className="status-amount text-success">${Math.abs(currentBalance).toFixed(2)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="status-label">Account Status</span>
+                      <span className="status-amount text-success">Paid in Full</span>
+                    </>
+                  )}
+                </div>
+                <div className="status-actions">
+                  <button className="btn-action primary" onClick={() => setIsAddTxModalOpen(true)}>
+                    <Plus size={16} /> Add Transaction
+                  </button>
+                </div>
               </div>
 
               {/* Standing arrangements. Above the ledger on purpose: this is
@@ -1083,19 +1091,20 @@ const BillingPanel = () => {
                 </div>
               )}
 
-              <table className="ledger-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Student</th>
-                    <th>Description</th>
-                    <th>Charges & Discounts</th>
-                    <th>Payments & Refunds</th>
-                    <th>Balance</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
+              <div className="table-scroll">
+                <table className="ledger-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Student</th>
+                      <th>Description</th>
+                      <th>Charges & Discounts</th>
+                      <th>Payments & Refunds</th>
+                      <th>Balance</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
                   {ledgerTxs.map(tx => {
                     const type = tx.type.toLowerCase();
                     return (
@@ -1166,6 +1175,7 @@ const BillingPanel = () => {
                   {ledgerTxs.length === 0 && <tr><td colSpan="7" className="text-center text-muted">No transactions found.</td></tr>}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
