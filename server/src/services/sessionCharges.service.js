@@ -13,7 +13,14 @@
  * before touching either.
  *
  * Per enrolled student at full price, not split: the price typed is what one
- * family pays, the same way term tuition works. A $400 event with three students
+ * family pays, the same way term tuition works.
+ *
+ * One charge per class, not one per week. The published rates are per 8-week
+ * quarter, but only the first week of each class carries a price and the second
+ * quarter is added by hand when it comes (decided 2026-08-15). Nothing here
+ * repeats a charge on its own, and nothing should be taught to: a service that
+ * "completed the semester" by pricing the October sessions would raise about
+ * $32,000 nobody authorised. A $400 event with three students
  * raises three $400 charges.
  *
  * Nothing here writes. `buildSessionCharges` is the sheet an admin checks;
