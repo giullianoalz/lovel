@@ -3101,12 +3101,24 @@ const CalendarView = () => {
                         where it stops being one number — a student whose fee
                         already covers this room is set to $0 here, on the entry,
                         with the roster in front of you. */}
-                    {canSetPay && selectedEvent.chargeAmount !== '' && selectedEvent.chargeAmount != null
-                      && (selectedEvent.rosterStudents?.length > 0) && (
+                    {canSetPay && (selectedEvent.rosterStudents?.length > 0) && (
                       <div className="cal-charge-roster">
+                        {/* Shown on every session, not only priced ones: "what
+                            does this child pay" is a question you ask of the
+                            meeting in front of you, and a list that only
+                            appeared once a room-wide price existed was missing
+                            on the majority of the calendar. */}
+                        <div className="cal-roster-head">
+                          What each student pays
+                          <small>click an amount to change it</small>
+                        </div>
                         {selectedEvent.rosterStudents.map(st => {
                           const ov = selectedEvent.chargeOverrides?.[st.id];
-                          const listed = Number(selectedEvent.chargeAmount);
+                          // No price on the meeting is not the same as $0 for a
+                          // student: the room charges nothing, but this one
+                          // person can still be given a price of their own.
+                          const hasListPrice = selectedEvent.chargeAmount !== '' && selectedEvent.chargeAmount != null;
+                          const listed = hasListPrice ? Number(selectedEvent.chargeAmount) : null;
                           const pays = ov ? ov.amount : listed;
                           const editing = priceEdit?.studentId === st.id;
 
@@ -3115,7 +3127,7 @@ const CalendarView = () => {
                           // one nobody can defend when the family asks.
                           if (editing) {
                             return (
-                              <div className="cal-roster-row cal-roster-row-editing" key={st.id}>
+                              <div className="cal-roster-row cal-roster-row-editing" key={`edit-${st.id}`}>
                                 <span className="cal-roster-name">{st.name}</span>
                                 <div className="cal-roster-edit">
                                   <span>$</span>
@@ -3155,7 +3167,7 @@ const CalendarView = () => {
                           }
 
                           return (
-                            <div className={`cal-roster-row${ov ? ' cal-roster-row-exempt' : ''}`} key={st.id}>
+                            <div className={`cal-roster-row${ov?.amount === 0 ? ' cal-roster-row-exempt' : ''}`} key={st.id}>
                               <span className="cal-roster-name">{st.name}</span>
                               {/* The amount is the control: click it to price
                                   this student at anything. The links beside it
@@ -3163,22 +3175,24 @@ const CalendarView = () => {
                                   answers, nothing and the full price. */}
                               <button
                                 className="cal-roster-amount cal-roster-amount-btn"
-                                title={ov?.reason ? `${ov.reason} — click to change` : 'Click to price this student differently'}
-                                onClick={() => setPriceEdit({ studentId: st.id, value: String(pays), reason: ov?.reason || '' })}
+                                title={ov?.reason ? `${ov.reason} — click to change` : 'Click to price this student'}
+                                onClick={() => setPriceEdit({ studentId: st.id, value: pays == null ? '' : String(pays), reason: ov?.reason || '' })}
                               >
-                                ${pays.toFixed(2)}
-                                {ov && <s>${listed.toFixed(2)}</s>}
+                                {pays == null ? <em>set price</em> : `$${pays.toFixed(2)}`}
+                                {ov && hasListPrice && <s>${listed.toFixed(2)}</s>}
                               </button>
                               {ov ? (
                                 <button
                                   className="cal-roster-btn"
                                   disabled={saving}
-                                  title="Put this student back on the meeting's own price"
+                                  title={hasListPrice
+                                    ? "Put this student back on the meeting's own price"
+                                    : 'Remove this price — the meeting charges nothing'}
                                   onClick={() => handleStudentPrice(st.id, null)}
                                 >
-                                  charge full price
+                                  {hasListPrice ? 'charge full price' : 'remove'}
                                 </button>
-                              ) : (
+                              ) : hasListPrice ? (
                                 <button
                                   className="cal-roster-btn"
                                   disabled={saving}
@@ -3187,7 +3201,7 @@ const CalendarView = () => {
                                 >
                                   don't charge
                                 </button>
-                              )}
+                              ) : <span />}
                             </div>
                           );
                         })}

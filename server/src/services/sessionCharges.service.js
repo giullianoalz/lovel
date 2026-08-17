@@ -46,7 +46,15 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
   // and a class the academy still ran with a substitute is still owed.
   const sessions = await prisma.session.findMany({
     where: {
-      chargeAmount: { not: null },
+      // Either the meeting has a price for the room, or somebody has been given
+      // one individually. The second half matters: pricing a single student on
+      // a meeting that costs everyone else nothing is a real case — a make-up
+      // lesson for one child inside a class the rest already paid for — and
+      // without it that charge would be recorded and then never raised.
+      OR: [
+        { chargeAmount: { not: null } },
+        { chargeOverrides: { some: { amount: { gt: 0 } } } },
+      ],
       status: { not: 'CANCELLED' },
       ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
     },
@@ -109,7 +117,9 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
 
   const lines = [];
   for (const session of sessions) {
-    const listPrice = round2(Number(session.chargeAmount) || 0);
+    // Null means the meeting charges the room nothing; individuals may still
+    // have been priced on it, and those are the only lines it produces.
+    const listPrice = session.chargeAmount == null ? 0 : round2(Number(session.chargeAmount));
     const description = session.chargeNote?.trim() || session.class?.name || 'Session';
     const overrides = new Map((session.chargeOverrides || []).map((o) => [o.studentId, o]));
 
@@ -173,11 +183,16 @@ const summarise = (lines) => {
     billable: billable.length,
     alreadyCharged: lines.filter((l) => l.alreadyCharged).length,
     missingFamily: lines.filter((l) => l.missingFamily).length,
-    // Priced differently for one student, and of those the ones priced at
-    // nothing. Reported so a total that looks low has a visible reason on the
-    // same screen, rather than an admin wondering where the money went.
+    // Priced differently for one student, and how much of that is money given
+    // up. Reported so a total that looks low has a visible reason on the same
+    // screen, rather than an admin wondering where it went.
+    //
+    // Only reductions count. An override can price somebody *above* the room's
+    // rate — a make-up lesson on a meeting that charges the class nothing is
+    // the ordinary case — and letting that subtract would report a discount
+    // that never happened, or in the extreme a negative one.
     overridden: overridden.length,
-    waived: round2(overridden.reduce((sum, l) => sum + (l.listPrice - l.amount), 0)),
+    waived: round2(overridden.reduce((sum, l) => sum + Math.max(0, l.listPrice - l.amount), 0)),
     total: round2(billable.reduce((sum, l) => sum + l.amount, 0)),
   };
 };
