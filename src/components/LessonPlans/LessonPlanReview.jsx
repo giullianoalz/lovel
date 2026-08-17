@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, DollarSign, Info, Archive, ArchiveRestore } from 'lucide-react';
+import { BookOpen, ShoppingCart, CheckCircle, XCircle, Clock, X, Package, DollarSign, Info, Archive, ArchiveRestore, Sparkles, RefreshCw } from 'lucide-react';
 import { startOfWeek } from 'date-fns';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -21,6 +21,8 @@ const LessonPlanReview = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [reviewPlan, setReviewPlan] = useState(null);
   const [feedback, setFeedback] = useState('');
+  const [notesSummary, setNotesSummary] = useState('');
+  const [regenerating, setRegenerating] = useState(false);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [archivingKey, setArchivingKey] = useState(null);
 
@@ -59,14 +61,29 @@ const LessonPlanReview = () => {
   const openReview = (plan) => {
     setReviewPlan(plan);
     setFeedback(plan.managerFeedback || '');
+    setNotesSummary(plan.notesSummary || '');
+  };
+
+  // Only fills the textarea — nothing is saved until the plan is approved, so a
+  // draft the manager dislikes can be discarded by closing the modal.
+  const handleRegenerateSummary = async () => {
+    if (!reviewPlan) return;
+    setRegenerating(true);
+    try {
+      const res = await api.post(`/lesson-plans/${reviewPlan.id}/regenerate-summary`);
+      setNotesSummary(res.data.notesSummary || '');
+    } catch {
+      toast.error('Could not draft a summary. Check that the AI assistant is configured.');
+    }
+    setRegenerating(false);
   };
 
   const handleReview = async (status) => {
     if (!reviewPlan) return;
     setReviewSubmitting(true);
     try {
-      await api.patch(`/lesson-plans/${reviewPlan.id}/review`, { status, managerFeedback: feedback });
-      toast.success(status === 'APPROVED' ? 'Lesson plan approved.' : 'Sent back for revision.');
+      await api.patch(`/lesson-plans/${reviewPlan.id}/review`, { status, managerFeedback: feedback, notesSummary });
+      toast.success(status === 'APPROVED' ? 'Lesson plan approved — summary published to families.' : 'Sent back for revision.');
       setReviewPlan(null);
       await loadPlans();
     } catch {
@@ -456,6 +473,33 @@ const LessonPlanReview = () => {
                   </div>
                 </div>
               )}
+
+              <div className="lpr-field">
+                <label className="lpr-field-label">
+                  <Sparkles size={13} /> Summary for Families
+                  <button
+                    type="button"
+                    className="lpr-regen-btn"
+                    onClick={handleRegenerateSummary}
+                    disabled={regenerating}
+                    title="Draft a new version from the lesson plan"
+                  >
+                    <RefreshCw size={12} className={regenerating ? 'lpr-spin' : ''} />
+                    {regenerating ? 'Writing…' : 'Regenerate'}
+                  </button>
+                </label>
+                <p className="lpr-field-hint">
+                  Drafted automatically from the plan above. Edit the wording here — on approval this
+                  is published to the session notes for parents and students to read.
+                </p>
+                <textarea
+                  rows={4}
+                  placeholder="Summary families will see before the class..."
+                  value={notesSummary}
+                  onChange={e => setNotesSummary(e.target.value)}
+                  className="lpr-feedback-input"
+                />
+              </div>
 
               <div className="lpr-field">
                 <label className="lpr-field-label">Manager Feedback</label>

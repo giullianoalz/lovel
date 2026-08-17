@@ -6,6 +6,7 @@ import {
   listLessonPlans,
   getLessonPlan,
   reviewLessonPlan,
+  regenerateLessonPlanSummary,
   archiveLessonPlan,
   archiveLessonPlansByWeek,
   getSupplyList,
@@ -21,6 +22,7 @@ router.patch('/supply-list/:id/purchased', authenticate, requireRole('ADMIN'), m
 router.patch('/archive-week', authenticate, requireRole('ADMIN'), archiveLessonPlansByWeek);
 router.get('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), getLessonPlan);
 router.patch('/:id/review', authenticate, requireRole('ADMIN'), reviewLessonPlan);
+router.post('/:id/regenerate-summary', authenticate, requireRole('ADMIN'), regenerateLessonPlanSummary);
 router.patch('/:id/archive', authenticate, requireRole('ADMIN'), archiveLessonPlan);
 
 export default router;

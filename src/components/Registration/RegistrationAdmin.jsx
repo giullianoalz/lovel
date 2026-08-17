@@ -160,9 +160,8 @@ const RegistrationAdmin = () => {
   // fixes. Selected classes stay visible regardless of what's typed, so
   // narrowing the search can never silently hide a pick already made.
   const [manualClassSearch, setManualClassSearch] = useState('');
-  // The student picker only knows the students /students returned (first page).
-  // A child who just self-registered may not be among them, so the name is kept
-  // here rather than looked up in that list.
+  // A child who just self-registered may not be in the student list yet, so the
+  // name is kept here rather than looked up there.
   const [manualStudentName, setManualStudentName] = useState('');
   const [manualApplication, setManualApplication] = useState(null);
   const [manualSubmitting, setManualSubmitting] = useState(false);
@@ -242,10 +241,17 @@ const RegistrationAdmin = () => {
     if (!termId) { setManualTermClasses([]); setManualTermElectives([]); return; }
     try {
       const [classRes, electiveRes] = await Promise.all([
-        api.get(`/registration/classes?termId=${termId}`),
+        // includeUntermed: a student can be placed into any class that exists,
+        // including the ones created from the calendar that carry no termId.
+        api.get(`/registration/classes?termId=${termId}&includeUntermed=true`),
         api.get(`/registration/terms/${termId}/electives`).catch(() => ({ data: { electives: [] } })),
       ]);
-      setManualTermClasses(classRes.data.classes || []);
+      // This term's coves first, standalone classes after — the common pick
+      // stays at the top of the list.
+      const classes = (classRes.data.classes || [])
+        .slice()
+        .sort((a, b) => (a.termId ? 0 : 1) - (b.termId ? 0 : 1));
+      setManualTermClasses(classes);
       setManualTermElectives(electiveRes.data.electives || []);
     } catch (e) {
       console.error(e);
@@ -473,7 +479,9 @@ const RegistrationAdmin = () => {
   // them. The roster picker narrows to ACTIVE at render instead.
   const loadAllStudents = async () => {
     try {
-      const res = await api.get('/students');
+      // limit=1000: the endpoint pages at 50, so without this the "unfiltered"
+      // list above is really just the first page.
+      const res = await api.get('/students?limit=1000');
       setAllStudents(res.data.students);
     } catch (error) {
       console.error(error);
@@ -1537,7 +1545,7 @@ const RegistrationAdmin = () => {
                                 className={`badge manual-reg-elective-btn ${manualForm.classIds.includes(c.id) ? 'active' : ''}`}
                                 onClick={() => handleManualClassToggle(c.id)}
                               >
-                                {c.name} ({c.enrolled}/{c.capacity}{isFull ? ' · FULL' : ''})
+                                {c.name} ({c.enrolled}/{c.capacity}{isFull ? ' · FULL' : ''}{c.termId ? '' : ' · no term'})
                               </button>
                             );
                           });
@@ -1571,7 +1579,7 @@ const RegistrationAdmin = () => {
                           .filter(c => c.id !== manualForm.classIds[0])
                           .map(c => (
                             <option key={c.id} value={c.id}>
-                              {c.name} ({c.enrolled}/{c.capacity})
+                              {c.name} ({c.enrolled}/{c.capacity}{c.termId ? '' : ' · no term'})
                             </option>
                           ))}
                       </select>

@@ -1,8 +1,9 @@
 import prisma from '../config/database.js';
 import { isOnly, hasRole } from '../utils/roles.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
-import { computeTeacherPayroll, computePayrollSummary, loadPayCategories } from '../services/payroll.service.js';
+import { computeTeacherPayroll, computePayrollSummary, computeWeeklyPayrollSummary, loadPayCategories } from '../services/payroll.service.js';
 import { buildParentMaskMap, masksParentIdentity } from '../utils/parentPrivacy.js';
+import { resolvePaging } from '../utils/helpers.js';
 
 const EMPTY_MASK_MAP = new Map();
 
@@ -86,7 +87,8 @@ const presentUser = (user, viewer, maskMap = EMPTY_MASK_MAP) => {
  */
 export const listUsers = async (req, res, next) => {
   try {
-    const { role, status, search, page = 1, limit = 50 } = req.query;
+    const { role, status, search } = req.query;
+    const { page, limit, skip, take } = resolvePaging(req.query);
 
     const andClauses = [];
     // Matches secondary roles too, so filtering for TEACHER also turns up an
@@ -174,8 +176,8 @@ export const listUsers = async (req, res, next) => {
     const [users, total] = await Promise.all([
       prisma.user.findMany({
         where,
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit),
+        skip,
+        take,
         orderBy: { fullName: 'asc' },
         include: {
           // The family's other members ride along so a guardian's row can name
@@ -204,10 +206,10 @@ export const listUsers = async (req, res, next) => {
     res.json({
       users: users.map((user) => presentUser(user, req.user, maskMap)),
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
         total,
-        totalPages: Math.ceil(total / parseInt(limit)),
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -628,6 +630,26 @@ export const getPayrollSummary = async (req, res, next) => {
     }
 
     res.json(await computePayrollSummary(targetMonth, targetYear));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/users/payroll/weekly-summary
+ * Every teacher's earnings for one Monday-Sunday week (Admin only).
+ *
+ * Same shape as GET /payroll/summary, so the screen can reuse one table for
+ * both — payroll is actually settled weekly, this is the view that matches
+ * how the money goes out, while the monthly one stays for reviewing rates.
+ */
+export const getWeeklyPayrollSummary = async (req, res, next) => {
+  try {
+    const { weekStart } = req.query;
+    if (weekStart && Number.isNaN(new Date(weekStart).getTime())) {
+      return res.status(400).json({ error: 'Validation Error', message: 'weekStart must be a valid date.' });
+    }
+    res.json(await computeWeeklyPayrollSummary(weekStart));
   } catch (error) {
     next(error);
   }

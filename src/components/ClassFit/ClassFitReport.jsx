@@ -37,8 +37,10 @@ const ClassFitReport = () => {
   const loadData = async () => {
     try {
       const [studRes, classRes] = await Promise.all([
-        api.get('/students'),
-        api.get('/classes'),
+        // Both endpoints page at 50 by default, which would quietly cut the
+        // pickers off partway through the alphabet.
+        api.get('/students?limit=1000'),
+        api.get('/classes?limit=1000'),
       ]);
       setStudents(studRes.data.students || []);
       setClasses(classRes.data.classes || []);

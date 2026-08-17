@@ -11,6 +11,7 @@ import {
   setTeachingRole,
   getTeacherPayroll,
   getPayrollSummary,
+  getWeeklyPayrollSummary,
   updateTeacherPayroll,
 } from '../controllers/users.controller.js';
 
@@ -22,6 +23,10 @@ router.get('/', authenticate, requireRole('ADMIN', 'TEACHER'), listUsers);
 // GET /api/users/payroll/summary — The whole roster's pay for one month (Admin only).
 // Declared before /:id so "payroll" is never read as a user id.
 router.get('/payroll/summary', authenticate, requireRole('ADMIN'), getPayrollSummary);
+
+// GET /api/users/payroll/weekly-summary — The whole roster's pay for one
+// Monday-Sunday week (Admin only). Also declared before /:id.
+router.get('/payroll/weekly-summary', authenticate, requireRole('ADMIN'), getWeeklyPayrollSummary);
 
 // GET /api/users/:id — Get a user by ID (Admin/Teacher or self)
 router.get('/:id', authenticate, requireSelfOrRole('ADMIN', 'TEACHER'), getUser);

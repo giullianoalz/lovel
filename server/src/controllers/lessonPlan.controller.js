@@ -1,6 +1,57 @@
 import prisma from '../config/database.js';
 import { isOnly } from '../utils/roles.js';
 import { sendNotification } from '../jobs/notification.helper.js';
+import { generateLessonPlanSummary, fallbackLessonPlanSummary } from '../services/ai.service.js';
+
+// The Monday (UTC calendar date) of the week `date` falls in. Sessions and
+// lesson plans are both stored as @db.Date — comparing on UTC calendar days
+// (rather than local time) keeps this stable regardless of server timezone.
+function mondayOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getUTCDay(); // 0 (Sun) .. 6 (Sat)
+  const diff = day === 0 ? -6 : 1 - day;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + diff));
+}
+
+// Publishes the manager-approved preview to every session of that week. Teachers
+// pick any date to represent "the week" on a lesson plan, not necessarily a
+// Monday, so plan and sessions are matched by which Mon-Sun week they fall in,
+// not an exact date. Always clears old auto-notes first (covers NEEDS_REVISION
+// and re-approval alike) so a plan that's no longer approved never leaves a
+// stale preview for families.
+//
+// Re-approving overwrites edits made to the note afterwards. That is deliberate:
+// approving is an explicit act by the manager, and the version they just signed
+// off on is the one families should see.
+async function syncLessonPlanSessionSummary(lessonPlan) {
+  if (!lessonPlan.classId) return;
+
+  const start = mondayOfWeek(lessonPlan.weekOf);
+  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  const sessions = await prisma.session.findMany({
+    where: { classId: lessonPlan.classId, date: { gte: start, lt: end } },
+    select: { id: true },
+  });
+  const sessionIds = sessions.map(s => s.id);
+  if (sessionIds.length === 0) return;
+
+  await prisma.sessionNote.deleteMany({
+    where: { sessionId: { in: sessionIds }, source: 'lesson_plan_summary' },
+  });
+
+  if (lessonPlan.status === 'APPROVED') {
+    const summary = lessonPlan.notesSummary?.trim() || fallbackLessonPlanSummary(lessonPlan);
+    await prisma.sessionNote.createMany({
+      data: sessionIds.map(sessionId => ({
+        sessionId,
+        notes: summary,
+        visibility: 'all',
+        source: 'lesson_plan_summary',
+      })),
+    });
+  }
+}
 
 export const createLessonPlan = async (req, res, next) => {
   try {
@@ -69,6 +120,18 @@ export const createLessonPlan = async (req, res, next) => {
     }
 
     res.status(201).json({ lessonPlan });
+
+    // Drafted after responding, not before: the model takes ~30s on the local
+    // Ollama box, and a teacher hitting "Submit" must not sit and wait for it.
+    // The manager is the only one who reads this, minutes or hours later. If it
+    // is somehow still missing when they open the plan, the review screen has a
+    // Regenerate button that drafts one on the spot.
+    void generateLessonPlanSummary(lessonPlan)
+      .then(notesSummary => prisma.lessonPlan.update({
+        where: { id: lessonPlan.id },
+        data: { notesSummary },
+      }))
+      .catch(error => console.error(`[lesson-plan] Background summary failed for ${lessonPlan.id}:`, error.message));
   } catch (error) {
     next(error);
   }
@@ -123,16 +186,51 @@ export const getLessonPlan = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/lesson-plans/:id/regenerate-summary
+ * Draft a fresh family-facing summary for a plan, on demand.
+ *
+ * Deliberately does NOT save: it hands the text back for the manager's textarea,
+ * and only approving commits it. Regenerating a draft the manager then dislikes
+ * must not destroy the wording that was already there.
+ */
+export const regenerateLessonPlanSummary = async (req, res, next) => {
+  try {
+    const lessonPlan = await prisma.lessonPlan.findUnique({
+      where: { id: req.params.id },
+      select: {
+        mainActivity: true,
+        materials: true,
+        skillConnection: true,
+        class: { select: { name: true } },
+      },
+    });
+    if (!lessonPlan) return res.status(404).json({ error: 'Not Found' });
+
+    const notesSummary = await generateLessonPlanSummary(lessonPlan);
+    res.json({ notesSummary });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const reviewLessonPlan = async (req, res, next) => {
   try {
-    const { status, managerFeedback } = req.body;
+    const { status, managerFeedback, notesSummary } = req.body;
     if (!['APPROVED', 'NEEDS_REVISION'].includes(status)) {
       return res.status(400).json({ error: 'status must be APPROVED or NEEDS_REVISION' });
     }
 
     const lessonPlan = await prisma.lessonPlan.update({
       where: { id: req.params.id },
-      data: { status, managerFeedback: managerFeedback || null },
+      data: {
+        status,
+        managerFeedback: managerFeedback || null,
+        // The manager's corrected wording, if they touched it. Undefined leaves
+        // the assistant's draft as-is; an empty string is treated as "cleared"
+        // and falls back at publish time rather than showing families a blank.
+        ...(notesSummary !== undefined ? { notesSummary: notesSummary.trim() || null } : {}),
+      },
       include: {
         teacher: { select: { id: true, fullName: true } },
         class: { select: { id: true, name: true } },
@@ -140,6 +238,8 @@ export const reviewLessonPlan = async (req, res, next) => {
         attachments: true,
       },
     });
+
+    await syncLessonPlanSessionSummary(lessonPlan);
 
     res.json({ lessonPlan });
   } catch (error) {

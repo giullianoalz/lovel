@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ScrollText, LogIn, LogOut, QrCode, Users, Hand } from 'lucide-react';
+import { ScrollText, LogIn, LogOut, QrCode, Users, Hand, ClipboardList } from 'lucide-react';
 import api from '../../lib/api';
 import ErrorBanner from '../Layout/ErrorBanner';
-import './DoorLog.css';
+import './AttendanceLog.css';
 
 /**
  * The door, read back.
@@ -17,19 +17,32 @@ const SOURCE_META = {
   FAMILY_QR: { label: 'Family QR', icon: Users },
   PICKUP_QR: { label: 'Pickup QR', icon: QrCode },
   MANUAL: { label: 'By hand', icon: Hand },
+  SHEET: { label: 'Class sheet', icon: ClipboardList },
+};
+
+/**
+ * A MARK is the teacher's sheet, not a movement, and it has to read that way —
+ * "Marked absent", never "Out". The status is the whole content of the event.
+ */
+const markLabel = (status) => {
+  if (status === 'PRESENT') return 'Marked present';
+  if (status === 'LATE') return 'Marked late';
+  if (status === 'ABSENT') return 'Marked absent';
+  if (status === 'EXCUSED') return 'Marked excused';
+  return 'Marked';
 };
 
 const fmtStamp = (value) =>
   new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-const DoorLog = ({ date }) => {
+const AttendanceLog = ({ date }) => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const { data } = await api.get('/sessions/door-log', { params: date ? { date } : {} });
+      const { data } = await api.get('/sessions/attendance-log', { params: date ? { date } : {} });
       setEvents(data.events);
       setError(null);
     } catch (err) {
@@ -41,40 +54,42 @@ const DoorLog = ({ date }) => {
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <div className="dl-loading">Loading the door log&hellip;</div>;
+  if (loading) return <div className="al-loading">Loading the door log&hellip;</div>;
 
   return (
-    <section className="dl-panel">
+    <section className="al-panel">
       {error && <ErrorBanner message={error} onRetry={load} />}
 
-      <header className="dl-head">
+      <header className="al-head">
         <ScrollText size={15} />
         <h3>Door log</h3>
-        <span className="dl-count">{events.length} event{events.length === 1 ? '' : 's'}</span>
+        <span className="al-count">{events.length} event{events.length === 1 ? '' : 's'}</span>
       </header>
 
       {events.length === 0 ? (
-        <p className="dl-empty">Nothing has been recorded at the door yet.</p>
+        <p className="al-empty">Nothing has been recorded at the door yet.</p>
       ) : (
-        <ul className="dl-list">
+        <ul className="al-list">
           {events.map((e) => {
             const out = e.direction === 'OUT';
+            const marked = e.direction === 'MARK';
             const meta = SOURCE_META[e.source] || SOURCE_META.MANUAL;
             const SourceIcon = meta.icon;
+            const kind = marked ? 'mark' : out ? 'out' : 'in';
 
             return (
-              <li key={e.id} className={`dl-row ${out ? 'is-out' : 'is-in'}`}>
-                <span className="dl-time">{fmtStamp(e.at)}</span>
-                <span className={`dl-dir ${out ? 'out' : 'in'}`}>
-                  {out ? <LogOut size={13} /> : <LogIn size={13} />}
-                  {out ? 'Out' : e.status === 'LATE' ? 'In (late)' : 'In'}
+              <li key={e.id} className={`al-row is-${kind}`}>
+                <span className="al-time">{fmtStamp(e.at)}</span>
+                <span className={`al-dir ${kind}`}>
+                  {marked ? <ClipboardList size={13} /> : out ? <LogOut size={13} /> : <LogIn size={13} />}
+                  {marked ? markLabel(e.status) : out ? 'Out' : e.status === 'LATE' ? 'In (late)' : 'In'}
                 </span>
-                <span className="dl-who">
+                <span className="al-who">
                   <strong>{e.studentName || 'Unknown student'}</strong>
-                  {e.className && <span className="dl-class">{e.className}</span>}
+                  {e.className && <span className="al-class">{e.className}</span>}
                 </span>
-                <span className="dl-source"><SourceIcon size={12} /> {meta.label}</span>
-                <span className="dl-by">
+                <span className="al-source"><SourceIcon size={12} /> {meta.label}</span>
+                <span className="al-by">
                   {/* A missing name and a missing account read differently, and
                       only the parts that exist are joined — a bare separator in
                       front of the staff name looked like a dropped field. */}
@@ -92,4 +107,4 @@ const DoorLog = ({ date }) => {
   );
 };
 
-export default DoorLog;
+export default AttendanceLog;

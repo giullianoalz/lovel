@@ -595,8 +595,9 @@ model Attendance {
 }
 
 /**
- * Append-only log of the door: every arrival and every departure, as it
- * happened, with who recorded it.
+ * Append-only log of who was where: the door's arrivals and departures, and the
+ * teacher's marks on the attendance sheet, each as it happened and with the
+ * person who recorded it.
  *
  * Attendance above is *state* — one row per child per session, overwritten. A
  * child who leaves for a dentist appointment and comes back leaves no trace of
@@ -611,14 +612,20 @@ model AttendanceEvent {
   id        String   @id @default(uuid()) @db.Uuid
   sessionId String   @map("session_id") @db.Uuid
   studentId String   @map("student_id") @db.Uuid
-  // IN or OUT. The direction as recorded, not a state to be reconciled.
+  // IN, OUT, or MARK. The first two are movements somebody witnessed at the
+  // door. MARK is the teacher filling in the sheet, which is a decision rather
+  // than a movement — recorded as an IN it would invent an arrival at whatever
+  // time the sheet happened to be saved, sitting in the record next to the
+  // door's real stamps as though it were one.
   direction String   @db.VarChar(10)
-  // The arrival status written (PRESENT / LATE); null on a departure.
+  // The status written (PRESENT / LATE on an arrival, any of the four on a
+  // MARK); null on a departure.
   status    AttendanceStatus?
   // How it was done: MANUAL (someone tapped a name on the board), FAMILY_QR
   // (the household code was shown), PICKUP_QR (a temporary authorisation was
-  // scanned). This is the difference between "the desk says he arrived" and
-  // "the family presented their code", and it is the whole reason to log.
+  // scanned), SHEET (the teacher's attendance sheet). This is the difference
+  // between "the desk says he arrived" and "the family presented their code",
+  // and it is the whole reason to log.
   source    String   @db.VarChar(20)
   // The staff member at the door. Nullable so the row survives their account
   // being deleted — losing the log because someone left the academy would
@@ -1520,6 +1527,11 @@ model LessonPlan {
   differentiation String?
   status          LessonPlanStatus @default(SUBMITTED)
   managerFeedback String?          @map("manager_feedback")
+  // A family-facing summary of this plan, drafted by the assistant the moment
+  // the teacher submits so they never write the same thing twice. It rides
+  // along to the manager with the rest of the plan, who edits it if the draft
+  // reads badly, and only becomes a session note once they approve.
+  notesSummary    String?          @map("notes_summary")
   archived        Boolean          @default(false)
   archivedAt      DateTime?        @map("archived_at") @db.Timestamptz(6)
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)

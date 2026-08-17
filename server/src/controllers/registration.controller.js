@@ -821,11 +821,21 @@ export const updateTerm = async (req, res, next) => {
  */
 export const getRegistrationClasses = async (req, res, next) => {
   try {
-    const { termId } = req.query;
-    const whereClause = termId ? { termId } : {};
-    
+    const { termId, includeUntermed } = req.query;
+    // A class only gets a termId when it was created from Registration → Rosters.
+    // Everything made elsewhere (the calendar's "Add Event", the Classes screen)
+    // keeps termId null, so a strict { termId } match hides it from this list
+    // forever. The manual-registration picker wants those too — a student can be
+    // placed into any class that exists — while the Rosters tab must not show
+    // them, since a cove list should only ever be this term's coves.
+    const wantsUntermed = includeUntermed === 'true' || includeUntermed === '1';
+    const whereClause = termId
+      ? (wantsUntermed ? { OR: [{ termId }, { termId: null }] } : { termId })
+      : {};
+
     const classes = await prisma.class.findMany({
       where: whereClause,
+      orderBy: { name: 'asc' },
       include: {
         teacher: { select: { id: true, fullName: true } },
         coTeachers: { select: { id: true, fullName: true } },
@@ -842,6 +852,9 @@ export const getRegistrationClasses = async (req, res, next) => {
     const formattedClasses = classes.map(c => ({
       id: c.id,
       name: c.name,
+      // null for a standalone class. The picker labels those so the admin can
+      // tell a term cove from a one-off tutoring slot at a glance.
+      termId: c.termId,
       capacity: c.maxStudents,
       enrolled: c._count.enrollments,
       holds: c._count.priorityHolds,

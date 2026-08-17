@@ -1,6 +1,7 @@
 import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
 import { hasRole, isOnly, isFrontDeskOnly } from '../utils/roles.js';
+import { resolvePaging } from '../utils/helpers.js';
 
 /**
  * Prisma filter limiting a teacher to the students they actually teach.
@@ -201,7 +202,8 @@ export const exportStudentsCsv = async (req, res, next) => {
  */
 export const listStudents = async (req, res, next) => {
   try {
-    const { status, search, familyId, page = 1, limit = 50 } = req.query;
+    const { status, search, familyId } = req.query;
+    const { page, limit, skip, take } = resolvePaging(req.query);
     // See parentContactLevel. The directory is the only place the desk gets a
     // guardian's number; the profile below stays admin/teacher, so reception
     // reads a name and a phone and not a family's medical or billing history.
@@ -232,8 +234,8 @@ export const listStudents = async (req, res, next) => {
     const [students, total] = await Promise.all([
       prisma.user.findMany({
         where,
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit),
+        skip,
+        take,
         orderBy: { fullName: 'asc' },
         include: {
           familyMembers: hideParentContact
@@ -265,10 +267,10 @@ export const listStudents = async (req, res, next) => {
         : students.map(s => withParentContact(s, { includeEmail: contactLevel === 'full' }))
       ).map(s => stripStaffNotes(s, req.user)),
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
         total,
-        totalPages: Math.ceil(total / parseInt(limit)),
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {

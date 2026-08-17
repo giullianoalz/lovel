@@ -46,7 +46,12 @@ services:
         sync: false
       - key: FIREBASE_PRIVATE_KEY
         sync: false
+      # "gemini" in production. Ollama is local-only — there is no Ollama at
+      # localhost:11434 inside a Render container, so that setting makes every
+      # lesson-plan summary fall through to the plain-text fallback.
       - key: AI_PROVIDER
+        sync: false
+      - key: GEMINI_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false

@@ -57,3 +57,34 @@ export const generateDedupKey = (type, userId, referenceId, date) => {
  * @param {number} ms - Milliseconds to sleep
  */
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Most rows a single list response will ever return. */
+export const MAX_PAGE_SIZE = 1000;
+
+/**
+ * Resolve ?page/?limit for a roster-shaped list endpoint (students, classes,
+ * families, staff).
+ *
+ * These collections are bounded — hundreds of rows, not millions — and every
+ * screen in the app wants the whole thing. A small default meant each new
+ * caller silently rendered only the first page until someone noticed the
+ * missing records, so the default here is "everything", and paging is
+ * opt-in via an explicit limit. A caller can still tell a truncated list
+ * from a complete one by the `total` these endpoints return alongside rows.
+ *
+ * @param {{ page?: any, limit?: any }} query - Raw req.query values
+ * @returns {{ page: number, limit: number, skip: number, take: number }}
+ */
+export const resolvePaging = ({ page, limit } = {}) => {
+  const resolvedPage = Math.max(1, parseInt(page, 10) || 1);
+  const resolvedLimit = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, parseInt(limit, 10) || MAX_PAGE_SIZE)
+  );
+  return {
+    page: resolvedPage,
+    limit: resolvedLimit,
+    skip: (resolvedPage - 1) * resolvedLimit,
+    take: resolvedLimit,
+  };
+};

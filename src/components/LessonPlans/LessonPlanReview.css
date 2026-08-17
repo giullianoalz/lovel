@@ -520,13 +520,50 @@
 }
 
 .lpr-field-label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
   margin-bottom: 6px;
   color: var(--text-main);
+}
+
+.lpr-field-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.lpr-regen-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
+  background: #f5f3ff;
+  color: #6d28d9;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.lpr-regen-btn:hover:not(:disabled) { background: #ede9fe; }
+.lpr-regen-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.lpr-spin { animation: lpr-spin 1s linear infinite; }
+
+@keyframes lpr-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
 .lpr-supply-tags {

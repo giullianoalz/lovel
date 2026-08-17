@@ -1,6 +1,7 @@
 import prisma from '../config/database.js';
 import { hasRole, isOnly } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
+import { resolvePaging } from '../utils/helpers.js';
 
 const MAX_STUDENTS_CAP = 100;
 
@@ -92,7 +93,8 @@ const validateClassInput = async ({ maxStudents, teacherId, coTeacherIds, priceO
  */
 export const listClasses = async (req, res, next) => {
   try {
-    const { teacherId, status, search, page = 1, limit = 50, includeRoster } = req.query;
+    const { teacherId, status, search, includeRoster } = req.query;
+    const { page, limit, skip, take } = resolvePaging(req.query);
 
     const where = {};
     // A teacher sees only their own classes — override whatever teacherId they
@@ -123,8 +125,8 @@ export const listClasses = async (req, res, next) => {
     const [classes, total] = await Promise.all([
       prisma.class.findMany({
         where,
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit),
+        skip,
+        take,
         orderBy: { name: 'asc' },
         include: {
           teacher: {
@@ -152,10 +154,10 @@ export const listClasses = async (req, res, next) => {
     res.json({
       classes,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
         total,
-        totalPages: Math.ceil(total / parseInt(limit)),
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {

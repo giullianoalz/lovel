@@ -1319,6 +1319,32 @@
   color: #5b21b6; font-size: 14px;
 }
 
+.session-family-preview-panel {
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 16px;
+}
+.session-family-preview-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  color: #1e40af; font-size: 14px;
+}
+.session-family-preview-text {
+  margin: 0; font-size: 13px; color: #1e3a8a; line-height: 1.6; white-space: pre-line;
+}
+.preview-edit-btn, .preview-edit-actions button {
+  margin-left: auto; padding: 4px 12px; border-radius: 8px; cursor: pointer;
+  font-size: 12px; font-weight: 600; border: 1px solid #bfdbfe;
+  background: #fff; color: #1e40af;
+}
+.preview-edit-actions { margin-left: auto; display: flex; gap: 8px; }
+.preview-edit-actions button { margin-left: 0; }
+.preview-edit-actions button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+.preview-edit-btn:disabled, .preview-edit-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.preview-edit-textarea {
+  width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 13px;
+  line-height: 1.6; color: #1e3a8a; border: 1px solid #bfdbfe; border-radius: 8px;
+  background: #fff; resize: vertical; font-family: inherit;
+}
+
 @media (max-width: 600px) {
   .class-acc-row { flex-direction: column; align-items: flex-start; gap: 8px; }
   .class-acc-meta { gap: 12px; }

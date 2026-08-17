@@ -283,12 +283,21 @@
 .sp-sessions-list   { border-top: 1px solid #f1f5f9; padding-top: 14px; }
 .sp-sessions-title  { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin: 0 0 10px; letter-spacing: 0.4px; }
 
-.sp-session-row {
-  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-main);
+.sp-session-row-wrap {
   padding: 6px 0; border-bottom: 1px solid #f8fafc;
 }
-.sp-session-row:last-child { border-bottom: none; }
+.sp-session-row-wrap:last-child { border-bottom: none; }
+.sp-session-row {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-main);
+}
 .sp-sess-time { color: var(--text-muted); margin-left: auto; }
+
+.sp-lesson-preview {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin: 6px 0 0; padding: 8px 10px; background: #f0fdf4; border-radius: 8px;
+  font-size: 12px; color: #166534; line-height: 1.5; white-space: pre-line;
+}
+.sp-lesson-preview svg { flex-shrink: 0; margin-top: 2px; }
 
 /* ── Rewards ── */
 .sp-rewards-header {

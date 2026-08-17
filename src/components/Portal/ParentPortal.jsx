@@ -839,16 +839,23 @@ const ParentPortal = () => {
                     {!child.enrollments?.length ? <p className="pp-empty">No active classes.</p> : (
                       <div className="pp-child-classes">
                         {child.enrollments.map((e, i) => (
-                          <div key={i} className="pp-class-item">
-                            <div>
-                              <h4>{e.className}</h4>
-                              <span>with {e.teacherName}</span>
-                            </div>
-                            {e.upcomingSessions?.[0] && (
-                              <div className="pp-next-badge">
-                                <Clock size={11} />
-                                {fmtShort(e.upcomingSessions[0].date)}
+                          <div key={i} className="pp-class-item-wrap">
+                            <div className="pp-class-item">
+                              <div>
+                                <h4>{e.className}</h4>
+                                <span>with {e.teacherName}</span>
                               </div>
+                              {e.upcomingSessions?.[0] && (
+                                <div className="pp-next-badge">
+                                  <Clock size={11} />
+                                  {fmtShort(e.upcomingSessions[0].date)}
+                                </div>
+                              )}
+                            </div>
+                            {e.upcomingSessions?.[0]?.lessonPreview && (
+                              <p className="pp-lesson-preview">
+                                <BookOpen size={12} /> {e.upcomingSessions[0].lessonPreview}
+                              </p>
                             )}
                           </div>
                         ))}

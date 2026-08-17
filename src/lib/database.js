@@ -265,6 +265,15 @@ export const database = {
     return response.data;
   },
 
+  // The same roster for one Monday-Sunday week — the cadence pay actually
+  // goes out on. `weekStart` is any date inside the wanted week (ISO string);
+  // the server snaps it to that week's Monday.
+  fetchWeeklyPayrollSummary: async (weekStart) => {
+    const qs = weekStart ? `?weekStart=${weekStart}` : '';
+    const response = await api.get(`/users/payroll/weekly-summary${qs}`);
+    return response.data;
+  },
+
   updateTeacherPayroll: async (teacherId, { baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates }) => {
     const response = await api.put(`/users/${teacherId}/payroll`, {
       baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates,

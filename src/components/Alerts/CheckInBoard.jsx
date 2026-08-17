@@ -4,7 +4,7 @@ import api from '../../lib/api';
 import ErrorBanner from '../Layout/ErrorBanner';
 import PickupScanner from './PickupScanner';
 import FamilyScanner from './FamilyScanner';
-import DoorLog from './DoorLog';
+import AttendanceLog from './AttendanceLog';
 import './CheckInBoard.css';
 
 /**
@@ -128,11 +128,11 @@ const CheckInBoard = ({ canSeeParentPhone = false }) => {
         {/* Mounted only while open: it fetches on mount, and the log is read
             when a question comes up, not watched all afternoon. */}
         <button className="checkin-btn ghost" onClick={() => setShowLog((v) => !v)}>
-          <ScrollText size={15} /> {showLog ? 'Hide log' : 'Door log'}
+          <ScrollText size={15} /> {showLog ? 'Hide log' : 'Attendance log'}
         </button>
       </div>
 
-      {showLog && <DoorLog />}
+      {showLog && <AttendanceLog />}
 
       {scanningFamily && (
         <FamilyScanner

@@ -133,7 +133,11 @@ export const getTeacherPortal = async (req, res, next) => {
           }
         },
         attendance: true,
-        materials: true
+        materials: true,
+        // The family-facing preview published when an admin approved this
+        // week's lesson plan, so the teacher can correct it from the same
+        // screen when the class doesn't go the way the plan said.
+        notes: { where: { source: 'lesson_plan_summary' }, take: 1 }
       },
       orderBy: { startTime: 'asc' }
     });
@@ -172,8 +176,12 @@ export const getTeacherPortal = async (req, res, next) => {
       className: session.class.name,
       startTime: session.startTime,
       endTime: session.endTime,
+      lessonPreview: session.notes?.[0]
+        ? { id: session.notes[0].id, notes: session.notes[0].notes }
+        : null,
       roster: session.class.enrollments.map(e => {
         const student = e.student;
+        const mark = session.attendance.find(a => a.studentId === student.id);
         return {
           id: student.id,
           name: student.fullName,
@@ -183,7 +191,18 @@ export const getTeacherPortal = async (req, res, next) => {
           noPhoto: false, // Schema doesn't currently store this, defaulting to false
           upcomingBirthday: false, // Requires DOB to be tracked in schema, using placeholder
           seashells: student.seashells,
-          attendance: session.attendance.find(a => a.studentId === student.id)?.status || 'PENDING'
+          attendance: mark?.status || 'PENDING',
+          // What the front desk saw at the door. The teacher marking the sheet
+          // is often not the person who watched the child walk in, and marking
+          // an absence is what opens a suggested charge against the family —
+          // so the arrival the desk recorded belongs on the sheet, in front of
+          // whoever is about to decide the child never came.
+          //
+          // Only sent once the desk has actually recorded something: a null
+          // here means nobody was on the door, not that the child is missing.
+          checkedAt: mark?.checkedAt || null,
+          checkedOutAt: mark?.checkedOutAt || null,
+          checkedOutTo: mark?.checkedOutTo || null,
         };
       })
     }));
@@ -237,6 +256,9 @@ export const getStudentPortal = async (req, res, next) => {
               where: { date: { gte: new Date() } },
               orderBy: { date: 'asc' },
               take: 5,
+              include: {
+                notes: { where: { source: 'lesson_plan_summary' }, take: 1 },
+              },
             },
           },
         },
@@ -311,7 +333,13 @@ export const getStudentPortal = async (req, res, next) => {
         classId: e.class.id,
         className: e.class.name,
         teacherName: e.class.teacher?.fullName || 'TBD',
-        upcomingSessions: e.class.sessions,
+        upcomingSessions: e.class.sessions.map(s => ({
+          id: s.id,
+          date: s.date,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          lessonPreview: s.notes?.[0]?.notes || null,
+        })),
       })),
       prizeHistory,
       behaviorSummary: { warnings: warningCount, positives: positiveCount },
@@ -582,6 +610,12 @@ export const getParentPortal = async (req, res, next) => {
                 where: { date: { gte: new Date() } },
                 orderBy: { date: 'asc' },
                 take: 3,
+                include: {
+                  // The auto-generated preview of that week's approved lesson
+                  // plan — visibility is always 'all' for these, so no filter
+                  // needed to keep this family-safe.
+                  notes: { where: { source: 'lesson_plan_summary' }, take: 1 },
+                },
               },
             },
           },
@@ -706,7 +740,13 @@ export const getParentPortal = async (req, res, next) => {
           classId: e.class.id,
           className: e.class.name,
           teacherName: e.class.teacher?.fullName || 'TBD',
-          upcomingSessions: e.class.sessions,
+          upcomingSessions: e.class.sessions.map(s => ({
+            id: s.id,
+            date: s.date,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            lessonPreview: s.notes?.[0]?.notes || null,
+          })),
         })),
         behaviorSummary: behaviorByStudent[user.id] || { warnings: 0, positives: 0 },
         behaviorHistory: behaviorHistoryByStudent[user.id] || [],

@@ -88,6 +88,11 @@ const TeacherPortal = () => {
   const [noteVisibility, setNoteVisibility] = useState(['students_parents', 'me']);
   const [completeLoading, setCompleteLoading] = useState(false);
 
+  /* ── Family preview (the approved lesson-plan summary on this session) ── */
+  const [editingPreview, setEditingPreview] = useState(false);
+  const [previewDraft, setPreviewDraft] = useState('');
+  const [savingPreview, setSavingPreview] = useState(false);
+
   /* ── History ── */
   const [sessionHistory, setSessionHistory] = useState([]);
   const [historyFilter, setHistoryFilter] = useState('30days');
@@ -173,7 +178,7 @@ const TeacherPortal = () => {
 
   useEffect(() => {
     if (!user?.id) return;
-    api.get('/classes', { params: { teacherId: viewTeacherId || user.id } })
+    api.get('/classes', { params: { teacherId: viewTeacherId || user.id, limit: 1000 } })
       .then(r => setMyClasses(r.data.classes || []))
       .catch(() => {});
   }, [user?.id, viewTeacherId]);
@@ -368,6 +373,26 @@ const TeacherPortal = () => {
           : cls
       )
     );
+  };
+
+  /* ── Family preview ── */
+  // Edits the already-published note in place rather than adding a second one:
+  // families are looking at this text right now, and a plan describes what a
+  // class *will* do — when it doesn't, the published version has to be corrected.
+  const handleSavePreview = async (cls) => {
+    if (!cls?.lessonPreview) return;
+    setSavingPreview(true);
+    try {
+      await api.patch(`/sessions/${cls.sessionId}/notes/${cls.lessonPreview.id}`, { notes: previewDraft });
+      setSchedule((prev) => prev.map((c) => c.sessionId === cls.sessionId
+        ? { ...c, lessonPreview: { ...c.lessonPreview, notes: previewDraft } }
+        : c));
+      setEditingPreview(false);
+      showToast('✓ Updated for families');
+    } catch {
+      showToast('Could not update the summary.');
+    }
+    setSavingPreview(false);
   };
 
   /* ── Prize ── */
@@ -777,7 +802,7 @@ const TeacherPortal = () => {
                   <div key={cls.classId} className="class-acc-item">
                     <button
                       className={`class-acc-row ${isOpen ? 'open' : ''} ${live ? 'live' : ''}`}
-                      onClick={() => { setSelectedClassIdx(selectedClassIdx === idx ? null : idx); setSelectedForPrize({}); }}
+                      onClick={() => { setSelectedClassIdx(selectedClassIdx === idx ? null : idx); setSelectedForPrize({}); setEditingPreview(false); }}
                     >
                       <div className="class-acc-main">
                         {live && <span className="live-dot" />}
@@ -832,6 +857,40 @@ const TeacherPortal = () => {
                         ))}
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {cls.lessonPreview && (
+                <div className="session-family-preview-panel">
+                  <div className="session-family-preview-header">
+                    <Eye size={16} />
+                    <strong>What Families See</strong>
+                    {editingPreview ? (
+                      <div className="preview-edit-actions">
+                        <button onClick={() => setEditingPreview(false)} disabled={savingPreview}>Cancel</button>
+                        <button className="primary" onClick={() => handleSavePreview(cls)} disabled={savingPreview}>
+                          {savingPreview ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="preview-edit-btn"
+                        onClick={() => { setPreviewDraft(cls.lessonPreview.notes || ''); setEditingPreview(true); }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  {editingPreview ? (
+                    <textarea
+                      className="preview-edit-textarea"
+                      rows={4}
+                      value={previewDraft}
+                      onChange={(e) => setPreviewDraft(e.target.value)}
+                    />
+                  ) : (
+                    <p className="session-family-preview-text">{cls.lessonPreview.notes}</p>
                   )}
                 </div>
               )}

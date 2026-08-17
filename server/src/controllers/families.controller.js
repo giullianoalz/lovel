@@ -1,5 +1,6 @@
 import prisma from '../config/database.js';
 import { placeholderUid } from '../services/invite.service.js';
+import { resolvePaging } from '../utils/helpers.js';
 
 /**
  * GET /api/families
@@ -7,7 +8,8 @@ import { placeholderUid } from '../services/invite.service.js';
  */
 export const listFamilies = async (req, res, next) => {
   try {
-    const { search, page = 1, limit = 50 } = req.query;
+    const { search } = req.query;
+    const { page, limit, skip, take } = resolvePaging(req.query);
 
     const where = {};
     if (search) {
@@ -17,8 +19,8 @@ export const listFamilies = async (req, res, next) => {
     const [families, total] = await Promise.all([
       prisma.family.findMany({
         where,
-        skip: (parseInt(page) - 1) * parseInt(limit),
-        take: parseInt(limit),
+        skip,
+        take,
         orderBy: { name: 'asc' },
         include: {
           members: {
@@ -49,10 +51,10 @@ export const listFamilies = async (req, res, next) => {
     res.json({
       families,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
         total,
-        totalPages: Math.ceil(total / parseInt(limit)),
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {

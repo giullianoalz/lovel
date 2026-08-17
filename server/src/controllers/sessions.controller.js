@@ -661,6 +661,31 @@ export const updateSession = async (req, res, next) => {
  * PUT /api/sessions/:id/attendance
  * Batch update attendance for a session
  */
+/**
+ * How an attendance event was recorded. See AttendanceEvent.source.
+ *
+ * SHEET is not on this list on purpose: it is written only by the attendance
+ * sheet below, never accepted from a request body, so the door can never claim
+ * to be the classroom.
+ */
+const DESK_SOURCES = ['MANUAL', 'FAMILY_QR', 'PICKUP_QR'];
+
+/**
+ * Append to the attendance log — the door's arrivals and departures, and the
+ * teacher's marks on the sheet.
+ *
+ * Deliberately never blocks the caller: a failed log is worth a line in the
+ * server output, not a parent left standing at the counter while the desk
+ * retries, nor a teacher's sheet refusing to save. Fired without awaiting for
+ * the same reason.
+ */
+const logAttendanceEvents = (rows) => {
+  if (rows.length === 0) return;
+  prisma.attendanceEvent
+    .createMany({ data: rows })
+    .catch((err) => console.error('[Attendance log] could not record event:', err.message));
+};
+
 export const updateAttendance = async (req, res, next) => {
   try {
     const { attendanceRecords } = req.body; // Array of { studentId, status }
@@ -671,6 +696,17 @@ export const updateAttendance = async (req, res, next) => {
 
     const denied = await denyForeignSession(req.user, req.params.id);
     if (denied) return res.status(404).json(denied);
+
+    // What the sheet is about to overwrite. Read before the write for two
+    // reasons: only actual changes are worth logging (this sheet is saved
+    // several times a class), and an arrival already recorded at the door must
+    // survive the save — see the update below.
+    const before = new Map(
+      (await prisma.attendance.findMany({
+        where: { sessionId: req.params.id, studentId: { in: attendanceRecords.map((r) => r.studentId) } },
+        select: { studentId: true, status: true, checkedAt: true },
+      })).map((a) => [a.studentId, a])
+    );
 
     // Execute all updates in a transaction
     await prisma.$transaction(
@@ -683,8 +719,15 @@ export const updateAttendance = async (req, res, next) => {
             },
           },
           update: {
+            // checkedAt is deliberately left alone. It used to be stamped with
+            // the save time, which rewrote history: the desk logged a child in
+            // at 1:02, the teacher saved the sheet at 1:40, and the arrival
+            // became 1:40. The column means "when this child arrived", and the
+            // sheet is not evidence of that — it is filled in from memory,
+            // often after the fact. On a create it falls to the schema default,
+            // which is the closest thing to an arrival time anyone has when
+            // nobody was on the door.
             status: record.status.toUpperCase(),
-            checkedAt: new Date(),
           },
           create: {
             sessionId: req.params.id,
@@ -693,6 +736,23 @@ export const updateAttendance = async (req, res, next) => {
           },
         })
       )
+    );
+
+    // The sheet's marks, as marks — never as IN/OUT. The teacher recording
+    // PRESENT at 1:40 did not witness an arrival at 1:40, and writing one would
+    // put a fiction in the record next to the door's real stamps. Only changed
+    // statuses are logged, so re-saving an unchanged sheet adds nothing.
+    logAttendanceEvents(
+      attendanceRecords
+        .filter((r) => before.get(r.studentId)?.status !== r.status.toUpperCase())
+        .map((r) => ({
+          sessionId: req.params.id,
+          studentId: r.studentId,
+          direction: 'MARK',
+          status: r.status.toUpperCase(),
+          source: 'SHEET',
+          byUserId: req.user.id,
+        }))
     );
 
     // Open (or clear) no-show charge reviews based on this sheet. Wrapped so a
@@ -804,17 +864,18 @@ export const checkInBoard = async (req, res, next) => {
 };
 
 /**
- * GET /api/sessions/door-log
+ * GET /api/sessions/attendance-log
  *
- * The door, read back: every arrival and departure, newest first, each naming
- * the staff member who recorded it and how.
+ * The record read back: every arrival and departure at the door, and every
+ * mark made on a teacher's attendance sheet, newest first, each naming who
+ * recorded it and how.
  *
  * Defaults to today because that is the shift being worked. `date` reads one
  * past day and `studentId` narrows to one child, which between them cover the
- * two questions actually asked of this log — "what happened at the door on
- * Tuesday" and "when has this child been signed out, and by whom".
+ * questions actually asked of this log — "what happened at the door on
+ * Tuesday", and "when has this child been signed out or marked, and by whom".
  */
-export const doorLog = async (req, res, next) => {
+export const attendanceLog = async (req, res, next) => {
   try {
     const { date, studentId } = req.query;
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
@@ -1075,7 +1136,7 @@ export const scanPickup = async (req, res, next) => {
       });
       // The releases this scan performed, each naming the adult it was performed
       // for. This is the row that answers "who took this child home".
-      logDoorEvents(toRelease.map((a) => ({
+      logAttendanceEvents(toRelease.map((a) => ({
         sessionId: a.sessionId,
         studentId: a.studentId,
         direction: 'OUT',
@@ -1123,23 +1184,6 @@ export const scanPickup = async (req, res, next) => {
  */
 const CHECK_IN_STATUSES = ['PRESENT', 'LATE'];
 
-/** How a door event was recorded. See AttendanceEvent.source. */
-const DOOR_SOURCES = ['MANUAL', 'FAMILY_QR', 'PICKUP_QR'];
-
-/**
- * Append to the door log.
- *
- * Deliberately never blocks the door: a failed log is worth a line in the
- * server output, not a parent left standing at the counter while the desk
- * retries. Fired without awaiting for the same reason.
- */
-const logDoorEvents = (rows) => {
-  if (rows.length === 0) return;
-  prisma.attendanceEvent
-    .createMany({ data: rows })
-    .catch((err) => console.error('[Door log] could not record event:', err.message));
-};
-
 export const checkInStudent = async (req, res, next) => {
   try {
     const { studentId, action = 'IN', status = 'PRESENT', source = 'MANUAL' } = req.body;
@@ -1147,7 +1191,7 @@ export const checkInStudent = async (req, res, next) => {
     const arriving = direction === 'IN';
     // Whitelisted rather than trusted: this ends up in the record as the answer
     // to "did the family show their code, or did we just tap the name?".
-    const doorSource = DOOR_SOURCES.includes(String(source).toUpperCase())
+    const doorSource = DESK_SOURCES.includes(String(source).toUpperCase())
       ? String(source).toUpperCase()
       : 'MANUAL';
 
@@ -1206,7 +1250,7 @@ export const checkInStudent = async (req, res, next) => {
         where: key,
         data: { checkedOutAt: new Date(), checkedOutTo: null },
       });
-      logDoorEvents([{
+      logAttendanceEvents([{
         sessionId: session.id,
         studentId,
         direction: 'OUT',
@@ -1225,7 +1269,7 @@ export const checkInStudent = async (req, res, next) => {
       create: { sessionId: session.id, studentId, status: arrivalStatus },
     });
 
-    logDoorEvents([{
+    logAttendanceEvents([{
       sessionId: session.id,
       studentId,
       direction: 'IN',

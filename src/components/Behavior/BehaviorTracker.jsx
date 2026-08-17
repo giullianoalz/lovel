@@ -59,7 +59,8 @@ const BehaviorTracker = () => {
 
   const loadStudents = async () => {
     try {
-      const response = await api.get('/students');
+      // limit=1000: the endpoint pages at 50 otherwise.
+      const response = await api.get('/students?limit=1000');
       setStudents(response.data.students || []);
     } catch (error) {
       console.error('Error loading students:', error);

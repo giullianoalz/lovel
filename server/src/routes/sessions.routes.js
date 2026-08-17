@@ -20,7 +20,7 @@ import {
   checkInStudent,
   scanPickup,
   scanFamilyCode,
-  doorLog,
+  attendanceLog,
   addSessionNote,
   updateSessionNote,
   supervisionSessions,
@@ -64,9 +64,10 @@ router.post('/pickup/scan', authenticate, requireRole(...DESK_ROLES), scanPickup
 // it covers and where they stand today. Read-only; the check-in route writes.
 router.post('/front-desk/scan', authenticate, requireRole(...DESK_ROLES), scanFamilyCode);
 
-// GET /api/sessions/door-log — Arrivals and departures as they happened, with
-// who recorded each one. Whoever may work the door may read what it recorded.
-router.get('/door-log', authenticate, requireRole(...DESK_ROLES), doorLog);
+// GET /api/sessions/attendance-log — Door arrivals/departures and sheet marks,
+// as they happened, with who recorded each one. Whoever may work the door or
+// the sheet may read what either one wrote.
+router.get('/attendance-log', authenticate, requireRole(...DESK_ROLES, 'ADMIN'), attendanceLog);
 
 // GET /api/sessions — List sessions for calendar (All auth users)
 router.get('/', authenticate, listSessions);

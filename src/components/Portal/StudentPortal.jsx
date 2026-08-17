@@ -165,6 +165,11 @@ const StudentPortal = () => {
                         {formatDateOnly(next.date)}
                         {next.startTime && ` · ${formatTimeOfDay(next.startTime)}`}
                       </div>
+                      {next.lessonPreview && (
+                        <p className="sp-lesson-preview">
+                          <BookOpen size={12} /> {next.lessonPreview}
+                        </p>
+                      )}
                     </div>
                   ) : <p className="sp-empty">No upcoming sessions</p>;
                 })() : <p className="sp-empty">No active classes</p>}
@@ -233,10 +238,17 @@ const StudentPortal = () => {
                       <div className="sp-sessions-list">
                         <p className="sp-sessions-title">Upcoming sessions</p>
                         {e.upcomingSessions.slice(0, 5).map((s, j) => (
-                          <div key={j} className="sp-session-row">
-                            <Clock size={13} />
-                            <span>{formatDateOnly(s.date)}</span>
-                            {s.startTime && <span className="sp-sess-time">{formatTimeOfDay(s.startTime)}</span>}
+                          <div key={j} className="sp-session-row-wrap">
+                            <div className="sp-session-row">
+                              <Clock size={13} />
+                              <span>{formatDateOnly(s.date)}</span>
+                              {s.startTime && <span className="sp-sess-time">{formatTimeOfDay(s.startTime)}</span>}
+                            </div>
+                            {s.lessonPreview && (
+                              <p className="sp-lesson-preview">
+                                <BookOpen size={12} /> {s.lessonPreview}
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>
