@@ -126,13 +126,14 @@ async function broadcastMessage({ io, threadId, message, senderId }) {
  * server's, which on Render is UTC — a 9 PM–7 AM window was silently being
  * applied from 5 PM to 3 AM local.
  */
-function isWithinQuietHours(start, end, now = new Date()) {
+function isWithinQuietHours(start, end, now = new Date(), fullDays = []) {
+  const { date, time: local } = academyNowParts(now);
+  if (fullDays?.includes(date.getUTCDay())) return true;
   if (!start || !end) return false;
   const toMinutes = (hhmm) => {
     const [h, m] = hhmm.split(':').map(Number);
     return h * 60 + m;
   };
-  const local = academyNowParts(now).time;
   const cur = local.getUTCHours() * 60 + local.getUTCMinutes();
   const s = toMinutes(start);
   const e = toMinutes(end);
@@ -705,7 +706,7 @@ export const sendMessage = async (req, res, next) => {
           });
           const quietTeacher = otherParticipants.find(p =>
             hasRole(p.user, 'TEACHER') &&
-            isWithinQuietHours(p.user.quietHoursStart, p.user.quietHoursEnd)
+            isWithinQuietHours(p.user.quietHoursStart, p.user.quietHoursEnd, new Date(), p.user.quietHoursFullDays)
           );
           if (!quietTeacher) return;
 

@@ -144,6 +144,14 @@
 .quiet-time-field input {
   padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px;
 }
+.quiet-fulldays-field { margin-bottom: 10px; }
+.quiet-fulldays-field label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 5px; }
+.quiet-fulldays-row { display: flex; gap: 4px; }
+.quiet-day-chip {
+  flex: 1; padding: 6px 0; border: 1px solid #d1d5db; border-radius: 8px;
+  background: white; font-size: 11px; font-weight: 600; color: #64748b; cursor: pointer;
+}
+.quiet-day-chip.active { background: #7c3aed; border-color: #7c3aed; color: white; }
 .quiet-msg-field { margin-bottom: 10px; }
 .quiet-msg-field label { font-size: 11px; font-weight: 600; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 3px; }
 .quiet-msg-field textarea {

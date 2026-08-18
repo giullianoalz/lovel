@@ -162,6 +162,35 @@ export const listLessonPlans = async (req, res, next) => {
       orderBy: { weekOf: 'desc' },
     });
 
+    const classIds = [...new Set(lessonPlans.map((p) => p.classId).filter(Boolean))];
+    if (classIds.length > 0) {
+      const minWeek = new Date(Math.min(...lessonPlans.map((p) => p.weekOf)));
+      const maxWeek = new Date(Math.max(...lessonPlans.map((p) => p.weekOf)));
+      const start = mondayOfWeek(minWeek);
+      const end = new Date(mondayOfWeek(maxWeek).getTime() + 7 * 24 * 60 * 60 * 1000);
+      
+      const allSessions = await prisma.session.findMany({
+        where: {
+          classId: { in: classIds },
+          date: { gte: start, lt: end },
+          status: { not: 'CANCELLED' }
+        },
+        select: { classId: true, date: true }
+      });
+
+      for (const plan of lessonPlans) {
+        if (!plan.classId) {
+          plan.sessionDates = [];
+          continue;
+        }
+        const pStart = mondayOfWeek(plan.weekOf);
+        const pEnd = new Date(pStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+        plan.sessionDates = allSessions
+          .filter((s) => s.classId === plan.classId && s.date >= pStart && s.date < pEnd)
+          .map((s) => s.date.toISOString());
+      }
+    }
+
     res.json({ lessonPlans });
   } catch (error) {
     next(error);

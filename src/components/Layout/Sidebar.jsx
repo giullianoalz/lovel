@@ -99,21 +99,27 @@ const Sidebar = () => {
   const [quietStart, setQuietStart] = useState('17:00');
   const [quietEnd, setQuietEnd] = useState('09:00');
   const [quietMsg, setQuietMsg] = useState('I have quiet hours enabled and will respond within 1 business day.');
+  const [quietFullDays, setQuietFullDays] = useState([]);
   const [quietSaving, setQuietSaving] = useState(false);
 
   useEffect(() => {
     if (hasRole('TEACHER') && user?.id) {
       api.get(`/users/${user.id}`).then(r => {
         const u = r.data.user || r.data;
-        if (u.quietHoursStart) {
+        if (u.quietHoursStart || u.quietHoursFullDays?.length) {
           setQuietActive(true);
-          setQuietStart(u.quietHoursStart);
+          setQuietStart(u.quietHoursStart || '17:00');
           setQuietEnd(u.quietHoursEnd || '09:00');
           setQuietMsg(u.autoResponderMessage || 'I have quiet hours enabled and will respond within 1 business day.');
+          setQuietFullDays(u.quietHoursFullDays || []);
         }
       }).catch(() => {});
     }
   }, [role, user?.id]);
+
+  const toggleQuietFullDay = (day) => {
+    setQuietFullDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+  };
 
   const handleQuietSave = async () => {
     setQuietSaving(true);
@@ -121,6 +127,7 @@ const Sidebar = () => {
       await api.put(`/users/${user.id}`, {
         quietHoursStart: quietActive ? quietStart : null,
         quietHoursEnd: quietActive ? quietEnd : null,
+        quietHoursFullDays: quietActive ? quietFullDays : [],
         autoResponderMessage: quietActive ? quietMsg : null,
       });
     } catch { /* silent */ }
@@ -352,6 +359,29 @@ const Sidebar = () => {
                       <div className="quiet-time-field">
                         <label>To</label>
                         <input type="time" value={quietEnd} onChange={e => setQuietEnd(e.target.value)} />
+                      </div>
+                    </div>
+                    <div className="quiet-fulldays-field">
+                      <label>Full days (quiet all day)</label>
+                      <div className="quiet-fulldays-row">
+                        {[
+                          { day: 0, label: 'Su' },
+                          { day: 1, label: 'Mo' },
+                          { day: 2, label: 'Tu' },
+                          { day: 3, label: 'We' },
+                          { day: 4, label: 'Th' },
+                          { day: 5, label: 'Fr' },
+                          { day: 6, label: 'Sa' },
+                        ].map(({ day, label }) => (
+                          <button
+                            type="button"
+                            key={day}
+                            className={`quiet-day-chip ${quietFullDays.includes(day) ? 'active' : ''}`}
+                            onClick={() => toggleQuietFullDay(day)}
+                          >
+                            {label}
+                          </button>
+                        ))}
                       </div>
                     </div>
                     <div className="quiet-msg-field">

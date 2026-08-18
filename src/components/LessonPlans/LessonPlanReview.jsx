@@ -18,6 +18,8 @@ const LessonPlanReview = () => {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterTeacher, setFilterTeacher] = useState('');
+  const [filterDay, setFilterDay] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [reviewPlan, setReviewPlan] = useState(null);
   const [feedback, setFeedback] = useState('');
@@ -137,9 +139,26 @@ const LessonPlanReview = () => {
     setArchivingKey(null);
   };
 
-  const pendingCount = plans.filter(p => p.status === 'SUBMITTED').length;
+  const uniqueTeachers = Array.from(new Set(plans.map(p => p.teacher?.fullName).filter(Boolean))).sort();
+  
+  const uniqueDaysSet = new Set();
+  plans.forEach(p => {
+    (p.sessionDates || []).forEach(d => uniqueDaysSet.add(parseDateOnly(d).toISOString()));
+  });
+  const uniqueDays = Array.from(uniqueDaysSet).sort((a, b) => new Date(b) - new Date(a));
 
-  const plansByWeek = plans.reduce((acc, plan) => {
+  const filteredPlans = plans.filter(p => {
+    if (filterTeacher && p.teacher?.fullName !== filterTeacher) return false;
+    if (filterDay) {
+      const pDays = (p.sessionDates || []).map(d => parseDateOnly(d).toISOString());
+      if (!pDays.includes(filterDay)) return false;
+    }
+    return true;
+  });
+
+  const pendingCount = filteredPlans.filter(p => p.status === 'SUBMITTED').length;
+
+  const plansByWeek = filteredPlans.reduce((acc, plan) => {
     // Teachers can pick any date to represent "the week" on a lesson plan, not
     // necessarily a Monday — group by the Mon-Sun week it falls in, not the
     // exact date, or every distinct pick becomes its own group.
@@ -237,6 +256,20 @@ const LessonPlanReview = () => {
               <option value="SUBMITTED">Pending Review</option>
               <option value="NEEDS_REVISION">Needs Revision</option>
               <option value="APPROVED">Approved</option>
+            </select>
+            <select value={filterTeacher} onChange={e => setFilterTeacher(e.target.value)}>
+              <option value="">All Teachers</option>
+              {uniqueTeachers.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+            <select value={filterDay} onChange={e => setFilterDay(e.target.value)}>
+              <option value="">All Days</option>
+              {uniqueDays.map(d => (
+                <option key={d} value={d}>
+                  {new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })}
+                </option>
+              ))}
             </select>
             <label className="lpr-archived-toggle">
               <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />

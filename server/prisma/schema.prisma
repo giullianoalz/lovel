@@ -115,6 +115,7 @@ model User {
   fcmToken               String?                   @map("fcm_token")
   quietHoursStart        String?                   @map("quiet_hours_start") @db.VarChar(10)
   quietHoursEnd          String?                   @map("quiet_hours_end") @db.VarChar(10)
+  quietHoursFullDays     Int[]                     @default([]) @map("quiet_hours_full_days")
   autoResponderMessage   String?                   @map("auto_responder_message")
   announcementReads      AnnouncementRead[]
   medicalLogsAsStudent   MedicalLog[]              @relation("StudentMedicalLogs")

@@ -250,7 +250,7 @@ export const getUser = async (req, res, next) => {
  */
 export const updateUser = async (req, res, next) => {
   try {
-    const { fullName, phone, avatarUrl, age, allergies, quietHoursStart, quietHoursEnd, autoResponderMessage, fcmToken } = req.body;
+    const { fullName, phone, avatarUrl, age, allergies, quietHoursStart, quietHoursEnd, quietHoursFullDays, autoResponderMessage, fcmToken } = req.body;
 
     const user = await prisma.user.update({
       where: { id: req.params.id },
@@ -262,6 +262,7 @@ export const updateUser = async (req, res, next) => {
         ...(allergies !== undefined && { allergies }),
         ...(quietHoursStart !== undefined && { quietHoursStart }),
         ...(quietHoursEnd !== undefined && { quietHoursEnd }),
+        ...(quietHoursFullDays !== undefined && { quietHoursFullDays }),
         ...(autoResponderMessage !== undefined && { autoResponderMessage }),
         ...(fcmToken !== undefined && { fcmToken }),
       },
