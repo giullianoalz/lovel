@@ -241,33 +241,42 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: 50%;
+  gap: 8px;
+  width: auto;
+  min-width: 42px;
+  height: 42px;
+  padding: 0 14px;
+  background: rgba(255,255,255,0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 21px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background 0.2s, color 0.2s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .sidebar-bell-btn:hover {
-  background: var(--bg-hover, #f0fdf4);
+  background: white;
   color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+.sidebar-bell-btn:active {
+  transform: translateY(0);
 }
 
 .sidebar-notif-pill {
-  position: absolute;
-  top: 0;
-  right: 0;
-  background: #ef4444;
+  position: relative;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
   color: white;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 6px;
   border-radius: 99px;
-  min-width: 18px;
+  min-width: 20px;
   text-align: center;
+  box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
 }
 
 /* Per-nav-item indicators: a count pill (unread alerts/announcements/chats)
@@ -367,17 +376,21 @@
   
   .global-notif-bell .notif-badge {
     position: absolute;
-    top: 0px;
-    right: 0px;
-    background: #ef4444;
+    top: 4px;
+    right: 4px;
+    background: linear-gradient(135deg, #ef4444, #dc2626);
     color: white;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
-    font-size: 9px;
+    font-size: 10px;
+    font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
+    box-shadow: 0 4px 8px rgba(239, 68, 68, 0.4);
+    border: 2px solid white;
+
     border: 2px solid white;
     font-weight: bold;
   }

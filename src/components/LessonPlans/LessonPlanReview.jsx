@@ -286,9 +286,11 @@ const LessonPlanReview = () => {
             </div>
           ) : (
             sortedPlanWeeks.map(weekKey => (
-              <div key={weekKey} className="lpr-card" style={{ marginBottom: 16 }}>
-                <div className="lpr-week-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Week of {new Date(weekKey).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}</span>
+              <div key={weekKey} style={{ marginBottom: 32 }}>
+                <div className="lpr-week-header-row">
+                  <h2 className="lpr-week-header" style={{ background: 'transparent', padding: 0, border: 'none' }}>
+                    Week of {new Date(weekKey).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
+                  </h2>
                   {!showArchived && (
                     <button
                       className="lpr-archive-week-btn"
@@ -299,8 +301,9 @@ const LessonPlanReview = () => {
                     </button>
                   )}
                 </div>
-                <table className="lpr-table">
-                  <thead>
+                <div className="lpr-card">
+                  <table className="lpr-table">
+                    <thead>
                     <tr>
                       {['Type', 'Class', 'Teacher', 'Main Activity', 'Status', ''].map(h => (
                         <th key={h}>{h}</th>
@@ -333,6 +336,7 @@ const LessonPlanReview = () => {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             ))
           )}
