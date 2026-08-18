@@ -145,23 +145,31 @@ const StudentsList = () => {
   };
 
   // Opens the preview modal instead of sending straight away, so the admin
-  // reads (and can edit) the subject/message first.
-  const handleInvite = (parent) => setInviteTarget(parent);
+  // reads (and can edit) the subject/message first. Takes `{ id, fullName,
+  // email, invitedAt }` — the teachers list names that field `name`, so it
+  // adapts its row rather than this handler learning about two shapes.
+  const handleInvite = (person) => setInviteTarget(person);
 
   const confirmInvite = async ({ subject, message }) => {
-    const parent = inviteTarget;
-    setInvitingId(parent.id);
+    const person = inviteTarget;
+    setInvitingId(person.id);
     setManualInvite(null);
     try {
-      const res = await api.post(`/users/${parent.id}/invite`, { subject, message });
-      setParents(ps => ps.map(p => (p.id === parent.id ? { ...p, ...res.data.user } : p)));
+      const res = await api.post(`/users/${person.id}/invite`, { subject, message });
+      setParents(ps => ps.map(p => (p.id === person.id ? { ...p, ...res.data.user } : p)));
+      // Teacher rows keep their own shape (`name`, salary, hourly rate), so only
+      // the access fields are merged in — spreading the raw user would bury the
+      // mapping fetchTeachers just did.
+      setTeachers(ts => ts.map(t => (t.id === person.id
+        ? { ...t, canSignIn: res.data.user.canSignIn, invitedAt: res.data.user.invitedAt }
+        : t)));
       if (res.data.emailed) {
         toast.success(res.data.message);
       } else {
         // Email is down or unconfigured — the account is still ready, so give
         // the admin the link rather than leaving the family stuck.
         toast.error(res.data.message);
-        setManualInvite({ name: parent.fullName, link: res.data.link });
+        setManualInvite({ name: person.fullName, link: res.data.link });
       }
       setInviteTarget(null);
     } catch (err) {
@@ -539,6 +547,48 @@ const StudentsList = () => {
       )}
 
       {/* Teachers Tab */}
+      {/* The invite queue is the same job on both staff tabs — a row exists but
+          its owner has never been able to sign in — so the bulk entry point and
+          the fallback-link banner sit above both rather than only over parents. */}
+      {(activeTab === 'parents' || activeTab === 'teachers') && (
+        <>
+          <div className="bulk-invite-cta">
+            <div>
+              <strong>Invite people in bulk</strong>
+              <p>
+                Create sign-in access for everyone at once, across parents, teachers and staff.
+                Works even while email delivery is down — you get the links to pass on by hand.
+              </p>
+            </div>
+            <button className="action-btn primary" onClick={() => setShowBulkInvite(true)}>
+              <Send size={14} /> Bulk invite
+            </button>
+          </div>
+
+          {manualInvite && (
+            <div className="invite-manual-banner">
+              <div>
+                <strong>{manualInvite.name}'s account is ready, but the email didn't go out.</strong>
+                <p>Send them this link yourself — it lets them set a password, so treat it like one.</p>
+                <code>{manualInvite.link}</code>
+              </div>
+              <div className="invite-manual-actions">
+                <button
+                  className="action-btn"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(manualInvite.link);
+                    toast.success('Link copied.');
+                  }}
+                >
+                  <Copy size={14} /> Copy link
+                </button>
+                <button className="action-btn outline" onClick={() => setManualInvite(null)}>Dismiss</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {activeTab === 'teachers' && (
         <div className="students-grid">
           {filteredTeachers.map(teacher => (
@@ -551,6 +601,18 @@ const StudentsList = () => {
                     <span className={`status-tag ${teacher.status?.replace(' ', '').toLowerCase()}`}>
                       {teacher.status}
                     </span>
+                    {/* Employment status and portal access are different facts:
+                        a teacher can be Active on payroll and still unable to
+                        log in, which is exactly the backlog this tab hid. */}
+                    {teacher.canSignIn ? (
+                      <span className="access-tag active"><CheckCircle2 size={13} /> Can sign in</span>
+                    ) : teacher.invitedAt ? (
+                      <span className="access-tag invited">
+                        <Clock size={13} /> Invited {new Date(teacher.invitedAt).toLocaleDateString('en-US')}
+                      </span>
+                    ) : (
+                      <span className="access-tag none">No portal access</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -596,6 +658,26 @@ const StudentsList = () => {
                 <button className="action-btn" onClick={() => setSelectedTeacher(teacher)}>
                   <DollarSign size={14} /> View Payroll
                 </button>
+                {!teacher.canSignIn && (
+                  teacher.emailUsable ? (
+                    <button
+                      className="action-btn primary"
+                      // The teachers list calls it `name`; the invite preview and
+                      // the endpoint both speak `fullName`.
+                      onClick={() => handleInvite({ ...teacher, fullName: teacher.name })}
+                      disabled={invitingId === teacher.id}
+                    >
+                      <Send size={14} />
+                      {invitingId === teacher.id
+                        ? 'Sending…'
+                        : teacher.invitedAt ? 'Resend invite' : 'Send invite'}
+                    </button>
+                  ) : (
+                    <span className="invite-blocked-hint">
+                      <AlertCircle size={14} /> Add their email first
+                    </span>
+                  )
+                )}
               </div>
             </div>
           ))}
@@ -605,44 +687,6 @@ const StudentsList = () => {
       {/* Parents Tab — who can actually sign in, and the invite queue */}
       {activeTab === 'parents' && (
         <>
-          {/* The backlog is not a parents-only problem — staff accounts were
-              created the same way and are just as locked out — so this opens a
-              picker over everyone rather than only the list below. */}
-          <div className="bulk-invite-cta">
-            <div>
-              <strong>Invite people in bulk</strong>
-              <p>
-                Create sign-in access for everyone at once, across parents, teachers and staff.
-                Works even while email delivery is down — you get the links to pass on by hand.
-              </p>
-            </div>
-            <button className="action-btn primary" onClick={() => setShowBulkInvite(true)}>
-              <Send size={14} /> Bulk invite
-            </button>
-          </div>
-
-          {manualInvite && (
-            <div className="invite-manual-banner">
-              <div>
-                <strong>{manualInvite.name}'s account is ready, but the email didn't go out.</strong>
-                <p>Send them this link yourself — it lets them set a password, so treat it like one.</p>
-                <code>{manualInvite.link}</code>
-              </div>
-              <div className="invite-manual-actions">
-                <button
-                  className="action-btn"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(manualInvite.link);
-                    toast.success('Link copied.');
-                  }}
-                >
-                  <Copy size={14} /> Copy link
-                </button>
-                <button className="action-btn outline" onClick={() => setManualInvite(null)}>Dismiss</button>
-              </div>
-            </div>
-          )}
-
           {filteredParents.length === 0 ? (
             <div className="empty-state">
               <Users size={32} />
@@ -814,8 +858,9 @@ const StudentsList = () => {
         <BulkInviteModal
           onClose={() => setShowBulkInvite(false)}
           // Reload rather than patch: the rows below show who can sign in, and
-          // a batch of invites has just changed that for several of them.
-          onDone={loadParents}
+          // a batch of invites has just changed that for several of them. Both
+          // lists, because the picker spans every role.
+          onDone={() => { loadParents(); loadTeachers(); }}
         />
       )}
 

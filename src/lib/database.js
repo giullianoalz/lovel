@@ -224,6 +224,13 @@ export const database = {
         // 0 would render a confident "$0.00/hr" for someone simply not
         // configured yet — the two need to look different on a payroll screen.
         hourlyRate: t.hourlyRate == null ? null : parseFloat(t.hourlyRate),
+        // Carried through so the Teachers tab can run the same invite queue the
+        // Parents tab does. Staff rows are created by hand or by the importer
+        // and start with no sign-in account, so "can they log in yet" is just
+        // as much a teacher question as a parent one.
+        canSignIn: Boolean(t.canSignIn),
+        emailUsable: t.emailUsable !== false,
+        invitedAt: t.invitedAt || null,
         classCount: t.familyMembers?.length || 0, // placeholder
       }));
       if (teachers.length > 0) return teachers;
