@@ -13,6 +13,7 @@ import { useAuth } from '../../context/AuthContext';
 import ErrorBanner from '../Layout/ErrorBanner';
 import StatHistoryModal from './StatHistoryModal';
 import FamilyCodeModal from './FamilyCodeModal';
+import LessonNotesModal from './LessonNotesModal';
 import WaiverForm from '../Waiver/WaiverForm';
 import './ParentPortal.css';
 
@@ -448,6 +449,10 @@ const ParentPortal = () => {
   const [reloadSubmitting, setReloadSubmitting] = useState(null);
   const [waiverChild, setWaiverChild] = useState(null);
   const [waiverDownloading, setWaiverDownloading] = useState(null);
+  // The class whose full note history is open — { studentId, classId, className }.
+  const [notesFor, setNotesFor] = useState(null);
+  const [notesDownloading, setNotesDownloading] = useState(null); // classId being exported
+  const [notesError, setNotesError] = useState(null);
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -579,6 +584,26 @@ const ParentPortal = () => {
       console.error(err);
     } finally {
       setWaiverDownloading(null);
+    }
+  };
+
+  // Same pattern as the waiver download — the PDF sits behind auth, so it has
+  // to be fetched with the token rather than opened as a plain link.
+  const handleDownloadClassNotes = async (studentId, classId, className) => {
+    setNotesDownloading(classId);
+    setNotesError(null);
+    try {
+      const res = await api.get(`/portal/parent/children/${studentId}/classes/${classId}/notes/pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `lesson-notes-${(className || 'class').replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase()}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setNotesError(err.userMessage || 'Could not download those lesson notes.');
+    } finally {
+      setNotesDownloading(null);
     }
   };
 
@@ -857,6 +882,41 @@ const ParentPortal = () => {
                                 <BookOpen size={12} /> {e.upcomingSessions[0].lessonPreview}
                               </p>
                             )}
+                            {/* The badge above is only the next meeting — this opens every
+                                note a manager has published for the class. */}
+                            <button
+                              type="button"
+                              className="pp-notes-btn"
+                              onClick={() => setNotesFor({ studentId: child.id, classId: e.classId, className: e.className })}
+                            >
+                              <BookOpen size={12} /> All lesson notes
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Classes that already wrapped, or one the child was
+                        dropped from — kept separate so the schedule above
+                        stays only what's actually running, while the notes
+                        archive for a finished class stays reachable. */}
+                    {child.pastEnrollments?.length > 0 && (
+                      <div className="pp-past-classes">
+                        <p className="pp-past-classes-title">Past classes</p>
+                        {child.pastEnrollments.map((e, i) => (
+                          <div key={i} className="pp-class-item-wrap pp-past">
+                            <div className="pp-class-item">
+                              <div>
+                                <h4>{e.className}</h4>
+                                <span>with {e.teacherName}</span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="pp-notes-btn"
+                              onClick={() => setNotesFor({ studentId: child.id, classId: e.classId, className: e.className })}
+                            >
+                              <BookOpen size={12} /> All lesson notes
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -893,6 +953,32 @@ const ParentPortal = () => {
                       </div>
                     )}
                   </div>
+
+                  {/* Lesson notes — the full published history per class, kept
+                      separate from Materials since it comes from a different
+                      source (approved lesson plans, not uploads). */}
+                  {child.enrollments?.length > 0 && (
+                    <div className="pp-child-section">
+                      <h3><Download size={17} /> Lesson Notes</h3>
+                      {notesError && <ErrorBanner message={notesError} />}
+                      <div className="pp-materials">
+                        {child.enrollments.map((e) => (
+                          <button
+                            key={e.classId}
+                            type="button"
+                            className="pp-material-link pp-notes-download"
+                            disabled={notesDownloading === e.classId}
+                            onClick={() => handleDownloadClassNotes(child.id, e.classId, e.className)}
+                          >
+                            📄 {e.className}
+                            <span className="pp-mat-sub">
+                              {notesDownloading === e.classId ? 'Preparing…' : 'Download PDF'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Pickup Authorizations — only relevant for students who are physically picked up */}
                   {child.isInPerson && (
@@ -1183,6 +1269,15 @@ const ParentPortal = () => {
 
       {showFamilyCode && (
         <FamilyCodeModal canRotate onClose={() => setShowFamilyCode(false)} />
+      )}
+
+      {notesFor && (
+        <LessonNotesModal
+          studentId={notesFor.studentId}
+          classId={notesFor.classId}
+          className={notesFor.className}
+          onClose={() => setNotesFor(null)}
+        />
       )}
 
       {waiverChild && (

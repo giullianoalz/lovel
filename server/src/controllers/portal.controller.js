@@ -7,6 +7,7 @@ import { getAdminUserIds } from '../services/notificationConfig.service.js';
 import { isOnly } from '../utils/roles.js';
 import { childIdsOfParent, familyIdsOfUser, ensureFamilyCheckInCode } from '../utils/family.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
+import { buildLessonNotesPdf, lessonNotesPdfFilename } from '../services/lessonNotesPdf.service.js';
 
 // Shape a behavior log for the student/parent portals — exposes the reason
 // ("why") behind each positive note or warning, not just the count.
@@ -246,24 +247,36 @@ export const getStudentPortal = async (req, res, next) => {
     }
 
     // Get enrollments & upcoming sessions
-    const enrollments = await prisma.classEnrollment.findMany({
-      where: { studentId: userId, status: 'active' },
-      include: {
-        class: {
-          include: {
-            teacher: { select: { id: true, fullName: true } },
-            sessions: {
-              where: { date: { gte: new Date() } },
-              orderBy: { date: 'asc' },
-              take: 5,
-              include: {
-                notes: { where: { source: 'lesson_plan_summary' }, take: 1 },
+    const [enrollments, pastEnrollments] = await Promise.all([
+      prisma.classEnrollment.findMany({
+        where: { studentId: userId, status: 'active' },
+        include: {
+          class: {
+            include: {
+              teacher: { select: { id: true, fullName: true } },
+              sessions: {
+                where: { date: { gte: new Date() } },
+                orderBy: { date: 'asc' },
+                take: 5,
+                include: {
+                  notes: { where: { source: 'lesson_plan_summary' }, take: 1 },
+                },
               },
             },
           },
         },
-      },
-    });
+      }),
+      // A class the student is no longer in — dropped, or the term ended.
+      // Still worth listing: the notes archive stays reachable for a class
+      // that has already wrapped, not just the ones running today.
+      prisma.classEnrollment.findMany({
+        where: { studentId: userId, status: { not: 'active' } },
+        include: {
+          class: { select: { id: true, name: true, teacher: { select: { fullName: true } } } },
+        },
+        orderBy: { enrolledAt: 'desc' },
+      }),
+    ]);
 
     // Get prize history (last 20)
     const prizeHistory = await prisma.prizeHistory.findMany({
@@ -341,6 +354,11 @@ export const getStudentPortal = async (req, res, next) => {
           lessonPreview: s.notes?.[0]?.notes || null,
         })),
       })),
+      pastEnrollments: pastEnrollments.map(e => ({
+        classId: e.class.id,
+        className: e.class.name,
+        teacherName: e.class.teacher?.fullName || 'TBD',
+      })),
       prizeHistory,
       behaviorSummary: { warnings: warningCount, positives: positiveCount },
       behaviorHistory,
@@ -348,6 +366,139 @@ export const getStudentPortal = async (req, res, next) => {
       materials,
       announcements,
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── Lesson notes archive ─────────────────────────────────────────────────
+// The class cards only ever carried the next few sessions, so a student could
+// read the note for the day they were looking at and nothing else. These two
+// endpoints hand them the whole class instead: every published summary, on
+// screen and on paper.
+
+// Shared by the JSON list and the PDF so the document can never contain a note
+// the screen would have withheld.
+const loadClassLessonNotes = async (studentId, classId) => {
+  const enrollment = await prisma.classEnrollment.findUnique({
+    where: { classId_studentId: { classId, studentId } },
+    include: {
+      class: {
+        select: { id: true, name: true, subject: true, teacher: { select: { fullName: true } } },
+      },
+    },
+  });
+
+  // Enrollment is the whole authorisation check here: these notes belong to a
+  // class, and a student who was never in it has no business reading them. A
+  // finished enrollment still counts — last term's notes are still theirs.
+  if (!enrollment) return null;
+
+  const sessions = await prisma.session.findMany({
+    where: {
+      classId,
+      notes: { some: { source: 'lesson_plan_summary', notes: { not: null } } },
+    },
+    orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
+    include: {
+      notes: {
+        where: { source: 'lesson_plan_summary' },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      },
+    },
+  });
+
+  return {
+    class: {
+      id: enrollment.class.id,
+      name: enrollment.class.name,
+      subject: enrollment.class.subject,
+      teacherName: enrollment.class.teacher?.fullName || 'TBD',
+    },
+    notes: sessions
+      .map((s) => ({
+        sessionId: s.id,
+        date: s.date,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        status: s.status,
+        notes: s.notes[0]?.notes || '',
+      }))
+      .filter((n) => n.notes.trim()),
+  };
+};
+
+// GET /api/portal/student/classes/:classId/notes — every published lesson note
+// for one of the student's classes, newest first.
+export const getStudentClassNotes = async (req, res, next) => {
+  try {
+    const result = await loadClassLessonNotes(req.user.id, req.params.classId);
+    if (!result) {
+      return res.status(404).json({ error: 'Not Found', message: 'You are not enrolled in that class.' });
+    }
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/portal/student/classes/:classId/notes/pdf — the same notes as a
+// printable document, for revising away from the screen.
+export const downloadStudentClassNotes = async (req, res, next) => {
+  try {
+    const result = await loadClassLessonNotes(req.user.id, req.params.classId);
+    if (!result) {
+      return res.status(404).json({ error: 'Not Found', message: 'You are not enrolled in that class.' });
+    }
+
+    const pdf = await buildLessonNotesPdf(result.class, { fullName: req.user.fullName }, result.notes);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${lessonNotesPdfFilename(result.class)}"`);
+    res.send(pdf);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/portal/parent/children/:studentId/classes/:classId/notes — the same
+// archive as the student sees, opened by a parent for one of their children.
+// The parent's own family membership is the authorization check: a child not
+// in the caller's family returns the same 404 as a class the child was never
+// enrolled in, so neither leaks which is true.
+export const getParentChildClassNotes = async (req, res, next) => {
+  try {
+    const { studentId, classId } = req.params;
+    if (!(await childIdsOfParent(req.user.id)).includes(studentId)) {
+      return res.status(404).json({ error: 'Not Found', message: 'That student is not in your family.' });
+    }
+    const result = await loadClassLessonNotes(studentId, classId);
+    if (!result) {
+      return res.status(404).json({ error: 'Not Found', message: 'That student is not enrolled in that class.' });
+    }
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/portal/parent/children/:studentId/classes/:classId/notes/pdf
+export const downloadParentChildClassNotes = async (req, res, next) => {
+  try {
+    const { studentId, classId } = req.params;
+    if (!(await childIdsOfParent(req.user.id)).includes(studentId)) {
+      return res.status(404).json({ error: 'Not Found', message: 'That student is not in your family.' });
+    }
+    const result = await loadClassLessonNotes(studentId, classId);
+    if (!result) {
+      return res.status(404).json({ error: 'Not Found', message: 'That student is not enrolled in that class.' });
+    }
+
+    const student = await prisma.user.findUnique({ where: { id: studentId }, select: { fullName: true } });
+    const pdf = await buildLessonNotesPdf(result.class, student, result.notes);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${lessonNotesPdfFilename(result.class)}"`);
+    res.send(pdf);
   } catch (error) {
     next(error);
   }
@@ -599,7 +750,7 @@ export const getParentPortal = async (req, res, next) => {
     }
 
     // Batch all child-data queries in a single Promise.all — O(1) DB round-trips
-    const [enrollments, behaviorLogs, prizeHistories, materials, announcements, pendingReloads, snackPurchases, fulfilledReloads, waivers] = await Promise.all([
+    const [enrollments, pastEnrollments, behaviorLogs, prizeHistories, materials, announcements, pendingReloads, snackPurchases, fulfilledReloads, waivers] = await Promise.all([
       prisma.classEnrollment.findMany({
         where: { studentId: { in: studentIds }, status: 'active' },
         include: {
@@ -621,6 +772,14 @@ export const getParentPortal = async (req, res, next) => {
           },
         },
       }), // class.type is used below to derive isInPerson
+      // A class a child is no longer in — dropped, or the term ended. Kept
+      // separate from the active list so the notes archive for it stays
+      // reachable without cluttering the schedule with classes that already wrapped.
+      prisma.classEnrollment.findMany({
+        where: { studentId: { in: studentIds }, status: { not: 'active' } },
+        include: { class: { select: { id: true, name: true, teacher: { select: { fullName: true } } } } },
+        orderBy: { enrolledAt: 'desc' },
+      }),
       // Full behavior logs (not just counts) so parents can see WHY each note or
       // warning was given. Volumes per family are modest; counts + the detail
       // list are both derived from this single fetch.
@@ -676,6 +835,11 @@ export const getParentPortal = async (req, res, next) => {
     for (const e of enrollments) {
       if (!enrollmentsByStudent[e.studentId]) enrollmentsByStudent[e.studentId] = [];
       enrollmentsByStudent[e.studentId].push(e);
+    }
+    const pastEnrollmentsByStudent = {};
+    for (const e of pastEnrollments) {
+      if (!pastEnrollmentsByStudent[e.studentId]) pastEnrollmentsByStudent[e.studentId] = [];
+      pastEnrollmentsByStudent[e.studentId].push(e);
     }
 
     // Derive both the counts (for the stat pills) and a capped detail list (for
@@ -747,6 +911,11 @@ export const getParentPortal = async (req, res, next) => {
             endTime: s.endTime,
             lessonPreview: s.notes?.[0]?.notes || null,
           })),
+        })),
+        pastEnrollments: (pastEnrollmentsByStudent[user.id] || []).map(e => ({
+          classId: e.class.id,
+          className: e.class.name,
+          teacherName: e.class.teacher?.fullName || 'TBD',
         })),
         behaviorSummary: behaviorByStudent[user.id] || { warnings: 0, positives: 0 },
         behaviorHistory: behaviorHistoryByStudent[user.id] || [],

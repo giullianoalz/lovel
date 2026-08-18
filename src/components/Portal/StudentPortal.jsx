@@ -8,6 +8,7 @@ import { formatTimeOfDay, formatDateOnly } from '../../lib/time';
 import ErrorBanner from '../Layout/ErrorBanner';
 import StatHistoryModal from './StatHistoryModal';
 import FamilyCodeModal from './FamilyCodeModal';
+import LessonNotesModal from './LessonNotesModal';
 import './StudentPortal.css';
 
 const TABS = [
@@ -27,6 +28,10 @@ const StudentPortal = () => {
   const [tab, setTab]         = useState('home');
   const [statModal, setStatModal] = useState(null); // 'seashells' | 'punches' | 'positive' | 'warnings'
   const [showFamilyCode, setShowFamilyCode] = useState(false);
+  // The class whose full note history is open — { classId, className }.
+  const [notesFor, setNotesFor] = useState(null);
+  const [notesDownloading, setNotesDownloading] = useState(null); // classId being exported
+  const [notesError, setNotesError] = useState(null);
 
   const load = async () => {
     setLoading(true);
@@ -43,11 +48,32 @@ const StudentPortal = () => {
 
   useEffect(() => { load(); }, []);
 
+  // A class's notes as a printable document, straight from the Materials tab —
+  // the same file the notes modal offers. Fetched with the token rather than
+  // opened as a plain link, since the endpoint sits behind auth like the rest.
+  const downloadClassNotes = async (classId, className) => {
+    setNotesDownloading(classId);
+    setNotesError(null);
+    try {
+      const res = await api.get(`/portal/student/classes/${classId}/notes/pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `lesson-notes-${(className || 'class').replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase()}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setNotesError(err.userMessage || 'Could not download those lesson notes.');
+    } finally {
+      setNotesDownloading(null);
+    }
+  };
+
   if (loading) return <div className="sp-loading"><span className="sp-spinner" />Loading your portal...</div>;
   if (error)   return <div className="sp-loading"><ErrorBanner message={error} onRetry={load} /></div>;
   if (!data)   return null;
 
-  const { student, enrollments, prizeHistory: seashellHistory, behaviorSummary, behaviorHistory = [], punchHistory = [], materials, announcements } = data;
+  const { student, enrollments, pastEnrollments = [], prizeHistory: seashellHistory, behaviorSummary, behaviorHistory = [], punchHistory = [], materials, announcements } = data;
   const historyData = { prizeHistory: seashellHistory, punchHistory, behaviorHistory };
   const firstName = student.fullName?.split(' ')[0] || 'Student';
   const initials  = student.fullName?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?';
@@ -234,6 +260,16 @@ const StudentPortal = () => {
                         <span>with {e.teacherName}</span>
                       </div>
                     </div>
+                    {/* The rows below only reach as far as the next few
+                        meetings; this opens every note the class has had. */}
+                    <button
+                      type="button"
+                      className="sp-notes-btn"
+                      onClick={() => setNotesFor({ classId: e.classId, className: e.className })}
+                    >
+                      <BookOpen size={14} /> All lesson notes
+                      <ChevronRight size={14} />
+                    </button>
                     {e.upcomingSessions?.length > 0 && (
                       <div className="sp-sessions-list">
                         <p className="sp-sessions-title">Upcoming sessions</p>
@@ -255,6 +291,36 @@ const StudentPortal = () => {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Classes that already wrapped, or a class the student was
+                dropped from — kept out of the active list above, but the
+                notes archive is still worth reaching. */}
+            {pastEnrollments.length > 0 && (
+              <div className="sp-past-classes">
+                <p className="sp-sessions-title">Past classes</p>
+                <div className="sp-classes-list">
+                  {pastEnrollments.map((e, i) => (
+                    <div key={i} className="sp-class-card sp-class-card-past">
+                      <div className="sp-class-header">
+                        <div className="sp-class-dot past" />
+                        <div>
+                          <h3>{e.className}</h3>
+                          <span>with {e.teacherName}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="sp-notes-btn"
+                        onClick={() => setNotesFor({ classId: e.classId, className: e.className })}
+                      >
+                        <BookOpen size={14} /> All lesson notes
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -299,6 +365,48 @@ const StudentPortal = () => {
         {/* ────────── MATERIALS ────────── */}
         {tab === 'materials' && (
           <div className="sp-section">
+            {/* Lesson notes live here too, not just inside a class card: this
+                is the tab a student opens when they want something to keep. */}
+            {enrollments.length > 0 && (
+              <div className="sp-notes-export">
+                <h2><FileText size={20} /> Lesson Notes</h2>
+                <p className="sp-notes-export-hint">
+                  Every note your teacher has published for a class — read them all, or save them as a PDF.
+                </p>
+                {notesError && <ErrorBanner message={notesError} />}
+                <div className="sp-notes-export-list">
+                  {enrollments.map((e) => (
+                    <div key={e.classId} className="sp-notes-export-item">
+                      <div className="sp-mat-icon"><BookOpen size={20} /></div>
+                      <div className="sp-mat-info">
+                        <span className="sp-mat-name">{e.className}</span>
+                        <div className="sp-mat-meta"><span>with {e.teacherName}</span></div>
+                      </div>
+                      <div className="sp-mat-actions">
+                        <button
+                          type="button"
+                          className="sp-mat-btn"
+                          title="Read all notes"
+                          onClick={() => setNotesFor({ classId: e.classId, className: e.className })}
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="sp-mat-btn"
+                          title="Download notes as PDF"
+                          disabled={notesDownloading === e.classId}
+                          onClick={() => downloadClassNotes(e.classId, e.className)}
+                        >
+                          <Download size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <h2><BookOpen size={20} /> My Materials</h2>
             {materials.length === 0 ? (
               <div className="sp-empty-state">
@@ -334,6 +442,14 @@ const StudentPortal = () => {
       </div>
 
       {showFamilyCode && <FamilyCodeModal onClose={() => setShowFamilyCode(false)} />}
+
+      {notesFor && (
+        <LessonNotesModal
+          classId={notesFor.classId}
+          className={notesFor.className}
+          onClose={() => setNotesFor(null)}
+        />
+      )}
 
       <StatHistoryModal
         kind={statModal}

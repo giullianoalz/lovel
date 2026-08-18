@@ -15,6 +15,10 @@ import {
   decideSnackReload,
   getFamilyCheckInCode,
   rotateFamilyCheckInCode,
+  getStudentClassNotes,
+  downloadStudentClassNotes,
+  getParentChildClassNotes,
+  downloadParentChildClassNotes,
 } from '../controllers/portal.controller.js';
 
 const router = Router();
@@ -42,6 +46,25 @@ router.get('/teacher', authenticate, requireRole('TEACHER', 'ADMIN'),
   ),
   getTeacherPortal
 );
+
+// The full lesson-note history for one class the student is (or was) enrolled
+// in — the portal card only carries the next few sessions. Cached briefly per
+// student and class; a note only changes when a manager approves a plan.
+router.get('/student/classes/:classId/notes', authenticate, requireRole('STUDENT'),
+  withCache(req => `portal:student:${req.user.id}:class:${req.params.classId}:notes`, 60),
+  getStudentClassNotes
+);
+
+// Not cached: withCache stores the JSON body, and a PDF is neither JSON nor
+// worth holding in memory.
+router.get('/student/classes/:classId/notes/pdf', authenticate, requireRole('STUDENT'), downloadStudentClassNotes);
+
+// Same archive, opened by a parent for one of their children.
+router.get('/parent/children/:studentId/classes/:classId/notes', authenticate, requireRole('PARENT'),
+  withCache(req => `portal:parent:${req.user.id}:child:${req.params.studentId}:class:${req.params.classId}:notes`, 60),
+  getParentChildClassNotes
+);
+router.get('/parent/children/:studentId/classes/:classId/notes/pdf', authenticate, requireRole('PARENT'), downloadParentChildClassNotes);
 
 // Pickup Authorization routes
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);
