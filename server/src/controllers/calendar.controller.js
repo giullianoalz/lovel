@@ -52,12 +52,16 @@ export const getCalendarData = async (req, res, next) => {
     });
 
     // Paid hours that aren't a class — reception, planning, a staff meeting.
-    // Scoped exactly like sessions: your own, unless you're one of the people
-    // who builds the rota, who need to see everyone's.
+    //
+    // Narrower than the rest of the org-wide view on purpose: a shift is an
+    // hour somebody is being paid for, so the rota is closer to payroll than to
+    // a schedule. Only admins see the building's; everyone else sees their own,
+    // including the front desk, whose own hours are the ones in question.
+    const canSeeAllShifts = hasRole(req.user, 'ADMIN');
     const shiftWhere = {
       date: { gte: fromDate, lte: toDate },
       status: { not: 'CANCELLED' },
-      ...(isOrgWide ? {} : { staffId: userId }),
+      ...(canSeeAllShifts ? {} : { staffId: userId }),
     };
     const [shiftRows, payCategories] = await Promise.all([
       prisma.workShift.findMany({

@@ -631,10 +631,10 @@ const CalendarView = () => {
   // way (asking for orgWide as a teacher is simply ignored there).
   const [staffEvents, setStaffEvents] = useState([]);
   const canSeeOrgWide = hasRole('ADMIN') || (hasRole('RECEPTIONIST') && !hasRole('TEACHER'));
-  // Front desk is included because the rota is her own schedule: leaving her out
-  // meant the one person whose hours are the front desk's hours was the only
-  // member of staff who could not see them — the server has always been willing
-  // to hand her the org-wide view, the calendar just never asked for it.
+  // Front desk is included so she sees her own hours on the grid. Note this is
+  // not the same reach as the shift chips below: the server hands work shifts to
+  // admins and to their owner only, so asking for orgWide here widens the PTO
+  // and room bookings, never somebody else's paid hours.
   const canSeeStaffEvents = hasRole('ADMIN', 'TEACHER') || canSeeOrgWide;
 
   const staffEventsSeqRef = useRef(0);

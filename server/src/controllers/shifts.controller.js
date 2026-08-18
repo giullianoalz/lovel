@@ -6,13 +6,13 @@
  * the rate, so scheduling somebody for 10–1 at the front desk is the same act
  * as saying those three hours cost $60.
  *
- * Shifts are scheduled by admins. Everyone can read their own; only admins and
- * the front desk see the whole building's.
+ * Shifts are scheduled by admins. Everyone can read their own; only admins see
+ * the whole building's, because a rota is what everybody's hours cost.
  */
 
 import prisma from '../config/database.js';
 import { loadPayCategories, freezeShiftRates, clearFrozenRates, isShiftPayable } from '../services/payroll.service.js';
-import { hasRole, isFrontDeskOnly } from '../utils/roles.js';
+import { hasRole } from '../utils/roles.js';
 
 const SHIFT_STATUSES = ['SCHEDULED', 'COMPLETED', 'CANCELLED'];
 
@@ -72,19 +72,22 @@ const decorate = (shift, categories) => ({
  * GET /api/shifts?from=&to=&staffId=
  * Shifts in a date range.
  *
- * Defaults to the caller's own. Admins and the front desk may ask for the whole
- * building, or for one person, because that is the schedule they build.
+ * Defaults to the caller's own. Admins may ask for the whole building, or for
+ * one person, because they are the ones who build the rota.
  */
 export const listShifts = async (req, res, next) => {
   try {
     const { from, to, staffId, status } = req.query;
-    const canSeeEveryone = hasRole(req.user, 'ADMIN') || isFrontDeskOnly(req.user);
+    // Admins only. The desk was included here once, on the reasoning that the
+    // rota is its own schedule — but "my own hours" is served by the default
+    // scope below, and the difference between the two is everybody else's pay.
+    const canSeeEveryone = hasRole(req.user, 'ADMIN');
 
     const fromDate = toDate(from) || new Date(new Date().setHours(0, 0, 0, 0));
     const toDate_ = toDate(to) || new Date(new Date().setDate(new Date().getDate() + 30));
 
-    // A teacher asking for someone else's shifts gets their own, the same way
-    // the calendar scopes sessions. Nobody's paid hours are a colleague's business.
+    // Anyone else asking for someone else's shifts gets their own. Nobody's
+    // paid hours are a colleague's business, whichever hat the colleague wears.
     const scopedStaffId = canSeeEveryone ? staffId : req.user.id;
 
     const shifts = await prisma.workShift.findMany({

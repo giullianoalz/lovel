@@ -11,8 +11,8 @@ import {
 
 const router = Router();
 
-// GET /api/shifts — Shifts in a date range. Staff see their own; admins and the
-// front desk see the building's (scoped inside the controller).
+// GET /api/shifts — Shifts in a date range. Staff see their own; only admins see
+// the building's (scoped inside the controller).
 router.get('/', authenticate, listShifts);
 
 // POST /api/shifts — Schedule someone (Admin only). Scheduling is deciding what
