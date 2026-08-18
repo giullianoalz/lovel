@@ -24,7 +24,7 @@
   max-height: 84vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-card, #ffffff);
+  background: #ffffff;
   border-radius: 18px;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
   overflow: hidden;
@@ -42,7 +42,7 @@
   align-items: center;
   gap: 14px;
   padding: 20px 22px;
-  border-bottom: 1px solid var(--border-light, #e2e8f0);
+  border-bottom: 1px solid #e2e8f0;
   background: color-mix(in srgb, var(--lnm-accent) 8%, transparent);
 }
 
@@ -63,7 +63,7 @@
   margin: 0 0 2px;
   font-size: 17px;
   font-weight: 700;
-  color: var(--text-main, #0f172a);
+  color: var(--text-main, #064e3b);
 }
 .lnm-header-text p {
   margin: 0;
@@ -89,7 +89,7 @@
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.lnm-close:hover { background: var(--bg-hover, #f1f5f9); color: var(--text-main, #0f172a); }
+.lnm-close:hover { background: #f1f5f9; color: var(--text-main, #064e3b); }
 
 /* ── Toolbar: search + download ── */
 .lnm-toolbar {
@@ -97,7 +97,7 @@
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
-  border-bottom: 1px solid var(--border-light, #eef2f7);
+  border-bottom: 1px solid #eef2f7;
 }
 
 .lnm-search {
@@ -108,9 +108,9 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: 999px;
-  border: 1px solid var(--border-light, #e2e8f0);
-  background: var(--bg-subtle, #f8fafc);
-  color: var(--text-muted, #94a3b8);
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #94a3b8;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .lnm-search:focus-within {
@@ -124,7 +124,7 @@
   outline: none;
   background: transparent;
   font-size: 13px;
-  color: var(--text-main, #0f172a);
+  color: var(--text-main, #064e3b);
 }
 
 .lnm-download {
@@ -141,7 +141,7 @@
   background: linear-gradient(135deg, #0ea5e9, #0284c7);
   box-shadow: 0 6px 16px rgba(14, 165, 233, 0.28);
   cursor: pointer;
-  transition: transform var(--dur, 0.25s) var(--ease-out, ease), box-shadow var(--dur, 0.25s) var(--ease-out, ease), opacity 0.15s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.15s ease;
 }
 .lnm-download:hover:not(:disabled) {
   transform: translateY(-1px);
@@ -183,7 +183,7 @@
   gap: 10px;
   padding: 44px 20px;
   text-align: center;
-  color: var(--text-muted, #94a3b8);
+  color: #94a3b8;
 }
 .lnm-empty p { margin: 0; font-size: 13.5px; }
 
@@ -198,19 +198,19 @@
 
 .lnm-item {
   padding: 13px 14px;
-  border-radius: var(--radius-md, 12px);
-  background: var(--bg-subtle, #f8fafc);
-  border: 1px solid var(--border-light, #eef2f7);
-  border-left: 4px solid var(--border-light, #e2e8f0);
-  transition: box-shadow var(--dur, 0.25s) var(--ease-out, ease), transform var(--dur, 0.25s) var(--ease-out, ease);
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  border-left: 4px solid #e2e8f0;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 .lnm-item:hover {
-  box-shadow: var(--shadow-sm, 0 4px 15px rgba(0, 0, 0, 0.03));
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
   transform: translateY(-1px);
 }
 .lnm-item.today {
   border-left-color: var(--lnm-accent);
-  background: color-mix(in srgb, var(--lnm-accent) 7%, var(--bg-subtle, #f8fafc));
+  background: color-mix(in srgb, var(--lnm-accent) 7%, #f8fafc);
 }
 
 .lnm-item-head {
@@ -224,7 +224,7 @@
 .lnm-item-date {
   font-size: 13.5px;
   font-weight: 700;
-  color: var(--text-main, #0f172a);
+  color: var(--text-main, #064e3b);
 }
 
 .lnm-item-time {
@@ -232,7 +232,7 @@
   align-items: center;
   gap: 3px;
   font-size: 11.5px;
-  color: var(--text-muted, #94a3b8);
+  color: #94a3b8;
 }
 
 .lnm-badge {
@@ -251,28 +251,13 @@
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
-  color: var(--text-secondary, #475569);
+  color: #475569;
 }
 
-/* ── Dark theme ── */
-@media (prefers-color-scheme: dark) {
-  .lnm-modal { background: var(--bg-card, #1e293b); }
-  .lnm-item,
-  .lnm-search {
-    background: var(--bg-subtle, #0f172a);
-    border-color: var(--border-light, #334155);
-  }
-  .lnm-item { border-left-color: var(--border-light, #334155); }
-  .lnm-item.today { border-left-color: var(--lnm-accent); }
-}
-:root[data-theme="dark"] .lnm-modal { background: var(--bg-card, #1e293b); }
-:root[data-theme="dark"] .lnm-item,
-:root[data-theme="dark"] .lnm-search {
-  background: var(--bg-subtle, #0f172a);
-  border-color: var(--border-light, #334155);
-}
-:root[data-theme="dark"] .lnm-item { border-left-color: var(--border-light, #334155); }
-:root[data-theme="dark"] .lnm-item.today { border-left-color: var(--lnm-accent); }
+/* No dark-mode branch: the rest of the app (StudentPortal, ParentPortal) is
+   hardcoded light with no theme toggle, so a system-dark-mode phone rendering
+   this modal in dark colors while everything behind it stays light looked
+   broken rather than adaptive. Match the app: always light. */
 
 @media (max-width: 480px) {
   .lnm-modal { max-width: 100%; max-height: 90vh; }
