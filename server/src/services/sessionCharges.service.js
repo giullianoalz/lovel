@@ -127,7 +127,9 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
     // Null means the meeting charges the room nothing; individuals may still
     // have been priced on it, and those are the only lines it produces.
     const listPrice = session.chargeAmount == null ? 0 : round2(Number(session.chargeAmount));
-    const description = session.chargeNote?.trim() || session.class?.name || 'Session';
+    const description = session.chargeNote?.trim() 
+      ? `${session.class?.name || 'Class'} - ${session.chargeNote.trim()}`
+      : (session.class?.name || 'Session');
     const overrides = new Map((session.chargeOverrides || []).map((o) => [o.studentId, o]));
 
     for (const enrollment of session.class?.enrollments || []) {

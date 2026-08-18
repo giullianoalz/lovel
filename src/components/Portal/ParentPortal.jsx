@@ -26,7 +26,7 @@ const PAYMENT_METHODS = [
     icon: <GraduationCap size={18} />,
     badge: 'Scholarship',
     accent: '#047857',
-    detail: 'Request payment from your Step Up portal using the invoice number (e.g. LC-4391). We approve the charge and payment is processed with your scholarship.',
+    detail: 'Direct Pay on EMA Marketplace/Providers/Love Camp using the invoice number (e.g. LC-4391). We approve the charge and payment is processed with your scholarship.',
     copy: null,
   },
   {

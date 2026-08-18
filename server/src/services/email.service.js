@@ -463,7 +463,7 @@ const PAYMENT_METHODS = [
   { name: 'Zelle', detail: 'Send to', value: 'lovelearningfl@gmail.com' },
   { name: 'Venmo', detail: 'Username', value: '@LoveLearningFL' },
   { name: 'PayPal', detail: 'Send to', value: 'lovelearningfl@gmail.com' },
-  { name: 'EMA · Step Up for Students', detail: 'Request from your Step Up portal using invoice #', value: invoiceNum => invoiceNum },
+  { name: 'EMA · Step Up for Students', detail: 'Direct Pay on EMA Marketplace/Providers/Love Camp using invoice #', value: invoiceNum => invoiceNum },
 ];
 
 const paymentMethodRow = (invoiceNumber) => PAYMENT_METHODS.map((m) => `
