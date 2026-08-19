@@ -269,8 +269,19 @@ export const getStudentPortal = async (req, res, next) => {
       // A class the student is no longer in — dropped, or the term ended.
       // Still worth listing: the notes archive stays reachable for a class
       // that has already wrapped, not just the ones running today.
+      //
+      // Only the classes they actually sat in. Unenrolling soft-deletes to
+      // 'inactive' to preserve history, so a student put in the wrong class and
+      // taken back out minutes later leaves a row indistinguishable from a term
+      // that ended — and it showed here forever. Requiring one attendance
+      // record keeps the real drops and drops the ghosts: there is no archive
+      // worth reaching for a class that never met them.
       prisma.classEnrollment.findMany({
-        where: { studentId: userId, status: { not: 'active' } },
+        where: {
+          studentId: userId,
+          status: { not: 'active' },
+          class: { sessions: { some: { attendance: { some: { studentId: userId } } } } },
+        },
         include: {
           class: { select: { id: true, name: true, teacher: { select: { fullName: true } } } },
         },
@@ -836,8 +847,30 @@ export const getParentPortal = async (req, res, next) => {
       if (!enrollmentsByStudent[e.studentId]) enrollmentsByStudent[e.studentId] = [];
       enrollmentsByStudent[e.studentId].push(e);
     }
+    // Keep only the past classes the child actually sat in. Unenrolling
+    // soft-deletes to 'inactive' to preserve history, so a child put in the
+    // wrong class and taken back out minutes later leaves a row
+    // indistinguishable from a term that ended — and it showed here forever.
+    // One attendance record keeps the real drops and drops the ghosts: there is
+    // no archive worth reaching for a class that never met them.
+    //
+    // Filtered here rather than in the query above because the check has to
+    // correlate back to each row's own student — a nested `some` filter would
+    // match on any sibling's attendance and resurrect the other's ghost row.
+    const attendedPast = pastEnrollments.length
+      ? await prisma.attendance.findMany({
+          where: {
+            studentId: { in: [...new Set(pastEnrollments.map(e => e.studentId))] },
+            session: { classId: { in: [...new Set(pastEnrollments.map(e => e.classId))] } },
+          },
+          select: { studentId: true, session: { select: { classId: true } } },
+        })
+      : [];
+    const attendedKeys = new Set(attendedPast.map(a => `${a.studentId}:${a.session.classId}`));
+
     const pastEnrollmentsByStudent = {};
     for (const e of pastEnrollments) {
+      if (!attendedKeys.has(`${e.studentId}:${e.classId}`)) continue;
       if (!pastEnrollmentsByStudent[e.studentId]) pastEnrollmentsByStudent[e.studentId] = [];
       pastEnrollmentsByStudent[e.studentId].push(e);
     }
