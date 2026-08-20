@@ -2099,13 +2099,42 @@
 
 @media (max-width: 768px) {
   .calendar-container {
-    padding: 16px 12px;
+    padding: 8px 4px;
   }
 
   .calendar-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 12px;
+    gap: 8px;
+  }
+
+  .calendar-header-bottom {
+    padding: 4px;
+    gap: 4px;
+  }
+
+  .calendar-actions-left,
+  .calendar-actions-right {
+    gap: 4px;
+  }
+
+  .calendar-title-text {
+    font-size: 18px;
+  }
+
+  .add-event-btn,
+  .advanced-search-btn-new,
+  .print-btn,
+  .options-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+    height: 28px;
+  }
+  
+  .view-toggle-new button {
+    padding: 4px 8px;
+    font-size: 11px;
+    height: 28px;
   }
 
   .calendar-actions {
@@ -2113,7 +2142,7 @@
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
   }
 
   .add-event-wrapper,

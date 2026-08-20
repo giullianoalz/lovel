@@ -1,30 +1,13 @@
 import React, { useState, useCallback } from 'react';
-import { X, QrCode, Users, AlertTriangle, CameraOff, LogIn, LogOut, CheckCircle2, Clock } from 'lucide-react';
+import { X, QrCode, Users, AlertTriangle, CameraOff, LogIn, LogOut, CheckCircle2, Clock, ShieldCheck } from 'lucide-react';
 import api from '../../lib/api';
 import { useQrScanner, readToken } from './useQrScanner';
 import './PickupScanner.css';
-// The check-in buttons are the board's, and they should look identical here —
-// it is the same action, so importing its sheet beats restyling them.
 import './CheckInBoard.css';
 import './FamilyScanner.css';
 
-/**
- * The arrival scanner: a family shows the household QR at the door and whoever
- * is on the desk checks in the children who actually walked in.
- *
- * Deliberately two steps, unlike the pickup scanner. That code is issued for one
- * named person on one day, so acting on the scan alone is safe. A family code is
- * permanent and covers every sibling — a parent dropping off one child would
- * otherwise mark the other one present from the car park. So the scan only
- * asks the server who the code covers, and the desk taps the child in front of
- * them.
- */
-
 const fmtTime = (value) => {
   if (!value) return '';
-  // startTime/endTime are TIME columns, which arrive as 1970-01-01T:HH:MM:SSZ.
-  // Read them in UTC — treating them as local shifts every class by the
-  // browser's offset and puts the morning block at 4am.
   return new Date(value).toLocaleTimeString('en-US', {
     hour: 'numeric', minute: '2-digit', timeZone: 'UTC',
   });
@@ -33,51 +16,57 @@ const fmtTime = (value) => {
 const fmtStamp = (value) =>
   value ? new Date(value).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
 
-const FamilyScanner = ({ onClose, onChanged }) => {
+const UniversalScanner = ({ onClose, onChanged }) => {
   const [family, setFamily] = useState(null);
+  const [pickupResult, setPickupResult] = useState(null);
   const [error, setError] = useState(null);
-  // Keyed by `${sessionId}:${studentId}` so two taps on different children
-  // don't disable each other's buttons.
   const [pending, setPending] = useState({});
   const [actionError, setActionError] = useState(null);
   const [manual, setManual] = useState('');
 
   const handleScan = useCallback(async (raw) => {
     setError(null);
+    setActionError(null);
+    const token = readToken(raw, ['code', 'family', 'token']);
+    
+    // We don't know if this is a family code or a pickup code.
+    // Let's try pickup scan first. If it fails, try family scan.
     try {
-      const { data } = await api.post('/sessions/front-desk/scan', {
-        code: readToken(raw, ['code', 'family', 'token']),
-      });
-      setFamily(data);
+      const { data } = await api.post('/sessions/pickup/scan', { token });
+      setPickupResult(data);
+      if (onChanged) onChanged(); 
+      return;
     } catch (err) {
-      setError(err.response?.data?.message || 'That code could not be read.');
+      try {
+        const { data } = await api.post('/sessions/front-desk/scan', { code: token });
+        setFamily(data);
+      } catch (err2) {
+        setError('That code could not be read or verified as either a pickup or family code.');
+      }
     }
-  }, []);
+  }, [onChanged]);
 
   const { videoRef, canvasRef, cameraError } = useQrScanner({
     onScan: handleScan,
-    active: !family && !error,
+    active: !family && !pickupResult && !error,
   });
 
   const reset = () => {
     setFamily(null);
+    setPickupResult(null);
     setError(null);
     setActionError(null);
     setManual('');
   };
 
-  const mark = async (studentId, sessionId, action, status = 'PRESENT') => {
+  const markFamily = async (studentId, sessionId, action, status = 'PRESENT') => {
     const key = `${sessionId}:${studentId}`;
     setPending((prev) => ({ ...prev, [key]: true }));
     setActionError(null);
     try {
-      // FAMILY_QR, not MANUAL: the door log should be able to show that the
-      // household presented its code, rather than that someone tapped a name.
       const { data } = await api.post(`/sessions/${sessionId}/check-in`, {
         studentId, action, status, source: 'FAMILY_QR',
       });
-      // Patch the one row rather than rescanning: the family is standing there,
-      // and sending them back for another scan to see the result is absurd.
       setFamily((prev) => ({
         ...prev,
         students: prev.students.map((s) => s.id !== studentId ? s : {
@@ -103,6 +92,9 @@ const FamilyScanner = ({ onClose, onChanged }) => {
     }
   };
 
+  const fmtTimeLocal = (v) =>
+    v ? new Date(v).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="scanner-modal family-scanner">
@@ -111,12 +103,12 @@ const FamilyScanner = ({ onClose, onChanged }) => {
         <div className="scanner-header">
           <div className="scanner-icon"><QrCode size={22} /></div>
           <div>
-            <h2>Scan family code</h2>
-            <p>Ask the family to show the QR from their portal.</p>
+            <h2>Scan QR Code</h2>
+            <p>Scan a family code for check-in or a pickup code for check-out.</p>
           </div>
         </div>
 
-        {!family && !error && (
+        {!family && !pickupResult && !error && (
           <>
             {cameraError ? (
               <div className="scanner-camera-error">
@@ -131,8 +123,6 @@ const FamilyScanner = ({ onClose, onChanged }) => {
               </div>
             )}
 
-            {/* A blocked camera or a cracked phone screen shouldn't stop the
-                door. The family can read the code out from their portal. */}
             <form
               className="fs-manual"
               onSubmit={(e) => { e.preventDefault(); if (manual.trim()) handleScan(manual.trim()); }}
@@ -141,8 +131,8 @@ const FamilyScanner = ({ onClose, onChanged }) => {
                 type="text"
                 value={manual}
                 onChange={(e) => setManual(e.target.value)}
-                placeholder="Or type the family code"
-                aria-label="Family code"
+                placeholder="Or type the code manually"
+                aria-label="Manual code"
               />
               <button type="submit" className="checkin-btn" disabled={!manual.trim()}>Look up</button>
             </form>
@@ -160,6 +150,50 @@ const FamilyScanner = ({ onClose, onChanged }) => {
           </div>
         )}
 
+        {/* --- PICKUP RESULT UI --- */}
+        {pickupResult && (
+          <div className="scanner-result scanner-result-good">
+            <div className="scanner-badge"><ShieldCheck size={18} /> Authorised</div>
+            <h3 className="scanner-person">{pickupResult.pickupPerson}</h3>
+            {pickupResult.relationship && <p className="scanner-relationship">{pickupResult.relationship}</p>}
+            {pickupResult.authorisedBy && (
+              <p className="scanner-authorised-by">Authorised by {pickupResult.authorisedBy}</p>
+            )}
+
+            {pickupResult.released.length > 0 && (
+              <div className="scanner-list">
+                <p className="scanner-list-label">Checked out</p>
+                {pickupResult.released.map((s) => (
+                  <div key={s.studentId} className="scanner-list-row">
+                    <span>{s.fullName}</span>
+                    <span className="scanner-stamp">{fmtTimeLocal(s.checkedOutAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {pickupResult.alreadyOut.length > 0 && (
+              <div className="scanner-list scanner-list-muted">
+                <p className="scanner-list-label">Already picked up</p>
+                {pickupResult.alreadyOut.map((s) => (
+                  <div key={s.studentId} className="scanner-list-row">
+                    <span>{s.fullName}</span>
+                    <span className="scanner-stamp">
+                      {s.checkedOutTo ? `${s.checkedOutTo}, ` : ''}{fmtTimeLocal(s.checkedOutAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <div className="fs-footer" style={{marginTop: '20px'}}>
+              <button className="scanner-btn" onClick={reset}>Scan another</button>
+              <button className="scanner-btn scanner-btn-primary" onClick={onClose}>Done</button>
+            </div>
+          </div>
+        )}
+
+        {/* --- FAMILY RESULT UI --- */}
         {family && (
           <div className="fs-result">
             <div className="fs-family">
@@ -211,7 +245,7 @@ const FamilyScanner = ({ onClose, onChanged }) => {
                                 <button
                                   className="checkin-btn primary"
                                   disabled={busy}
-                                  onClick={() => mark(student.id, sess.sessionId, 'IN')}
+                                  onClick={() => markFamily(student.id, sess.sessionId, 'IN')}
                                 >
                                   <LogIn size={14} /> {left ? 'Back in' : 'Check in'}
                                 </button>
@@ -219,7 +253,7 @@ const FamilyScanner = ({ onClose, onChanged }) => {
                                   <button
                                     className="checkin-btn ghost"
                                     disabled={busy}
-                                    onClick={() => mark(student.id, sess.sessionId, 'IN', 'LATE')}
+                                    onClick={() => markFamily(student.id, sess.sessionId, 'IN', 'LATE')}
                                     title="Arrived after the class started"
                                   >
                                     Late
@@ -231,7 +265,7 @@ const FamilyScanner = ({ onClose, onChanged }) => {
                               <button
                                 className="checkin-btn"
                                 disabled={busy}
-                                onClick={() => mark(student.id, sess.sessionId, 'OUT')}
+                                onClick={() => markFamily(student.id, sess.sessionId, 'OUT')}
                               >
                                 <LogOut size={14} /> Check out
                               </button>
@@ -256,4 +290,4 @@ const FamilyScanner = ({ onClose, onChanged }) => {
   );
 };
 
-export default FamilyScanner;
+export default UniversalScanner;

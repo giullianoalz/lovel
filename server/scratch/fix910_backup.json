@@ -1,0 +1,546 @@
+[
+  {
+    "id": "a1a60e0a-7179-4800-a0d2-7780cb63e05f",
+    "studentId": "2585a777-0f86-458e-9f1f-9b022b8f776a",
+    "familyId": "54ff0ead-dba7-44c4-ae89-c3f1ebe47a4b",
+    "amount": "130",
+    "type": "CHARGE",
+    "description": "Tiny Hands, Big Art - Elective",
+    "date": "2026-08-10T00:00:00.000Z",
+    "termId": null,
+    "quarter": null,
+    "recurringChargeId": null,
+    "periodKey": null,
+    "sessionCancellationId": null,
+    "sessionId": "799ab886-cc85-41a0-9dd8-12d2f04c5f29",
+    "invoiceId": "043be1a3-f3f8-427c-a0a4-6dbb06752d75",
+    "paymentId": null,
+    "createdAt": "2026-08-17T18:33:42.260Z",
+    "student": {
+      "id": "2585a777-0f86-458e-9f1f-9b022b8f776a",
+      "fullName": "Burbuja Alzate"
+    },
+    "invoice": {
+      "id": "043be1a3-f3f8-427c-a0a4-6dbb06752d75",
+      "invoiceNumber": "LC-4410",
+      "familyId": "54ff0ead-dba7-44c4-ae89-c3f1ebe47a4b",
+      "studentId": null,
+      "date": "2026-08-17T00:00:00.000Z",
+      "dateRange": "Classes on the calendar",
+      "poNumbers": [],
+      "source": null,
+      "subtotal": "130",
+      "processingFee": "0",
+      "totalAmount": "130",
+      "amountPaid": "0",
+      "status": "SENT",
+      "dueDate": "2026-09-16T00:00:00.000Z",
+      "stripePaymentLink": "https://checkout.stripe.com/c/pay/cs_test_a1uwE1fssXUAUloJ2SwpzmFUe9Kb7mJA0i2mvQB3EuKFinjmUhNATbyod6#fidnandhYHdWcXxpYCc%2FJ2FgY2RwaXEnKSdicGRmZGhqaWBTZHdsZGtxJz8nZmprcXdqaScpJ2R1bE5gfCc%2FJ3VuWnFgdnFaMDRRdEBLVkFDczIwUTFia0FDPV9kd3NATFRGaHBPdUZNS2lOfX1sYnZ0REJcQmtEbDN%2FUGlXUU5oPEI3b0M9RmF0N0BsMm43dDM8Sl09Mk5kaFFyaGNmZH01NWsyTDRfSlJNJyknY3dqaFZgd3Ngdyc%2FcXdwYCknZ2RmbmJ3anBrYUZqaWp3Jz8nJmNjY2NjYycpJ2lkfGpwcVF8dWAnPyd2bGtiaWBabHFgaCcpJ2BrZGdpYFVpZGZgbWppYWB3dic%2FcXdwYHgl",
+      "stripePaymentLinkId": "cs_test_a1uwE1fssXUAUloJ2SwpzmFUe9Kb7mJA0i2mvQB3EuKFinjmUhNATbyod6",
+      "createdAt": "2026-08-17T18:33:57.232Z",
+      "lines": [
+        {
+          "id": "e645471d-44b9-42e0-bfa8-0903dbda2584",
+          "invoiceId": "043be1a3-f3f8-427c-a0a4-6dbb06752d75",
+          "description": "Tiny Hands, Big Art - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "a1a60e0a-7179-4800-a0d2-7780cb63e05f"
+        }
+      ],
+      "payments": []
+    },
+    "invoiceLine": {
+      "id": "e645471d-44b9-42e0-bfa8-0903dbda2584",
+      "invoiceId": "043be1a3-f3f8-427c-a0a4-6dbb06752d75",
+      "description": "Tiny Hands, Big Art - Elective",
+      "amount": "130",
+      "quantity": 1,
+      "transactionId": "a1a60e0a-7179-4800-a0d2-7780cb63e05f"
+    },
+    "session": {
+      "id": "799ab886-cc85-41a0-9dd8-12d2f04c5f29",
+      "date": "2026-08-10T00:00:00.000Z"
+    }
+  },
+  {
+    "id": "5f84e521-9748-459e-8ecb-1ebad8d0e0af",
+    "studentId": "bdb36c7d-111c-4d9b-8944-5cdec6d7cb6d",
+    "familyId": "58251e70-9f5b-4867-a91a-74040be77d76",
+    "amount": "130",
+    "type": "CHARGE",
+    "description": "Explorers Through History - Elective",
+    "date": "2026-08-10T00:00:00.000Z",
+    "termId": null,
+    "quarter": null,
+    "recurringChargeId": null,
+    "periodKey": null,
+    "sessionCancellationId": null,
+    "sessionId": "454abdcf-0d21-43b7-957f-e7b0d69e6ecb",
+    "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+    "paymentId": null,
+    "createdAt": "2026-08-17T18:33:42.260Z",
+    "student": {
+      "id": "bdb36c7d-111c-4d9b-8944-5cdec6d7cb6d",
+      "fullName": "Cora Julian"
+    },
+    "invoice": {
+      "id": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+      "invoiceNumber": "LC-4411",
+      "familyId": "58251e70-9f5b-4867-a91a-74040be77d76",
+      "studentId": null,
+      "date": "2026-08-17T00:00:00.000Z",
+      "dateRange": "Classes on the calendar",
+      "poNumbers": [],
+      "source": null,
+      "subtotal": "780",
+      "processingFee": "0",
+      "totalAmount": "780",
+      "amountPaid": "0",
+      "status": "SENT",
+      "dueDate": "2026-09-16T00:00:00.000Z",
+      "stripePaymentLink": null,
+      "stripePaymentLinkId": null,
+      "createdAt": "2026-08-17T18:33:58.242Z",
+      "lines": [
+        {
+          "id": "0e0136e3-459a-4e69-a20f-35024d9921c3",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Explorers Through History - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "5f84e521-9748-459e-8ecb-1ebad8d0e0af"
+        },
+        {
+          "id": "3f163a75-411c-4291-9539-743b36c89a71",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Things that go Boom! - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "b6fbfdcb-e07d-4d9c-9b12-1dc1a07295ef"
+        },
+        {
+          "id": "932b84a7-a4d5-496a-a380-e243d48f03f9",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Ocean Exploration - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "aa11c83f-4e47-4e93-a384-2ffff01025ce"
+        },
+        {
+          "id": "b596d948-aef8-4251-adb8-cd965ac536a3",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Content Creation Station - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "bbd50557-33e7-4637-88c7-7f4307fcbbbf"
+        },
+        {
+          "id": "041fb54d-9a44-4a7d-8f47-d207642c25d1",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Wildlife Explorers - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "a93c992f-3244-4480-a2ff-c61115d90f29"
+        },
+        {
+          "id": "e678c54e-201c-44cf-b106-a281e2bfff74",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Social Superpower Hour - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "b2c925ae-e5b9-4147-b114-56bd9a699877"
+        }
+      ],
+      "payments": []
+    },
+    "invoiceLine": {
+      "id": "0e0136e3-459a-4e69-a20f-35024d9921c3",
+      "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+      "description": "Explorers Through History - Elective",
+      "amount": "130",
+      "quantity": 1,
+      "transactionId": "5f84e521-9748-459e-8ecb-1ebad8d0e0af"
+    },
+    "session": {
+      "id": "454abdcf-0d21-43b7-957f-e7b0d69e6ecb",
+      "date": "2026-08-10T00:00:00.000Z"
+    }
+  },
+  {
+    "id": "bbd50557-33e7-4637-88c7-7f4307fcbbbf",
+    "studentId": "e9c77f6c-80b0-477f-af8f-b4cf339da895",
+    "familyId": "58251e70-9f5b-4867-a91a-74040be77d76",
+    "amount": "130",
+    "type": "CHARGE",
+    "description": "Content Creation Station - Elective",
+    "date": "2026-08-13T00:00:00.000Z",
+    "termId": null,
+    "quarter": null,
+    "recurringChargeId": null,
+    "periodKey": null,
+    "sessionCancellationId": null,
+    "sessionId": "15549171-85ea-43a8-ae68-3cabe0140dee",
+    "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+    "paymentId": null,
+    "createdAt": "2026-08-17T18:33:42.260Z",
+    "student": {
+      "id": "e9c77f6c-80b0-477f-af8f-b4cf339da895",
+      "fullName": "Marisa Julian"
+    },
+    "invoice": {
+      "id": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+      "invoiceNumber": "LC-4411",
+      "familyId": "58251e70-9f5b-4867-a91a-74040be77d76",
+      "studentId": null,
+      "date": "2026-08-17T00:00:00.000Z",
+      "dateRange": "Classes on the calendar",
+      "poNumbers": [],
+      "source": null,
+      "subtotal": "780",
+      "processingFee": "0",
+      "totalAmount": "780",
+      "amountPaid": "0",
+      "status": "SENT",
+      "dueDate": "2026-09-16T00:00:00.000Z",
+      "stripePaymentLink": null,
+      "stripePaymentLinkId": null,
+      "createdAt": "2026-08-17T18:33:58.242Z",
+      "lines": [
+        {
+          "id": "0e0136e3-459a-4e69-a20f-35024d9921c3",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Explorers Through History - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "5f84e521-9748-459e-8ecb-1ebad8d0e0af"
+        },
+        {
+          "id": "3f163a75-411c-4291-9539-743b36c89a71",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Things that go Boom! - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "b6fbfdcb-e07d-4d9c-9b12-1dc1a07295ef"
+        },
+        {
+          "id": "932b84a7-a4d5-496a-a380-e243d48f03f9",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Ocean Exploration - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "aa11c83f-4e47-4e93-a384-2ffff01025ce"
+        },
+        {
+          "id": "b596d948-aef8-4251-adb8-cd965ac536a3",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Content Creation Station - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "bbd50557-33e7-4637-88c7-7f4307fcbbbf"
+        },
+        {
+          "id": "041fb54d-9a44-4a7d-8f47-d207642c25d1",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Wildlife Explorers - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "a93c992f-3244-4480-a2ff-c61115d90f29"
+        },
+        {
+          "id": "e678c54e-201c-44cf-b106-a281e2bfff74",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Social Superpower Hour - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "b2c925ae-e5b9-4147-b114-56bd9a699877"
+        }
+      ],
+      "payments": []
+    },
+    "invoiceLine": {
+      "id": "b596d948-aef8-4251-adb8-cd965ac536a3",
+      "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+      "description": "Content Creation Station - Elective",
+      "amount": "130",
+      "quantity": 1,
+      "transactionId": "bbd50557-33e7-4637-88c7-7f4307fcbbbf"
+    },
+    "session": {
+      "id": "15549171-85ea-43a8-ae68-3cabe0140dee",
+      "date": "2026-08-13T00:00:00.000Z"
+    }
+  },
+  {
+    "id": "f06fb4c6-9819-436c-924d-4a067d4ec65b",
+    "studentId": "48aaebad-e14e-4c4e-9c16-e0fab42a66e7",
+    "familyId": "ae7a88f1-6195-4dc9-9ef2-f5bffdfaccb0",
+    "amount": "130",
+    "type": "CHARGE",
+    "description": "Let's Get Sticky - Elective",
+    "date": "2026-08-13T00:00:00.000Z",
+    "termId": null,
+    "quarter": null,
+    "recurringChargeId": null,
+    "periodKey": null,
+    "sessionCancellationId": null,
+    "sessionId": "6cc97888-4677-4aff-b96f-f110896ad35a",
+    "invoiceId": "27ea2dfd-4266-48b9-8783-12d866edd142",
+    "paymentId": null,
+    "createdAt": "2026-08-17T18:33:42.260Z",
+    "student": {
+      "id": "48aaebad-e14e-4c4e-9c16-e0fab42a66e7",
+      "fullName": "Aubrie Baker"
+    },
+    "invoice": {
+      "id": "27ea2dfd-4266-48b9-8783-12d866edd142",
+      "invoiceNumber": "LC-4418",
+      "familyId": "ae7a88f1-6195-4dc9-9ef2-f5bffdfaccb0",
+      "studentId": null,
+      "date": "2026-08-17T00:00:00.000Z",
+      "dateRange": "Classes on the calendar",
+      "poNumbers": [],
+      "source": null,
+      "subtotal": "660",
+      "processingFee": "0",
+      "totalAmount": "660",
+      "amountPaid": "0",
+      "status": "SENT",
+      "dueDate": "2026-09-16T00:00:00.000Z",
+      "stripePaymentLink": null,
+      "stripePaymentLinkId": null,
+      "createdAt": "2026-08-17T18:34:05.500Z",
+      "lines": [
+        {
+          "id": "7c1bffac-28f8-496f-a1fb-f6fa8ab03f75",
+          "invoiceId": "27ea2dfd-4266-48b9-8783-12d866edd142",
+          "description": "Project-Based Learning - Discovery Cove",
+          "amount": "400",
+          "quantity": 1,
+          "transactionId": "f7179ead-e058-4977-9a57-1b63441ca321"
+        },
+        {
+          "id": "4bb998e3-677b-4c47-81b8-1afbc75a6ff7",
+          "invoiceId": "27ea2dfd-4266-48b9-8783-12d866edd142",
+          "description": "Things that go Boom! - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "59ff23ee-a4e6-4fe0-99de-a180d357e51d"
+        },
+        {
+          "id": "d23c112a-51ea-449e-8853-f7ecb2850c8c",
+          "invoiceId": "27ea2dfd-4266-48b9-8783-12d866edd142",
+          "description": "Let's Get Sticky - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "f06fb4c6-9819-436c-924d-4a067d4ec65b"
+        }
+      ],
+      "payments": []
+    },
+    "invoiceLine": {
+      "id": "d23c112a-51ea-449e-8853-f7ecb2850c8c",
+      "invoiceId": "27ea2dfd-4266-48b9-8783-12d866edd142",
+      "description": "Let's Get Sticky - Elective",
+      "amount": "130",
+      "quantity": 1,
+      "transactionId": "f06fb4c6-9819-436c-924d-4a067d4ec65b"
+    },
+    "session": {
+      "id": "6cc97888-4677-4aff-b96f-f110896ad35a",
+      "date": "2026-08-13T00:00:00.000Z"
+    }
+  },
+  {
+    "id": "a93c992f-3244-4480-a2ff-c61115d90f29",
+    "studentId": "bdb36c7d-111c-4d9b-8944-5cdec6d7cb6d",
+    "familyId": "58251e70-9f5b-4867-a91a-74040be77d76",
+    "amount": "130",
+    "type": "CHARGE",
+    "description": "Wildlife Explorers - Elective",
+    "date": "2026-08-14T00:00:00.000Z",
+    "termId": null,
+    "quarter": null,
+    "recurringChargeId": null,
+    "periodKey": null,
+    "sessionCancellationId": null,
+    "sessionId": "f7814c2f-b091-4155-8db1-89188aa7021e",
+    "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+    "paymentId": null,
+    "createdAt": "2026-08-17T18:33:42.260Z",
+    "student": {
+      "id": "bdb36c7d-111c-4d9b-8944-5cdec6d7cb6d",
+      "fullName": "Cora Julian"
+    },
+    "invoice": {
+      "id": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+      "invoiceNumber": "LC-4411",
+      "familyId": "58251e70-9f5b-4867-a91a-74040be77d76",
+      "studentId": null,
+      "date": "2026-08-17T00:00:00.000Z",
+      "dateRange": "Classes on the calendar",
+      "poNumbers": [],
+      "source": null,
+      "subtotal": "780",
+      "processingFee": "0",
+      "totalAmount": "780",
+      "amountPaid": "0",
+      "status": "SENT",
+      "dueDate": "2026-09-16T00:00:00.000Z",
+      "stripePaymentLink": null,
+      "stripePaymentLinkId": null,
+      "createdAt": "2026-08-17T18:33:58.242Z",
+      "lines": [
+        {
+          "id": "0e0136e3-459a-4e69-a20f-35024d9921c3",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Explorers Through History - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "5f84e521-9748-459e-8ecb-1ebad8d0e0af"
+        },
+        {
+          "id": "3f163a75-411c-4291-9539-743b36c89a71",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Things that go Boom! - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "b6fbfdcb-e07d-4d9c-9b12-1dc1a07295ef"
+        },
+        {
+          "id": "932b84a7-a4d5-496a-a380-e243d48f03f9",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Ocean Exploration - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "aa11c83f-4e47-4e93-a384-2ffff01025ce"
+        },
+        {
+          "id": "b596d948-aef8-4251-adb8-cd965ac536a3",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Content Creation Station - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "bbd50557-33e7-4637-88c7-7f4307fcbbbf"
+        },
+        {
+          "id": "041fb54d-9a44-4a7d-8f47-d207642c25d1",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Wildlife Explorers - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "a93c992f-3244-4480-a2ff-c61115d90f29"
+        },
+        {
+          "id": "e678c54e-201c-44cf-b106-a281e2bfff74",
+          "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+          "description": "Social Superpower Hour - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "b2c925ae-e5b9-4147-b114-56bd9a699877"
+        }
+      ],
+      "payments": []
+    },
+    "invoiceLine": {
+      "id": "041fb54d-9a44-4a7d-8f47-d207642c25d1",
+      "invoiceId": "8b44e2da-f0e0-4850-b0cf-d4e9b33daf2d",
+      "description": "Wildlife Explorers - Elective",
+      "amount": "130",
+      "quantity": 1,
+      "transactionId": "a93c992f-3244-4480-a2ff-c61115d90f29"
+    },
+    "session": {
+      "id": "f7814c2f-b091-4155-8db1-89188aa7021e",
+      "date": "2026-08-14T00:00:00.000Z"
+    }
+  },
+  {
+    "id": "8f06fe5e-5ac0-424d-ba79-46d5553018e6",
+    "studentId": "db3dae1b-0603-4b44-ab7e-e483c96927b0",
+    "familyId": "472801a0-4ff2-4a26-a445-29dac270ddb5",
+    "amount": "130",
+    "type": "CHARGE",
+    "description": "Wildlife Explorers - Elective",
+    "date": "2026-08-14T00:00:00.000Z",
+    "termId": null,
+    "quarter": null,
+    "recurringChargeId": null,
+    "periodKey": null,
+    "sessionCancellationId": null,
+    "sessionId": "f7814c2f-b091-4155-8db1-89188aa7021e",
+    "invoiceId": "77c0e9fb-f6e0-49e2-b801-d35992962fcc",
+    "paymentId": null,
+    "createdAt": "2026-08-17T18:33:42.260Z",
+    "student": {
+      "id": "db3dae1b-0603-4b44-ab7e-e483c96927b0",
+      "fullName": "Sophie Miers"
+    },
+    "invoice": {
+      "id": "77c0e9fb-f6e0-49e2-b801-d35992962fcc",
+      "invoiceNumber": "LC-4423",
+      "familyId": "472801a0-4ff2-4a26-a445-29dac270ddb5",
+      "studentId": null,
+      "date": "2026-08-17T00:00:00.000Z",
+      "dateRange": "Classes on the calendar",
+      "poNumbers": [],
+      "source": null,
+      "subtotal": "790",
+      "processingFee": "0",
+      "totalAmount": "790",
+      "amountPaid": "0",
+      "status": "SENT",
+      "dueDate": "2026-09-16T00:00:00.000Z",
+      "stripePaymentLink": null,
+      "stripePaymentLinkId": null,
+      "createdAt": "2026-08-17T18:34:10.325Z",
+      "lines": [
+        {
+          "id": "ed96fa36-a310-4dbf-bda6-6f58deedfd6b",
+          "invoiceId": "77c0e9fb-f6e0-49e2-b801-d35992962fcc",
+          "description": "Wellness Wednesday - Discovery Cove",
+          "amount": "400",
+          "quantity": 1,
+          "transactionId": "c94dfce8-fc91-4e6d-bee5-19dec470ca55"
+        },
+        {
+          "id": "9f8481dc-5a41-49b9-9b1d-1002b670cabb",
+          "invoiceId": "77c0e9fb-f6e0-49e2-b801-d35992962fcc",
+          "description": "Social Superpower Hour - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "1c43dcf9-553c-4241-9f1e-51d3c2995ebd"
+        },
+        {
+          "id": "832a97d0-3dee-4449-9198-21bbb3d34e78",
+          "invoiceId": "77c0e9fb-f6e0-49e2-b801-d35992962fcc",
+          "description": "Wildlife Explorers - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "8f06fe5e-5ac0-424d-ba79-46d5553018e6"
+        },
+        {
+          "id": "a16a6fcd-8ecd-48c0-beeb-3c53b9160837",
+          "invoiceId": "77c0e9fb-f6e0-49e2-b801-d35992962fcc",
+          "description": "The Girlfriend's Club - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "cf96fd7a-6fd7-433a-bcee-d54500cfeb2a"
+        }
+      ],
+      "payments": []
+    },
+    "invoiceLine": {
+      "id": "832a97d0-3dee-4449-9198-21bbb3d34e78",
+      "invoiceId": "77c0e9fb-f6e0-49e2-b801-d35992962fcc",
+      "description": "Wildlife Explorers - Elective",
+      "amount": "130",
+      "quantity": 1,
+      "transactionId": "8f06fe5e-5ac0-424d-ba79-46d5553018e6"
+    },
+    "session": {
+      "id": "f7814c2f-b091-4155-8db1-89188aa7021e",
+      "date": "2026-08-14T00:00:00.000Z"
+    }
+  }
+]

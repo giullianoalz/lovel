@@ -327,6 +327,32 @@ const CalendarView = () => {
   
   // Add Event States
   const [isAddEventDropdownOpen, setIsAddEventDropdownOpen] = useState(false);
+  const [gridClickMenu, setGridClickMenu] = useState(null);
+
+  const handleGridClick = (e, date, teacherName = null) => {
+    if (!canAddEvents) return;
+    if (e.target.closest('.agenda-event, .positioned-event, .mini-event')) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    let y = e.clientY - rect.top;
+    if (y < 0) y = 0;
+    const totalMins = y / PIXELS_PER_MINUTE;
+    const snapped = Math.round(totalMins / 30) * 30;
+    const h = Math.floor(snapped / 60) + START_HOUR;
+    const m = snapped % 60;
+    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    
+    let left = e.clientX + 10;
+    if (window.innerWidth - left < 250) left = e.clientX - 260;
+
+    setGridClickMenu({
+      x: left,
+      y: e.clientY + 10,
+      date,
+      time: timeStr,
+      teacher: teacherName
+    });
+  };
   const [activeModal, setActiveModal] = useState(null); // 'quick', 'full'
   const [isShiftSchedulerOpen, setIsShiftSchedulerOpen] = useState(false);
   // The kinds of work an hour can be, for the picker on a session. Only the
@@ -1864,10 +1890,16 @@ const CalendarView = () => {
     // Own-PTO rows carry no name (the server only names people on the org-wide
     // view), and a nameless column would render as a blank tutor lane.
     .filter(Boolean);
-  const uniqueTeachers = [...new Set([
+  let uniqueTeachers = [...new Set([
     ...dayEventsList.flatMap(e => e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames : [e.teacher]), 
     ...todaysPtoTeachers
   ].filter(Boolean))].sort();
+
+  if (searchForm.tutors.length > 0) {
+    uniqueTeachers = uniqueTeachers.filter(t => 
+      searchForm.tutors.some(st => t.toLowerCase().includes(st.toLowerCase()))
+    );
+  }
 
   // Moves currentDate by one unit of whatever's currently in view — this is
   // what the header's ◀ ▶ arrows call; each change re-fetches sessions via
@@ -2532,6 +2564,7 @@ const CalendarView = () => {
                              setHoverTime({ top: snapped * PIXELS_PER_MINUTE, label });
                            }}
                            onMouseLeave={() => setHoverTime(null)}
+                           onClick={e => handleGridClick(e, date)}
                          >
 
                            {/* Horizontal lines */}
@@ -2651,7 +2684,11 @@ const CalendarView = () => {
                          {isOutToday && <span className="instructor-pto-badge">Out</span>}
                       </div>
 
-                      <div className="timeline-container" style={{ height: `${24 * 60 * PIXELS_PER_MINUTE}px` }}>
+                      <div 
+                         className="timeline-container" 
+                         style={{ height: `${24 * 60 * PIXELS_PER_MINUTE}px` }}
+                         onClick={e => handleGridClick(e, currentDate, teacher)}
+                      >
                          {/* Background Hour Lines */}
                          {Array.from({ length: 24 }).map((_, i) => (
                            <React.Fragment key={i}>
@@ -3985,6 +4022,60 @@ const CalendarView = () => {
           // to come back through that fetch to appear on the grid.
           onSaved={() => loadStaffEvents(view, currentDate)}
         />
+      )}
+
+      {/* ── GRID CLICK MENU ────────────────────────────────────────── */}
+      {gridClickMenu && (
+        <>
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} onClick={() => setGridClickMenu(null)} />
+          <div 
+            className="add-event-dropdown"
+            style={{ position: 'fixed', top: gridClickMenu.y, left: gridClickMenu.x, zIndex: 1001, display: 'flex' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-light)', marginBottom: '4px', background: '#f8fafc', borderTopLeftRadius: '8px', borderTopRightRadius: '8px' }}>
+              <strong style={{ fontSize: '15px', color: 'var(--text-main)', display: 'block' }}>
+                {gridClickMenu.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+              </strong>
+              <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: 4 }}>
+                {gridClickMenu.time} {gridClickMenu.teacher ? `· ${gridClickMenu.teacher.replace('Prof. ', '')}` : ''}
+              </div>
+            </div>
+            
+            <div className="dropdown-item" onClick={() => {
+              const [h, m] = gridClickMenu.time.split(':').map(Number);
+              const endH = h + 1;
+              const endStr = `${String(endH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+              setNewEventForm(prev => ({
+                ...prev,
+                date: toISODate(gridClickMenu.date),
+                startTime: gridClickMenu.time,
+                endTime: endStr,
+                teacher: gridClickMenu.teacher || ''
+              }));
+              setActiveModal('full');
+              setGridClickMenu(null);
+            }}>
+              <CalendarPlus size={16} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontWeight: 600 }}>Quick-Add Lesson</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Create a new lesson at this time</span>
+              </div>
+            </div>
+
+            <div className="dropdown-item" onClick={() => {
+              setNewEventForm(prev => ({ ...prev, date: toISODate(gridClickMenu.date), startTime: gridClickMenu.time }));
+              setActiveModal('full');
+              setGridClickMenu(null);
+            }}>
+              <CalendarIcon size={16} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontWeight: 600 }}>New Non-Tutoring Event</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Create a new event without students</span>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

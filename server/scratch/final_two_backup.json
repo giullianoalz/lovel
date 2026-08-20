@@ -1,0 +1,204 @@
+{
+  "paul": {
+    "id": "ae6ca1ef-f299-48de-baea-4c0515b971d8",
+    "studentId": "25dfb313-f912-4ef2-87b3-77fdf14e75ef",
+    "familyId": "730265d3-87f2-4925-a678-f98835a4ab42",
+    "amount": "130",
+    "type": "CHARGE",
+    "description": "Wildlife Explorers - Elective",
+    "date": "2026-08-14T00:00:00.000Z",
+    "termId": null,
+    "quarter": null,
+    "recurringChargeId": null,
+    "periodKey": null,
+    "sessionCancellationId": null,
+    "sessionId": "f7814c2f-b091-4155-8db1-89188aa7021e",
+    "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+    "paymentId": null,
+    "createdAt": "2026-08-17T18:33:42.260Z",
+    "student": {
+      "id": "25dfb313-f912-4ef2-87b3-77fdf14e75ef"
+    },
+    "invoiceLine": {
+      "id": "de734818-ba6d-4737-bc34-1813335a030a",
+      "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+      "description": "Wildlife Explorers - Elective",
+      "amount": "130",
+      "quantity": 1,
+      "transactionId": "ae6ca1ef-f299-48de-baea-4c0515b971d8"
+    },
+    "session": {
+      "id": "f7814c2f-b091-4155-8db1-89188aa7021e"
+    },
+    "invoice": {
+      "id": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+      "invoiceNumber": "LC-4399",
+      "familyId": "730265d3-87f2-4925-a678-f98835a4ab42",
+      "studentId": null,
+      "date": "2026-08-17T00:00:00.000Z",
+      "dateRange": "Classes on the calendar",
+      "poNumbers": [],
+      "source": null,
+      "subtotal": "1830",
+      "processingFee": "0",
+      "totalAmount": "1830",
+      "amountPaid": "500",
+      "status": "PARTIAL",
+      "dueDate": "2026-09-16T00:00:00.000Z",
+      "stripePaymentLink": null,
+      "stripePaymentLinkId": null,
+      "createdAt": "2026-08-17T18:33:45.782Z",
+      "payments": [],
+      "lines": [
+        {
+          "id": "776914f2-ca1e-4eeb-ba6d-a57ee77d44ad",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Socialization Stations - Discovery Cove",
+          "amount": "400",
+          "quantity": 1,
+          "transactionId": "73bf7ab6-68b1-47e7-aeb6-1be54d145e40"
+        },
+        {
+          "id": "b6ed1576-b500-4f91-9326-9face98c33ff",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Tiny Hands, Big Art - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "200bcc1b-26a6-41e4-8562-e409c051e0d4"
+        },
+        {
+          "id": "f6cbc664-45bf-4165-bbc4-3d781a1b957a",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Tiny Hands, Big Art - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "3b3e42ce-559e-41ea-9516-409a3a3a49f7"
+        },
+        {
+          "id": "53ef7023-a017-4df8-ac0a-d1bd26619d35",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Things that go Boom! - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "436946a5-b467-4b12-936a-875e3fe3c7b1"
+        },
+        {
+          "id": "f2cf6fc8-f000-4b95-854f-3966d13c72d2",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "The Girlfriend's Club - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "cd499fe2-b5a7-4b00-a559-d88040912d6f"
+        },
+        {
+          "id": "ceab445d-2585-45c5-a146-4b8abe4cb9e1",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "The Messy Art Lab - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "6e4307ca-3c4f-4d7b-9280-c8a14bf626b4"
+        },
+        {
+          "id": "d3f38669-83b7-4a8f-85f7-568b7b8e399e",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Things that go Boom! - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "f3074d93-0865-4627-b241-09fb5eec4209"
+        },
+        {
+          "id": "a250eb69-1670-4b16-9434-0cc15b98e69e",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Color and Composition - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "3838a4ab-c880-414c-91cb-b5f35b18c3f0"
+        },
+        {
+          "id": "d324f168-d0ad-43da-a51b-8fe13a540cf7",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Content Creation Station - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "9db1e4f7-b6be-4055-931e-b038c8a2363c"
+        },
+        {
+          "id": "c28e8f89-cb36-4327-97ea-6bf9f63b0eab",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Social Superpower Hour - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "e3a22b9f-0a04-4743-979a-3f008f2aec20"
+        },
+        {
+          "id": "e8166d5a-749d-4817-a418-db17f666e595",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Wildlife Explorers - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "573d2b4d-4971-4b3e-b821-060ee6355fd9"
+        },
+        {
+          "id": "de734818-ba6d-4737-bc34-1813335a030a",
+          "invoiceId": "5a3f281d-98eb-4156-a00d-e01bcf41c028",
+          "description": "Wildlife Explorers - Elective",
+          "amount": "130",
+          "quantity": 1,
+          "transactionId": "ae6ca1ef-f299-48de-baea-4c0515b971d8"
+        }
+      ]
+    }
+  },
+  "inv41": {
+    "id": "9181084b-b5bc-4dd5-9aab-02bfb7c7e98d",
+    "invoiceNumber": "LC-4441",
+    "familyId": "804869a6-0534-41db-9a16-3083b52e109a",
+    "studentId": null,
+    "date": "2026-08-18T00:00:00.000Z",
+    "dateRange": "Classes on the calendar",
+    "poNumbers": [],
+    "source": null,
+    "subtotal": "400",
+    "processingFee": "0",
+    "totalAmount": "400",
+    "amountPaid": "400",
+    "status": "PAID",
+    "dueDate": "2026-09-17T00:00:00.000Z",
+    "stripePaymentLink": null,
+    "stripePaymentLinkId": null,
+    "createdAt": "2026-08-18T11:46:14.376Z",
+    "payments": [],
+    "lines": [
+      {
+        "id": "f0df2e15-b590-44f0-936c-bd610656d9db",
+        "invoiceId": "9181084b-b5bc-4dd5-9aab-02bfb7c7e98d",
+        "description": "Game-Based Learning - Discovery Cove",
+        "amount": "400",
+        "quantity": 1,
+        "transactionId": "3beee7d4-456d-4737-89a8-12a7479d3e68",
+        "transaction": {
+          "id": "3beee7d4-456d-4737-89a8-12a7479d3e68",
+          "studentId": "055e2884-529f-4b78-8ded-b9f7db083fcc",
+          "familyId": "804869a6-0534-41db-9a16-3083b52e109a",
+          "amount": "400",
+          "type": "CHARGE",
+          "description": "Game-Based Learning - Discovery Cove",
+          "date": "2026-08-13T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "e03d9e3e-be66-4f18-b2c2-c584b8581548",
+          "invoiceId": "9181084b-b5bc-4dd5-9aab-02bfb7c7e98d",
+          "paymentId": null,
+          "createdAt": "2026-08-18T11:46:02.583Z"
+        }
+      }
+    ],
+    "family": {
+      "id": "804869a6-0534-41db-9a16-3083b52e109a",
+      "name": "Selbee Family"
+    }
+  }
+}

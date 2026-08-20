@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LogIn, LogOut, Clock, DoorOpen, CheckCircle2, Phone, QrCode, Users, ScrollText } from 'lucide-react';
 import api from '../../lib/api';
 import ErrorBanner from '../Layout/ErrorBanner';
-import PickupScanner from './PickupScanner';
-import FamilyScanner from './FamilyScanner';
+import UniversalScanner from './UniversalScanner';
 import AttendanceLog from './AttendanceLog';
 import './CheckInBoard.css';
 
@@ -44,7 +43,6 @@ const CheckInBoard = ({ canSeeParentPhone = false }) => {
   const [pending, setPending] = useState({});
   const [phones, setPhones] = useState({});
   const [scanning, setScanning] = useState(false);
-  const [scanningFamily, setScanningFamily] = useState(false);
   const [showLog, setShowLog] = useState(false);
 
   const load = useCallback(async () => {
@@ -117,13 +115,8 @@ const CheckInBoard = ({ canSeeParentPhone = false }) => {
       {error && <ErrorBanner message={error} onRetry={load} />}
 
       <div className="checkin-toolbar">
-        {/* Arrivals first: it is the scan the desk reaches for all afternoon,
-            and the pickup code only exists for someone who isn't the family. */}
-        <button className="checkin-btn primary" onClick={() => setScanningFamily(true)}>
-          <Users size={15} /> Scan family QR
-        </button>
-        <button className="checkin-btn" onClick={() => setScanning(true)}>
-          <QrCode size={15} /> Scan pickup code
+        <button className="checkin-btn primary" onClick={() => setScanning(true)}>
+          <QrCode size={15} /> Scan QR code
         </button>
         {/* Mounted only while open: it fetches on mount, and the log is read
             when a question comes up, not watched all afternoon. */}
@@ -134,22 +127,10 @@ const CheckInBoard = ({ canSeeParentPhone = false }) => {
 
       {showLog && <AttendanceLog />}
 
-      {scanningFamily && (
-        <FamilyScanner
-          onClose={() => setScanningFamily(false)}
-          // The scanner writes one child at a time and patches its own view, so
-          // this only brings the board behind it back in step.
-          onChanged={load}
-        />
-      )}
-
       {scanning && (
-        <PickupScanner
+        <UniversalScanner
           onClose={() => setScanning(false)}
-          // The scan writes the check-outs server-side, so the board has to go
-          // back for them — patching from the response would miss any sibling
-          // released by the same code in another class.
-          onReleased={load}
+          onChanged={load}
         />
       )}
 

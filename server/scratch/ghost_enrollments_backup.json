@@ -1,0 +1,227 @@
+[
+  {
+    "id": "9141db7a-ea3d-4287-8ca5-fb29d243533d",
+    "classId": "0af115c8-34cd-47a1-b99c-71b13f04e6ed",
+    "studentId": "b5039c25-274e-4763-a401-1937572b7107",
+    "enrolledAt": "2026-08-01T18:49:55.605Z",
+    "status": "inactive",
+    "class": {
+      "id": "0af115c8-34cd-47a1-b99c-71b13f04e6ed",
+      "name": "Adulting 101"
+    },
+    "student": {
+      "id": "b5039c25-274e-4763-a401-1937572b7107",
+      "fullName": "Izayah Brown"
+    }
+  },
+  {
+    "id": "299cce8a-1a09-478b-8f3c-86253832b529",
+    "classId": "8eee1981-578f-4a2f-84d0-50b21ddd6b82",
+    "studentId": "4f07e7bb-6677-4214-acda-bf5e156cfc85",
+    "enrolledAt": "2026-07-29T14:59:28.669Z",
+    "status": "inactive",
+    "class": {
+      "id": "8eee1981-578f-4a2f-84d0-50b21ddd6b82",
+      "name": "Explorers Through History"
+    },
+    "student": {
+      "id": "4f07e7bb-6677-4214-acda-bf5e156cfc85",
+      "fullName": "Aiden Berry"
+    }
+  },
+  {
+    "id": "b0d839ad-c458-4db1-b5ff-a13c6a9093ef",
+    "classId": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+    "studentId": "ce593d52-3487-4270-a70e-12d1950ad148",
+    "enrolledAt": "2026-07-30T20:06:02.144Z",
+    "status": "inactive",
+    "class": {
+      "id": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+      "name": "8th Grade Program"
+    },
+    "student": {
+      "id": "ce593d52-3487-4270-a70e-12d1950ad148",
+      "fullName": "Benjamin Martin"
+    }
+  },
+  {
+    "id": "df38f5bd-1fb1-4a3a-9e25-10194c496ebe",
+    "classId": "30afe31b-a0a2-4efb-8dc2-0d84be88c79b",
+    "studentId": "692ac85d-fc21-44b0-8f09-f25425f23337",
+    "enrolledAt": "2026-08-01T18:50:22.388Z",
+    "status": "inactive",
+    "class": {
+      "id": "30afe31b-a0a2-4efb-8dc2-0d84be88c79b",
+      "name": "Growing Minds and Growing Gardens"
+    },
+    "student": {
+      "id": "692ac85d-fc21-44b0-8f09-f25425f23337",
+      "fullName": "Presley Bernard"
+    }
+  },
+  {
+    "id": "36b2380d-fbd2-4a6b-a215-81088e89894f",
+    "classId": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+    "studentId": "a3b5c052-c92e-484b-895b-d6c2c47e9921",
+    "enrolledAt": "2026-07-30T20:06:14.999Z",
+    "status": "inactive",
+    "class": {
+      "id": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+      "name": "8th Grade Program"
+    },
+    "student": {
+      "id": "a3b5c052-c92e-484b-895b-d6c2c47e9921",
+      "fullName": "Elijah Quesada-Fisher"
+    }
+  },
+  {
+    "id": "69771b37-1156-457f-a081-9784ea472db5",
+    "classId": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+    "studentId": "64ec9203-9552-41ea-9743-467d99afda92",
+    "enrolledAt": "2026-07-30T20:06:12.239Z",
+    "status": "inactive",
+    "class": {
+      "id": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+      "name": "8th Grade Program"
+    },
+    "student": {
+      "id": "64ec9203-9552-41ea-9743-467d99afda92",
+      "fullName": "Oliver Dosal"
+    }
+  },
+  {
+    "id": "4c841cd6-855d-4b90-88e3-c3b39e8d30ae",
+    "classId": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+    "studentId": "3d437556-cb19-4627-add8-e22c34c264fd",
+    "enrolledAt": "2026-07-30T20:06:09.859Z",
+    "status": "inactive",
+    "class": {
+      "id": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+      "name": "8th Grade Program"
+    },
+    "student": {
+      "id": "3d437556-cb19-4627-add8-e22c34c264fd",
+      "fullName": "Haydn Martin"
+    }
+  },
+  {
+    "id": "e2b4ccc2-417e-4e0d-90a7-1ee6c52d83d4",
+    "classId": "30afe31b-a0a2-4efb-8dc2-0d84be88c79b",
+    "studentId": "f3ca9776-1419-49ef-8d04-71041c299dae",
+    "enrolledAt": "2026-08-01T18:50:23.968Z",
+    "status": "inactive",
+    "class": {
+      "id": "30afe31b-a0a2-4efb-8dc2-0d84be88c79b",
+      "name": "Growing Minds and Growing Gardens"
+    },
+    "student": {
+      "id": "f3ca9776-1419-49ef-8d04-71041c299dae",
+      "fullName": "Remi Bernard"
+    }
+  },
+  {
+    "id": "afc8d294-3090-4c48-ad42-5ed90d85162e",
+    "classId": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+    "studentId": "9792d61d-7928-417f-8369-c7cb8891f6f9",
+    "enrolledAt": "2026-07-30T20:06:05.989Z",
+    "status": "inactive",
+    "class": {
+      "id": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+      "name": "8th Grade Program"
+    },
+    "student": {
+      "id": "9792d61d-7928-417f-8369-c7cb8891f6f9",
+      "fullName": "Deaglan Scott"
+    }
+  },
+  {
+    "id": "1ecd7e35-b0d5-4903-a52f-0fad53e2b7ed",
+    "classId": "2643cf0a-4c1c-4ce0-b7a9-eddaf3ac7db6",
+    "studentId": "2c73b3ae-e2c4-4ba8-a1e5-82d9011d568d",
+    "enrolledAt": "2026-08-01T18:52:53.083Z",
+    "status": "inactive",
+    "class": {
+      "id": "2643cf0a-4c1c-4ce0-b7a9-eddaf3ac7db6",
+      "name": "Ocean Exploration"
+    },
+    "student": {
+      "id": "2c73b3ae-e2c4-4ba8-a1e5-82d9011d568d",
+      "fullName": "Jack Cooper"
+    }
+  },
+  {
+    "id": "80efce56-302b-43fb-a206-6aade0da7f68",
+    "classId": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+    "studentId": "ae43538b-c7cc-4457-b4d5-25286a56a106",
+    "enrolledAt": "2026-07-30T20:06:08.246Z",
+    "status": "inactive",
+    "class": {
+      "id": "4d771445-0fea-4ec1-982d-35e36f8c9f78",
+      "name": "8th Grade Program"
+    },
+    "student": {
+      "id": "ae43538b-c7cc-4457-b4d5-25286a56a106",
+      "fullName": "Elliana Martin (Ellie)"
+    }
+  },
+  {
+    "id": "c32e651d-29de-4351-950e-263787d313ce",
+    "classId": "52d888c1-7f42-4ab8-b097-50fa67bdca2a",
+    "studentId": "2c73b3ae-e2c4-4ba8-a1e5-82d9011d568d",
+    "enrolledAt": "2026-08-07T05:48:37.927Z",
+    "status": "inactive",
+    "class": {
+      "id": "52d888c1-7f42-4ab8-b097-50fa67bdca2a",
+      "name": "Biology"
+    },
+    "student": {
+      "id": "2c73b3ae-e2c4-4ba8-a1e5-82d9011d568d",
+      "fullName": "Jack Cooper"
+    }
+  },
+  {
+    "id": "891c6c71-3284-4259-a36c-d46c25a8c553",
+    "classId": "2643cf0a-4c1c-4ce0-b7a9-eddaf3ac7db6",
+    "studentId": "a2a35ed6-9100-41de-b493-212dd46d3236",
+    "enrolledAt": "2026-08-10T15:25:46.591Z",
+    "status": "inactive",
+    "class": {
+      "id": "2643cf0a-4c1c-4ce0-b7a9-eddaf3ac7db6",
+      "name": "Ocean Exploration"
+    },
+    "student": {
+      "id": "a2a35ed6-9100-41de-b493-212dd46d3236",
+      "fullName": "Aries Solano"
+    }
+  },
+  {
+    "id": "60c6ef89-db10-4a7c-a4ab-3f617d9dc0f9",
+    "classId": "f7e3c962-80ed-47ff-8aae-aa040c9768c6",
+    "studentId": "a16e7331-8f77-4f68-b79c-f396c073b4ab",
+    "enrolledAt": "2026-08-07T19:13:58.299Z",
+    "status": "inactive",
+    "class": {
+      "id": "f7e3c962-80ed-47ff-8aae-aa040c9768c6",
+      "name": "Content Creation Station"
+    },
+    "student": {
+      "id": "a16e7331-8f77-4f68-b79c-f396c073b4ab",
+      "fullName": "Khymani Oliver"
+    }
+  },
+  {
+    "id": "9556fb5f-314d-47df-85cc-bbe877dd6edd",
+    "classId": "0af115c8-34cd-47a1-b99c-71b13f04e6ed",
+    "studentId": "2585a777-0f86-458e-9f1f-9b022b8f776a",
+    "enrolledAt": "2026-08-18T20:11:17.973Z",
+    "status": "inactive",
+    "class": {
+      "id": "0af115c8-34cd-47a1-b99c-71b13f04e6ed",
+      "name": "Adulting 101"
+    },
+    "student": {
+      "id": "2585a777-0f86-458e-9f1f-9b022b8f776a",
+      "fullName": "Burbuja Alzate"
+    }
+  }
+]

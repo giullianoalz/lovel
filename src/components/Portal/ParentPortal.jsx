@@ -250,10 +250,10 @@ const RegistrationChildCard = ({ child, classes, electives, onClaim, onSubmit, s
 };
 
 /* ────────── Pickup Modal ────────── */
-const PickupModal = ({ children, onClose, onCreated }) => {
+const PickupModal = ({ children, onClose, onCreated, initialAuth = null }) => {
   const [form, setForm] = useState({ pickupPerson: '', relationship: 'Parent', validDate: '', studentId: '' });
   const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState(null);
+  const [created, setCreated] = useState(initialAuth);
   const today = new Date().toISOString().split('T')[0];
 
   const handleSubmit = async (e) => {
@@ -331,9 +331,11 @@ const PickupModal = ({ children, onClose, onCreated }) => {
             <div className="qr-wrapper">
               <QRCodeSVG value={qrPayload} size={200} bgColor="#ffffff" fgColor="#1e293b" level="M" includeMargin />
             </div>
-            <p className="qr-instructions">Show this QR code at the front desk to verify the authorization.</p>
+            <p className="qr-instructions">
+              <strong>Please take a screenshot of this QR code</strong> and send it to the person collecting your child. They must show it at the front desk.
+            </p>
             <div className="qr-actions">
-              <button className="qr-new-btn" onClick={() => setCreated(null)}>Create another</button>
+              {!initialAuth && <button className="qr-new-btn" onClick={() => setCreated(null)}>Create another</button>}
               <button className="qr-done-btn" onClick={onClose}>Done</button>
             </div>
           </div>
@@ -437,6 +439,7 @@ const ParentPortal = () => {
   const [statModal, setStatModal] = useState(null); // 'seashells' | 'punches' | 'positive' | 'warnings'
   const [pickupAuths, setPickupAuths] = useState([]);
   const [showPickupModal, setShowPickupModal] = useState(false);
+  const [viewAuth, setViewAuth] = useState(null);
   const [showFamilyCode, setShowFamilyCode] = useState(false);
   const [paying, setPaying]         = useState(null);
   const [payError, setPayError]     = useState(null);
@@ -1006,9 +1009,14 @@ const ParentPortal = () => {
                                     {isPast ? 'Expired' : 'Active'}
                                   </span>
                                   {!isPast && (
-                                    <button className="pp-revoke-btn" onClick={() => handleDeleteAuth(auth.id)}>
-                                      <Trash2 size={13} />
-                                    </button>
+                                    <>
+                                      <button className="pp-revoke-btn" style={{marginRight: '8px', color: 'var(--primary)'}} onClick={() => setViewAuth(auth)} title="View QR">
+                                        <QrCode size={13} />
+                                      </button>
+                                      <button className="pp-revoke-btn" onClick={() => handleDeleteAuth(auth.id)} title="Revoke">
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </>
                                   )}
                                 </div>
                               </div>
@@ -1259,11 +1267,12 @@ const ParentPortal = () => {
         )}
       </div>
 
-      {showPickupModal && (
+      {(showPickupModal || viewAuth) && (
         <PickupModal
           children={inPersonChildren}
-          onClose={() => setShowPickupModal(false)}
-          onCreated={handlePickupCreated}
+          onClose={() => { setShowPickupModal(false); setViewAuth(null); }}
+          onCreated={(auth) => { handlePickupCreated(); setViewAuth(auth); }}
+          initialAuth={viewAuth}
         />
       )}
 

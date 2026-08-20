@@ -695,8 +695,10 @@ export const database = {
       // Normalize DB field names (fileUrl/fileType) to match locally-uploaded
       // files (url/type) so the preview modal works for either source.
       materials: (s.materials || []).map(m => ({ name: m.name, url: m.fileUrl, type: m.fileType })),
-      visibility: s.notes?.[0]?.visibility || 'all',
-    }));
+    })).filter(s => {
+      const plainNotes = s.notes.replace(/<[^>]*>?/gm, '').replace(/&nbsp;/g, '').trim();
+      return plainNotes !== '' || s.materials.length > 0 || s.recordingUrl !== '';
+    });
     return realSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
   },
 

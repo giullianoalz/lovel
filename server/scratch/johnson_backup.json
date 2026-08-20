@@ -1,0 +1,256 @@
+[
+  {
+    "id": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+    "invoiceNumber": "LC-4407",
+    "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+    "studentId": null,
+    "date": "2026-08-17T00:00:00.000Z",
+    "dateRange": "Classes on the calendar",
+    "poNumbers": [],
+    "source": null,
+    "subtotal": "2660",
+    "processingFee": "0",
+    "totalAmount": "2660",
+    "amountPaid": "0",
+    "status": "SENT",
+    "dueDate": "2026-09-16T00:00:00.000Z",
+    "stripePaymentLink": null,
+    "stripePaymentLinkId": null,
+    "createdAt": "2026-08-17T18:33:54.276Z",
+    "lines": [
+      {
+        "id": "09e797c9-631c-4f23-96e9-8820cec25b17",
+        "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+        "description": "8th Grade Program - 8th Grade Program",
+        "amount": "2000",
+        "quantity": 1,
+        "transactionId": "7bcd6fbd-fd6d-456f-b3df-551c13743e93",
+        "transaction": {
+          "id": "7bcd6fbd-fd6d-456f-b3df-551c13743e93",
+          "studentId": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+          "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+          "amount": "2000",
+          "type": "CHARGE",
+          "description": "8th Grade Program - 8th Grade Program",
+          "date": "2026-08-10T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "3ca8af6f-9c56-4cbd-b60a-ef679c64f3db",
+          "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+          "paymentId": null,
+          "createdAt": "2026-08-17T18:33:42.260Z",
+          "student": {
+            "id": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+            "fullName": "Jameson Johnson"
+          }
+        }
+      },
+      {
+        "id": "ca3836d7-afee-4010-bd1f-2a79478eb56b",
+        "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+        "description": "Project-Based Learning - Discovery Cove",
+        "amount": "400",
+        "quantity": 1,
+        "transactionId": "abfda8ce-db07-494f-b42c-007621f18998",
+        "transaction": {
+          "id": "abfda8ce-db07-494f-b42c-007621f18998",
+          "studentId": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+          "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+          "amount": "400",
+          "type": "CHARGE",
+          "description": "Project-Based Learning - Discovery Cove",
+          "date": "2026-08-11T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "23d23870-8ac7-42f1-a2b6-2fda9ba16c8e",
+          "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+          "paymentId": null,
+          "createdAt": "2026-08-17T18:33:42.260Z",
+          "student": {
+            "id": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+            "fullName": "Farrah Johnson"
+          }
+        }
+      },
+      {
+        "id": "4fc29ff0-2faf-466e-a7d5-aa5413c13488",
+        "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+        "description": "Growing Minds and Growing Gardens - Elective",
+        "amount": "130",
+        "quantity": 1,
+        "transactionId": "f8209f12-24ce-4922-9a07-9af8631f47dc",
+        "transaction": {
+          "id": "f8209f12-24ce-4922-9a07-9af8631f47dc",
+          "studentId": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+          "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+          "amount": "130",
+          "type": "CHARGE",
+          "description": "Growing Minds and Growing Gardens - Elective",
+          "date": "2026-08-11T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "d5fbea11-5f32-4f2e-9736-869283066e36",
+          "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+          "paymentId": null,
+          "createdAt": "2026-08-17T18:33:42.260Z",
+          "student": {
+            "id": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+            "fullName": "Farrah Johnson"
+          }
+        }
+      },
+      {
+        "id": "02b774d8-63dd-4306-9608-c5ac0cbdc5f7",
+        "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+        "description": "Color and Composition - Elective",
+        "amount": "130",
+        "quantity": 1,
+        "transactionId": "d4302424-1dd6-44ad-b693-971707d80c42",
+        "transaction": {
+          "id": "d4302424-1dd6-44ad-b693-971707d80c42",
+          "studentId": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+          "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+          "amount": "130",
+          "type": "CHARGE",
+          "description": "Color and Composition - Elective",
+          "date": "2026-08-13T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "ae1b4e7c-0246-4318-9982-bbf0d6c33ecd",
+          "invoiceId": "95c252fb-d5b4-4d3b-a421-1dbc22e4bb07",
+          "paymentId": null,
+          "createdAt": "2026-08-17T18:33:42.260Z",
+          "student": {
+            "id": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+            "fullName": "Farrah Johnson"
+          }
+        }
+      }
+    ],
+    "payments": []
+  },
+  {
+    "id": "75e62543-ea60-4924-a9f2-29fb4360f91b",
+    "invoiceNumber": "LC-4429",
+    "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+    "studentId": null,
+    "date": "2026-08-18T00:00:00.000Z",
+    "dateRange": "Classes on the calendar",
+    "poNumbers": [],
+    "source": null,
+    "subtotal": "930",
+    "processingFee": "0",
+    "totalAmount": "930",
+    "amountPaid": "0",
+    "status": "SENT",
+    "dueDate": "2026-09-17T00:00:00.000Z",
+    "stripePaymentLink": null,
+    "stripePaymentLinkId": null,
+    "createdAt": "2026-08-18T11:46:03.505Z",
+    "lines": [
+      {
+        "id": "eb969b85-802d-4fd9-a2b7-00119bd26f47",
+        "invoiceId": "75e62543-ea60-4924-a9f2-29fb4360f91b",
+        "description": "Let's Figure it Out - Elective",
+        "amount": "130",
+        "quantity": 1,
+        "transactionId": "c992e06a-5284-4612-b869-b0b87cfe1027",
+        "transaction": {
+          "id": "c992e06a-5284-4612-b869-b0b87cfe1027",
+          "studentId": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+          "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+          "amount": "130",
+          "type": "CHARGE",
+          "description": "Let's Figure it Out - Elective",
+          "date": "2026-08-10T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "c3d19cde-ecf6-4c8b-85ea-4d777cf57810",
+          "invoiceId": "75e62543-ea60-4924-a9f2-29fb4360f91b",
+          "paymentId": null,
+          "createdAt": "2026-08-18T11:46:02.583Z",
+          "student": {
+            "id": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+            "fullName": "Jameson Johnson"
+          }
+        }
+      },
+      {
+        "id": "e37fd618-1422-46b7-bdf5-0ce86ef042e6",
+        "invoiceId": "75e62543-ea60-4924-a9f2-29fb4360f91b",
+        "description": "Game-Based Learning - Discovery Cove",
+        "amount": "400",
+        "quantity": 1,
+        "transactionId": "37c4282d-c189-4adc-bc89-3b1489dd073d",
+        "transaction": {
+          "id": "37c4282d-c189-4adc-bc89-3b1489dd073d",
+          "studentId": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+          "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+          "amount": "400",
+          "type": "CHARGE",
+          "description": "Game-Based Learning - Discovery Cove",
+          "date": "2026-08-13T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "e03d9e3e-be66-4f18-b2c2-c584b8581548",
+          "invoiceId": "75e62543-ea60-4924-a9f2-29fb4360f91b",
+          "paymentId": null,
+          "createdAt": "2026-08-18T11:46:02.583Z",
+          "student": {
+            "id": "c6b303cc-0d56-430c-bc07-6df8229dd56f",
+            "fullName": "Farrah Johnson"
+          }
+        }
+      },
+      {
+        "id": "cd1b4579-4292-4dc8-b401-3a729165a9bf",
+        "invoiceId": "75e62543-ea60-4924-a9f2-29fb4360f91b",
+        "description": "Game-Based Learning - Discovery Cove",
+        "amount": "400",
+        "quantity": 1,
+        "transactionId": "9c9021b2-1a5a-4599-819f-8289f34d2db9",
+        "transaction": {
+          "id": "9c9021b2-1a5a-4599-819f-8289f34d2db9",
+          "studentId": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+          "familyId": "c505616e-33c6-4cf9-b0ff-7d947bbbbce5",
+          "amount": "400",
+          "type": "CHARGE",
+          "description": "Game-Based Learning - Discovery Cove",
+          "date": "2026-08-13T00:00:00.000Z",
+          "termId": null,
+          "quarter": null,
+          "recurringChargeId": null,
+          "periodKey": null,
+          "sessionCancellationId": null,
+          "sessionId": "e03d9e3e-be66-4f18-b2c2-c584b8581548",
+          "invoiceId": "75e62543-ea60-4924-a9f2-29fb4360f91b",
+          "paymentId": null,
+          "createdAt": "2026-08-18T11:46:02.583Z",
+          "student": {
+            "id": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+            "fullName": "Jameson Johnson"
+          }
+        }
+      }
+    ],
+    "payments": []
+  }
+]

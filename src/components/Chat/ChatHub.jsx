@@ -745,12 +745,25 @@ const ChatHub = () => {
                   <button className="icon-btn" onClick={handleAttachClick} disabled={isUploadingFile} title="Attach a file">
                     <Paperclip size={20} />
                   </button>
-                  <input
-                    type="text"
+                  <textarea
+                    className="auto-resize-textarea"
                     placeholder={isUploadingFile ? 'Sending file...' : 'Type your message...'}
                     value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    rows={1}
+                    onChange={(e) => {
+                      setInputText(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (inputText.trim()) {
+                          handleSendMessage();
+                          e.target.style.height = 'auto';
+                        }
+                      }
+                    }}
                   />
                   <button className="send-btn" onClick={handleSendMessage}>
                     <Send size={20} />

@@ -1,0 +1,39 @@
+{
+  "plan": [
+    {
+      "cls": "STEM Challenges",
+      "date": "2026-08-19",
+      "who": "Jameson Johnson",
+      "sessionId": "c1a8582f-3569-4fd0-8a90-d22e256467e3",
+      "studentId": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+      "base": 400,
+      "ya": null
+    },
+    {
+      "cls": "STEM Challenges",
+      "date": "2026-08-19",
+      "who": "Jayden Selbee",
+      "sessionId": "c1a8582f-3569-4fd0-8a90-d22e256467e3",
+      "studentId": "055e2884-529f-4b78-8ded-b9f7db083fcc",
+      "base": 400,
+      "ya": null
+    },
+    {
+      "cls": "Kitten Care Academy",
+      "date": "2026-08-13",
+      "who": "Jameson Johnson",
+      "sessionId": "89488240-cdab-4248-9166-ae9fcbc2a1c0",
+      "studentId": "6298c81c-0432-4d14-9b57-ba81fbcc881c",
+      "base": 130,
+      "ya": null
+    }
+  ],
+  "unprice": [
+    {
+      "cls": "Kitten Care Academy",
+      "date": "2026-08-20",
+      "id": "77774a0d-312b-4c5b-b4f9-0fd39dc8daa0",
+      "amount": "130"
+    }
+  ]
+}
