@@ -379,8 +379,17 @@ for (const r of results) {
       r.familyId = pick.id;
       r.familyName = pick.name;
       r.matchedVia = `family name "${pick.name}" (no student of theirs is in the app)`;
-    } else if (empty.length > 1) {
-      r.matchProblem = `no student matched and ${empty.length} empty "${r.surname} Family" households exist (${empty.map(f => f.name).join(', ')}) — no guardian name tells them apart`;
+    } else if (empty.length) {
+      // An archived legacy household under this surname already exists, but
+      // nothing on the block confirms it is this one. Creating another would
+      // split one household's debt across two records — the mirror image of
+      // the merge above, and just as silent. Refuse and name the candidates
+      // so an admin decides, whether there is one of them or several.
+      const who = guardianGivenNames(r).join(', ') || 'none listed';
+      const which = empty.map(f => f.name).join(', ');
+      r.matchProblem = empty.length > 1
+        ? `no student matched and ${empty.length} empty "${r.surname} Family" households exist (${which}) — no guardian on this block (${who}) tells them apart`
+        : `no student matched and the only empty "${r.surname} Family" household is "${which}" — no guardian on this block (${who}) confirms it is theirs`;
     } else if (populated.length > 0) {
       r.needsFamily = true;
       r.matchProblem = `no student matched, and "${r.surname} Family" already has real members — almost certainly a different, unrelated household with the same surname`;
