@@ -20,10 +20,30 @@ export const calculateFamilyBalance = async (tx, familyId) => {
 };
 
 /**
+ * Off while the TutorBird history is incomplete.
+ *
+ * The migration brought each family's old PAYMENTS across but, for 23 of them,
+ * not the matching CHARGES — Brooks is the extreme case, $3,590 of payments
+ * against $0 of charges where their old invoices say $4,180 was owed. That
+ * leaves a surplus on the ledger that never existed, and this function is what
+ * turns it into money: a fall invoice is raised and silently marked PAID from
+ * credit the family does not have. It had already happened to seven invoices
+ * ($4,534.25) before anyone noticed.
+ *
+ * Deliberately a switch and not a deletion: the old payments are real money
+ * that really arrived — Selbee's $2,000 for the first quarter is one of them —
+ * so the ledger keeps them and only the automatic allocation stops. Set
+ * APPLY_FAMILY_CREDIT=true to turn it back on once the missing charges are
+ * loaded and the balances are trustworthy again.
+ */
+const AUTO_APPLY_CREDIT = process.env.APPLY_FAMILY_CREDIT === 'true';
+
+/**
  * Applies any available family credit to a freshly-created invoice, up to its
  * total. Must run inside the same Prisma transaction that created the invoice.
  */
 export const applyAvailableCredit = async (tx, { familyId, invoiceId, invoiceTotal }) => {
+  if (!AUTO_APPLY_CREDIT) return { applied: 0 };
   if (!familyId || invoiceTotal <= 0) return { applied: 0 };
 
   // Measure the surplus that existed BEFORE this invoice's own charges. Those
