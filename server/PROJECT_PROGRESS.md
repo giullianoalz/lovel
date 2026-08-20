@@ -9,7 +9,7 @@
 
 ### ✅ Fase 1: Frontend & UI Design (Semanas 1-2)
 - **Periodo:** 16/04/2026 – 30/04/2026
-- **Alcance:** Creación de toda la interfaz visual, navegación, Dashboards de Admin/Parent, Calendario estilo TutorBird y lógica inicial de componentes.
+- **Alcance:** Creación de toda la interfaz visual, navegación, Dashboards de Admin/Parent, Calendario semanal tipo agenda y lógica inicial de componentes.
 - **Resultado:** Aplicación visualmente completa con Mock Data.
 
 ### ✅ Fase 2: Backend & Smart Registration (Semana 3)
@@ -176,7 +176,7 @@ La aplicación cliente está construida para ser rápida, visualmente impresiona
 - **`src/components/Students`**: Perfiles de alumnos, Snack Cabinet (Modal), y seguimiento de Prize Points.
 - **`src/components/Billing`**: Interfaz de facturas, balance de familias y pagos.
 - **`src/components/Registration`**: Flujo de inscripción (donde conectaremos la lógica de 1ra/2da opción).
-- **`src/components/Calendar`**: Vista de clases y sesiones (basado en el estilo TutorBird).
+- **`src/components/Calendar`**: Vista de clases y sesiones (vista semanal tipo agenda).
 
 ### Roadmap de Conexión
 1. **Migración de Datos:** Actualmente el front usa un archivo `database.js` (Mock Data). El siguiente paso es crear un `apiService.js` que use **Axios** o **Fetch** para llamar a nuestro nuevo Backend de Node.js.

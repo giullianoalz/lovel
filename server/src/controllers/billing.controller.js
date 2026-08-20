@@ -855,16 +855,124 @@ export const listInvoices = async (req, res, next) => {
 };
 
 /**
+ * The { studentId, lines } half of POST /api/billing/invoices — an invoice
+ * written from scratch for one student.
+ *
+ * Every line raises its own CHARGE transaction, exactly as editInvoice does
+ * when an admin adds a line by hand. That is not bookkeeping ceremony: a
+ * family's balance is the sum of its Transactions, so an invoice whose lines
+ * had no charges behind them would be a document the ledger never heard of —
+ * the family would owe money that no balance, statement or overdue check
+ * could see.
+ *
+ * The student's household comes from FamilyMember rather than the request, so
+ * a client cannot bill one family for another family's child.
+ */
+const createManualInvoice = async (req, res, next, { studentId, lines }) => {
+  try {
+    const student = await prisma.user.findUnique({
+      where: { id: studentId },
+      select: { id: true, fullName: true, role: true, familyMembers: { select: { familyId: true } } },
+    });
+    if (!student) {
+      return res.status(404).json({ error: 'Not Found', message: 'That student does not exist.' });
+    }
+    if (student.role !== 'STUDENT') {
+      return res.status(400).json({ error: 'Validation Error', message: 'Invoices can only be raised against a student.' });
+    }
+    // No household means nobody to bill and nowhere to hang the balance. Better
+    // a clear refusal than an invoice with a null familyId that never shows up
+    // on any family's account.
+    if (student.familyMembers.length === 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: `${student.fullName} is not attached to a family yet, so there is no account to bill. Add them to a family first.`,
+      });
+    }
+    const familyId = student.familyMembers[0].familyId;
+
+    const cleanLines = lines.map((l) => ({ description: String(l.description).trim(), amount: round2(Number(l.amount)) }));
+    const subtotal = round2(cleanLines.reduce((sum, l) => sum + l.amount, 0));
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
+
+      const created = await tx.invoice.create({
+        data: {
+          invoiceNumber,
+          familyId,
+          studentId,
+          subtotal,
+          totalAmount: subtotal,
+          status: 'SENT',
+          dateRange: 'Manual',
+          dueDate: new Date(Date.now() + 30 * 86400000), // 30 days, same as the sweep
+        },
+      });
+
+      for (const line of cleanLines) {
+        const charge = await tx.transaction.create({
+          data: {
+            familyId,
+            studentId,
+            invoiceId: created.id,
+            amount: line.amount,
+            type: 'CHARGE',
+            description: line.description,
+          },
+        });
+        await tx.invoiceLine.create({
+          data: { invoiceId: created.id, description: line.description, amount: line.amount, transactionId: charge.id },
+        });
+      }
+
+      const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
+      return applied > 0
+        ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' }
+        : created;
+    });
+
+    console.log(`[Billing] ${req.user.email} raised invoice ${invoice.invoiceNumber} for ${student.fullName} ($${subtotal}, ${cleanLines.length} lines)`);
+
+    res.status(201).json({
+      invoice: {
+        id: invoice.invoiceNumber,
+        dbId: invoice.id,
+        familyId: invoice.familyId,
+        studentId: invoice.studentId,
+        date: invoice.date.toISOString().split('T')[0],
+        dateRange: invoice.dateRange,
+        amount: Number(invoice.totalAmount),
+        amountPaid: Number(invoice.amountPaid),
+        status: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).toLowerCase(),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/billing/invoices
- * Generate a new invoice from uninvoiced charge transactions
+ *
+ * Two shapes, split by the validator (see createInvoiceSchema):
+ *
+ *  - { familyId, transactionIds } bundles charges already sitting unbilled on
+ *    the ledger — the calendar-charge sweep. One invoice per FAMILY.
+ *  - { studentId, lines } writes an invoice from scratch for ONE student, each
+ *    line raising its own CHARGE. Nothing needs to exist on the ledger first.
+ *
+ * The second path is why this endpoint stopped requiring transactionIds: with
+ * the migrated ledger gone there is routinely nothing unbilled to bundle, and
+ * "New Invoice" could do nothing at all. Billing per student is also what the
+ * family invoice never expressed — with several siblings in one household, a
+ * single invoice mixed their charges together and no line said whose it was.
  */
 export const createInvoice = async (req, res, next) => {
   try {
-    const { familyId, transactionIds } = req.body;
+    const { familyId, transactionIds, studentId, lines } = req.body;
 
-    if (!familyId || !transactionIds || transactionIds.length === 0) {
-      return res.status(400).json({ error: 'familyId and transactionIds are required.' });
-    }
+    if (lines) return createManualInvoice(req, res, next, { studentId, lines });
 
     // Only pull transactions that belong to this family and aren't already
     // billed — otherwise a stale client selection (or a re-submit) would

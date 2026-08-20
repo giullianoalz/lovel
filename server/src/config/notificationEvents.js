@@ -51,6 +51,16 @@ export const CHANNEL_LABELS = {
 
 export const NOTIFICATION_EVENTS = [
   {
+    key: 'ALERT',
+    label: 'Emergency class alert',
+    description: 'Sent when a teacher triggers an emergency alert (Class Support, Medic, Lock Down).',
+    category: null,
+    defaults: { enabled: true, audience: ['ADMINS'], channels: ['IN_APP', 'SMS'] },
+    allowedAudience: ['ADMINS'],
+    allowedChannels: ['IN_APP', 'EMAIL', 'SMS'],
+    params: [],
+  },
+  {
     key: 'CLASS_REMINDER',
     label: 'Class starting-soon reminder',
     description: 'Sent shortly before a class begins, to the recipients below.',

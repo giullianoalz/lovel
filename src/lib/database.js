@@ -529,6 +529,13 @@ export const database = {
     return response.data.invoice;
   },
 
+  // Writes an invoice for one student from typed lines, with no charges needing
+  // to exist on the ledger first. lines: [{ description, amount }]
+  createStudentInvoice: async (studentId, lines) => {
+    const response = await api.post('/billing/invoices', { studentId, lines });
+    return response.data.invoice;
+  },
+
   generateInvoiceId: async () => {
     const newInvoiceId = `${globalConfig.invoicePrefix}${globalConfig.nextInvoiceNumber}`;
     globalConfig.nextInvoiceNumber++;
@@ -707,7 +714,8 @@ export const database = {
       await api.post(`/sessions/${sessionId}/notes`, {
         notes,
         visibility,
-        recordingUrl
+        recordingUrl,
+        files
       });
       console.log(`[Database] Saved notes for session ${sessionId} [Visibility: ${visibility}] via API`);
       return true;

@@ -51,6 +51,8 @@ const BillingPanel = () => {
   // they are instructions, not money — nothing here is on anyone's balance.
   const [recurringCharges, setRecurringCharges] = useState([]);
   const [refundModal, setRefundModal] = useState(null); // { invoice, payment, amount, reason }
+  // Invoice being written by hand for a single student: { studentId, lines: [{ description, amount }] }
+  const [studentInvoice, setStudentInvoice] = useState(null);
 
   const loadBilling = async () => {
     setLoading(true);
@@ -404,6 +406,58 @@ const BillingPanel = () => {
     } catch (err) {
       setLoading(false);
       toast.error(err.userMessage || 'Could not process the refund. Please try again.');
+    }
+  };
+
+  /* Invoice written by hand for one student. `lines` always holds at least one
+     row so the form opens with something to type into. */
+  const openStudentInvoice = () => {
+    const familyStudents = students.filter(s => s.familyId === selectedFamily.id);
+    if (familyStudents.length === 0) {
+      toast.info('This family has no students to invoice.');
+      return;
+    }
+    setStudentInvoice({
+      studentId: familyStudents.length === 1 ? familyStudents[0].id : '',
+      lines: [{ description: '', amount: '' }],
+    });
+  };
+
+  const studentInvoiceTotal = studentInvoice
+    ? studentInvoice.lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0)
+    : 0;
+
+  const handleCreateStudentInvoice = async () => {
+    const { studentId, lines } = studentInvoice;
+    if (!studentId) {
+      toast.error('Pick the student this invoice is for.');
+      return;
+    }
+    // Drop blank rows rather than rejecting them — an empty trailing line is
+    // how people leave a form, not a mistake worth an error message.
+    const filled = lines
+      .map(l => ({ description: l.description.trim(), amount: parseFloat(l.amount) }))
+      .filter(l => l.description || !isNaN(l.amount));
+    if (filled.length === 0) {
+      toast.error('Add at least one line before creating the invoice.');
+      return;
+    }
+    const bad = filled.find(l => !l.description || isNaN(l.amount) || l.amount <= 0);
+    if (bad) {
+      toast.error('Every line needs a description and an amount greater than zero.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const invoice = await database.createStudentInvoice(studentId, filled);
+      setStudentInvoice(null);
+      setActiveTab('Invoices');
+      await loadBilling();
+      toast.success(`Invoice ${invoice.id} created for $${invoice.amount.toFixed(2)}.`);
+    } catch (err) {
+      setLoading(false);
+      toast.error(err.userMessage || 'Could not create the invoice. Please try again.');
     }
   };
 
@@ -991,6 +1045,12 @@ const BillingPanel = () => {
   // Map students for this family dynamically from Neon PostgreSQL
   const familyStudents = students.filter(s => s.familyId === selectedFamily.id);
 
+  // Charges sitting on the ledger that no invoice has picked up yet — what the
+  // "Bill pending charges" button would sweep, and why it only appears at all.
+  const pendingChargeCount = transactions.filter(
+    t => t.familyId === selectedFamily.id && t.type === 'Charge' && !t.invoiceId
+  ).length;
+
   return (
     <div className="billing-container">
       <button className="btn-back" onClick={() => setSelectedFamily(null)}>
@@ -1181,10 +1241,18 @@ const BillingPanel = () => {
 
           {activeTab === 'Invoices' && (
             <div className="tab-pane">
-              <div className="ledger-actions" style={{justifyContent: 'space-between'}}>
-                <button className="action-btn primary" onClick={handleGenerateInvoice}>
+              <div className="ledger-actions" style={{justifyContent: 'flex-start', gap: '0.5rem'}}>
+                <button className="action-btn primary" onClick={openStudentInvoice}>
                   <Plus size={16} /> New Invoice
                 </button>
+                {/* Only offered when it has something to sweep. Rendering it
+                    always is how the old single button came to look broken:
+                    with nothing unbilled it could only shrug. */}
+                {pendingChargeCount > 0 && (
+                  <button className="action-btn" onClick={handleGenerateInvoice}>
+                    <Receipt size={16} /> Bill {pendingChargeCount} pending charge{pendingChargeCount === 1 ? '' : 's'}
+                  </button>
+                )}
               </div>
 
               <table className="ledger-table">
@@ -1262,6 +1330,98 @@ const BillingPanel = () => {
       </div>
 
       {/* Add Transaction Modal */}
+      {studentInvoice && (
+        <div className="modal-overlay" onClick={() => setStudentInvoice(null)}>
+          <div className="tx-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>New Invoice</h3>
+              <button onClick={() => setStudentInvoice(null)}><X size={20}/></button>
+            </div>
+
+            <div className="tx-form">
+              <div className="form-group">
+                <label htmlFor="si-student">Student</label>
+                <select
+                  id="si-student"
+                  className="form-control"
+                  value={studentInvoice.studentId}
+                  onChange={e => setStudentInvoice({ ...studentInvoice, studentId: e.target.value })}
+                >
+                  <option value="">— Select a student —</option>
+                  {familyStudents.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Line items</label>
+                {studentInvoice.lines.map((line, i) => (
+                  <div key={i} className="si-line">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="e.g. September COVE tuition"
+                      value={line.description}
+                      onChange={e => {
+                        const lines = [...studentInvoice.lines];
+                        lines[i] = { ...lines[i], description: e.target.value };
+                        setStudentInvoice({ ...studentInvoice, lines });
+                      }}
+                    />
+                    <input
+                      type="number"
+                      className="form-control si-amount"
+                      placeholder="$0.00"
+                      min="0"
+                      step="0.01"
+                      value={line.amount}
+                      onChange={e => {
+                        const lines = [...studentInvoice.lines];
+                        lines[i] = { ...lines[i], amount: e.target.value };
+                        setStudentInvoice({ ...studentInvoice, lines });
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="si-remove"
+                      aria-label={`Remove line ${i + 1}`}
+                      disabled={studentInvoice.lines.length === 1}
+                      onClick={() => setStudentInvoice({
+                        ...studentInvoice,
+                        lines: studentInvoice.lines.filter((_, idx) => idx !== i),
+                      })}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="si-add"
+                  onClick={() => setStudentInvoice({
+                    ...studentInvoice,
+                    lines: [...studentInvoice.lines, { description: '', amount: '' }],
+                  })}
+                >
+                  <Plus size={14} /> Add line
+                </button>
+              </div>
+
+              <div className="si-total">
+                <span>Total</span>
+                <strong>${studentInvoiceTotal.toFixed(2)}</strong>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="action-btn" onClick={() => setStudentInvoice(null)}>Cancel</button>
+              <button className="action-btn primary" onClick={handleCreateStudentInvoice} disabled={loading}>
+                {loading ? 'Creating…' : 'Create Invoice'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isAddTxModalOpen && (
         <div className="modal-overlay" onClick={() => setIsAddTxModalOpen(false)}>
           <div className="tx-modal" onClick={e => e.stopPropagation()}>

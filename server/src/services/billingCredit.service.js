@@ -20,23 +20,23 @@ export const calculateFamilyBalance = async (tx, familyId) => {
 };
 
 /**
- * Off while the TutorBird history is incomplete.
+ * On by default again as of 2026-08-20.
  *
- * The migration brought each family's old PAYMENTS across but, for 23 of them,
- * not the matching CHARGES — Brooks is the extreme case, $3,590 of payments
- * against $0 of charges where their old invoices say $4,180 was owed. That
- * leaves a surplus on the ledger that never existed, and this function is what
- * turns it into money: a fall invoice is raised and silently marked PAID from
- * credit the family does not have. It had already happened to seven invoices
- * ($4,534.25) before anyone noticed.
+ * This was off for as long as the migrated ledger was on the books. That
+ * migration brought each family's old PAYMENTS across but, for 23 of them, not
+ * the matching CHARGES — Brooks being the extreme case, $3,590 of payments
+ * against $0 of charges. The surplus that left behind never existed, and this
+ * function is what turned it into money: an invoice raised and silently marked
+ * PAID from credit the family did not have, seven times ($4,534.25) before
+ * anyone noticed.
  *
- * Deliberately a switch and not a deletion: the old payments are real money
- * that really arrived — Selbee's $2,000 for the first quarter is one of them —
- * so the ledger keeps them and only the automatic allocation stops. Set
- * APPLY_FAMILY_CREDIT=true to turn it back on once the missing charges are
- * loaded and the balances are trustworthy again.
+ * The migrated ledger has since been deleted in full — 1,886 transactions
+ * across 99 families — so every balance the app now holds was raised by the
+ * app itself and means what it says. Set APPLY_FAMILY_CREDIT=false to turn
+ * auto-allocation back off if a future import ever makes balances doubtful
+ * again; do that BEFORE loading the data, not after.
  */
-const AUTO_APPLY_CREDIT = process.env.APPLY_FAMILY_CREDIT === 'true';
+const AUTO_APPLY_CREDIT = process.env.APPLY_FAMILY_CREDIT !== 'false';
 
 /**
  * Applies any available family credit to a freshly-created invoice, up to its

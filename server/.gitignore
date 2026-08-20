@@ -7,6 +7,7 @@ dist/
 # never commit one.
 backups/
 
-# Pasted TutorBird family-ledger pages (real balances, payment references) —
-# same reason as backups/ above.
-scripts/data/tutorbird-ledger/
+# One-off admin scripts and their backups. Same reason as backups/ above — a
+# billing-fix script here routinely dumps real family names, emails and
+# balances to a JSON snapshot before it writes.
+scratch/

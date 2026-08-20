@@ -117,7 +117,7 @@ const ImportStudentsModal = ({ onClose, onImported }) => {
     <div className="modal-overlay" onClick={onClose}>
       <div className="import-modal" onClick={e => e.stopPropagation()}>
         <div className="import-header">
-          <h2><UploadCloud size={22} /> Import from TutorBird (CSV)</h2>
+          <h2><UploadCloud size={22} /> Import students (CSV)</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={20} /></button>
         </div>
 
@@ -125,7 +125,7 @@ const ImportStudentsModal = ({ onClose, onImported }) => {
           <div className="import-body">
             <div className="import-dropzone">
               <FileText size={40} />
-              <p>Upload the CSV file exported from TutorBird (families / students).</p>
+              <p>Upload a CSV of families / students. You map the columns on the next step.</p>
               <label className="import-file-btn">
                 Select CSV
                 <input type="file" accept=".csv,.txt" hidden onChange={handleFile} />

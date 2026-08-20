@@ -1099,6 +1099,95 @@
   max-width: 500px;
 }
 
+/* Manual per-student invoice. The line list grows as an admin types, so the
+   modal scrolls internally rather than pushing its buttons off-screen. */
+.tx-modal {
+  max-height: 88vh;
+  overflow-y: auto;
+  animation: si-rise 0.18s ease-out;
+}
+
+@keyframes si-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.si-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.si-line .form-control { margin: 0; }
+.si-line .form-control:first-child { flex: 1 1 auto; min-width: 0; }
+
+.si-amount {
+  flex: 0 0 110px;
+  text-align: right;
+}
+
+.si-remove {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-light);
+  background: white;
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.si-remove:hover:not(:disabled) {
+  color: var(--danger, #dc2626);
+  border-color: var(--danger, #dc2626);
+  background: color-mix(in srgb, var(--danger, #dc2626) 8%, white);
+}
+
+.si-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.si-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 12px;
+  border: 1px dashed var(--border-light);
+  background: transparent;
+  border-radius: 8px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.si-add:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.si-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 20px 0 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.si-total strong {
+  font-size: 1.35rem;
+  color: var(--text-dark, #111827);
+}
+
 .tx-type-selector {
   display: flex;
   gap: 8px;

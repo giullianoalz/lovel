@@ -818,7 +818,7 @@
   font-size: 11px;
 }
 
-/* Week Time Grid View (TutorBird-style) */
+/* Week Time Grid View */
 .week-schedule-grid {
   display: flex;
   width: 100%;
@@ -1035,7 +1035,7 @@
 }
 
 /* --------------------------------------
-   TutorBird-style list events
+   list events
    (No left border, text colored to match)
 --------------------------------------- */
 .tb-list-event {

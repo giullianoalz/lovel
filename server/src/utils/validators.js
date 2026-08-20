@@ -88,10 +88,45 @@ export const createTransactionSchema = z.object({
   type: z.string().min(1, 'type is required'),
 }).passthrough();
 
+/**
+ * Two ways to raise an invoice, and the body says which:
+ *
+ *  - { familyId, transactionIds } bundles charges that already exist on the
+ *    ledger (the calendar-charge sweep).
+ *  - { studentId, lines } writes one from scratch for a single student, each
+ *    line raising its own charge. This is the per-student path; it does not
+ *    need anything to be on the ledger first.
+ *
+ * Deliberately not a plain `.optional()` on both pairs: that would accept an
+ * empty body and leave the controller to work out what was meant. A body must
+ * pick one shape, and picking neither (or both) is a validation error here
+ * rather than a surprise 400 further in.
+ */
 export const createInvoiceSchema = z.object({
-  familyId: uuid,
-  transactionIds: z.array(uuid).min(1, 'transactionIds must not be empty'),
-}).passthrough();
+  familyId: uuid.optional(),
+  transactionIds: z.array(uuid).min(1, 'transactionIds must not be empty').optional(),
+  studentId: uuid.optional(),
+  lines: z.array(z.object({
+    description: z.string().trim().min(1, 'each line needs a description'),
+    amount: z.coerce.number().positive('each line needs a positive amount'),
+  })).min(1, 'lines must not be empty').optional(),
+}).passthrough().superRefine((body, ctx) => {
+  const bundling = body.transactionIds !== undefined;
+  const manual = body.lines !== undefined;
+  if (bundling === manual) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Send either transactionIds (to bill existing charges) or lines (to write an invoice from scratch), not both.',
+    });
+    return;
+  }
+  if (bundling && !body.familyId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['familyId'], message: 'familyId is required when sending transactionIds.' });
+  }
+  if (manual && !body.studentId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['studentId'], message: 'studentId is required when sending lines.' });
+  }
+});
 
 export const createPickupAuthSchema = z.object({
   pickupPerson: z.string().min(1, 'pickupPerson is required'),

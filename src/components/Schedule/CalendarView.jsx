@@ -2460,7 +2460,7 @@ const CalendarView = () => {
                          <div className="week-day-body" style={{ minHeight: 'auto', padding: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                            {normalEvents.map(item => {
                               const isStaff = !!item.kind;
-                              // Match the TutorBird color themes based on subject
+                              // Match the color themes based on subject
                               let themeClass = isStaff ? item.kind : item.subject;
                               return (
                                 <div

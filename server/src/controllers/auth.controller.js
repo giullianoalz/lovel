@@ -153,7 +153,7 @@ const familyNameFor = (fullName) => {
  *     ever mint a PARENT and their STUDENT children. The route it replaces took
  *     `role` from the request, which meant anyone could sign up as an ADMIN.
  *  2. An email that already belongs to a User is refused outright. Families
- *     imported from TutorBird exist in the database before they ever log in;
+ *     put on the roster by staff exist in the database before they ever log in;
  *     linking on a matching email would let a stranger who guesses an address
  *     walk into an existing family's invoices, chat and children.
  *  3. The children land INACTIVE with a PENDING application. Nothing reaches a

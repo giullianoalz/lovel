@@ -1504,20 +1504,37 @@ export const supervisionSessions = async (req, res, next) => {
 
 export const addSessionNote = async (req, res, next) => {
   try {
-    const { notes, visibility = 'all' } = req.body;
+    const { notes, visibility = 'all', recordingUrl, files = [] } = req.body;
 
     const denied = await denyForeignSession(req.user, req.params.id);
     if (denied) return res.status(404).json(denied);
 
-    const note = await prisma.sessionNote.create({
-      data: {
-        sessionId: req.params.id,
-        notes,
-        visibility,
-      },
+    // Run in a transaction so we don't save notes if materials fail
+    const result = await prisma.$transaction(async (tx) => {
+      const note = await tx.sessionNote.create({
+        data: {
+          sessionId: req.params.id,
+          notes,
+          visibility,
+          recordingUrl: recordingUrl || null,
+        },
+      });
+
+      if (files && files.length > 0) {
+        await tx.sessionMaterial.createMany({
+          data: files.map(f => ({
+            sessionId: req.params.id,
+            name: f.name || 'Material',
+            fileUrl: f.url || f.fileUrl,
+            fileType: f.type || f.fileType || 'file',
+          })),
+        });
+      }
+
+      return note;
     });
 
-    res.status(201).json({ message: 'Session note added.', note });
+    res.status(201).json({ message: 'Session note added.', note: result });
   } catch (error) {
     next(error);
   }

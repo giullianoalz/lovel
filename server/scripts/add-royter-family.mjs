@@ -2,7 +2,7 @@
  * One-off: add the Royter family (Marina + student Marco) to the system so
  * an admin can enroll Marco into Lori Celli's 10am and 1pm classes.
  *
- * Follows the same pattern as import-tutorbird-contacts.mjs: placeholder
+ * Follows the roster-import pattern: placeholder
  * Firebase uid (shows up as "never invited" in Directory), synthetic
  * @import.local email for the student since email is required+unique.
  *
