@@ -464,6 +464,14 @@ export const database = {
     return response.data;
   },
 
+  // Recomputes and applies whatever account credit this invoice hasn't
+  // absorbed yet — for a deposit that landed after the invoice already
+  // existed. Safe to call any time; only ever raises amountPaid.
+  applyCreditToInvoice: async (id) => {
+    const response = await api.post(`/billing/invoices/${id}/apply-credit`);
+    return response.data;
+  },
+
   // The full specification of one invoice, plus who it would be emailed to.
   fetchInvoice: async (id) => {
     const response = await api.get(`/billing/invoices/${id}`);

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, ChevronRight, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers, GitFork
+  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers, GitFork, HandCoins
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
@@ -270,6 +270,20 @@ const BillingPanel = () => {
   const [voidingInvoiceId, setVoidingInvoiceId] = useState(null);
 
   const [splittingInvoiceId, setSplittingInvoiceId] = useState(null);
+  const [applyingCreditId, setApplyingCreditId] = useState(null);
+
+  const handleApplyCredit = async (inv) => {
+    setApplyingCreditId(inv.dbId);
+    try {
+      const res = await database.applyCreditToInvoice(inv.dbId);
+      toast[res.applied > 0 ? 'success' : 'info'](res.message);
+      if (res.applied > 0) await loadBilling();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not apply credit.');
+    } finally {
+      setApplyingCreditId(null);
+    }
+  };
 
   const handleSplitInvoice = async (inv) => {
     if (!window.confirm(
@@ -1455,6 +1469,16 @@ const BillingPanel = () => {
                             disabled={splittingInvoiceId === inv.dbId}
                           >
                             <GitFork size={14} />
+                          </button>
+                        )}
+                        {!['Paid', 'Cancelled'].includes(inv.status) && (
+                          <button
+                            className="tx-delete-btn"
+                            title="Apply any existing account credit (e.g. a deposit paid after this invoice) to this invoice"
+                            onClick={() => handleApplyCredit(inv)}
+                            disabled={applyingCreditId === inv.dbId}
+                          >
+                            <HandCoins size={14} />
                           </button>
                         )}
                         {inv.voidable && (

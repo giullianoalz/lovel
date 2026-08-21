@@ -11,6 +11,7 @@ import {
   createInvoice,
   mergeInvoices,
   splitInvoice,
+  applyCreditToInvoice,
   voidInvoice,
   editInvoice,
   getInvoice,
@@ -77,6 +78,9 @@ router.post('/invoices/:id/send', authenticate, requireRole('ADMIN'), sendInvoic
 // one per student (Admin). Same "before the generic GET/PATCH/DELETE :id
 // routes" placement as pdf/send, for the same reason.
 router.post('/invoices/:id/split', authenticate, requireRole('ADMIN'), splitInvoice);
+// POST /api/billing/invoices/:id/apply-credit — Sweep existing account
+// credit onto this invoice (Admin). Same placement reasoning as split/send.
+router.post('/invoices/:id/apply-credit', authenticate, requireRole('ADMIN'), applyCreditToInvoice);
 router.get('/invoices/:id', authenticate, requireRole('ADMIN'), getInvoice);
 
 // PATCH /api/billing/invoices/:id — Rewrite an invoice's line items (Admin).

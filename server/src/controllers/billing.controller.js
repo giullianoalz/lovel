@@ -1,6 +1,9 @@
 import prisma from '../config/database.js';
 import stripe from '../config/stripe.js';
-import { applyAvailableCredit, applyCreditAcrossInvoices, applyPerStudentCredit } from '../services/billingCredit.service.js';
+import {
+  applyAvailableCredit, applyCreditAcrossInvoices, applyPerStudentCredit,
+  sweepPaymentOntoOpenInvoices, applyCreditToExistingInvoice,
+} from '../services/billingCredit.service.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { notifyAdmins } from '../jobs/notification.helper.js';
 import { round2 } from '../services/registrationPricing.service.js';
@@ -771,6 +774,18 @@ export const createTransaction = async (req, res, next) => {
         });
       }
 
+      // A payment recorded without picking a specific invoice — "General
+      // family balance" in the Add Transaction form — used to just sit there
+      // as floating credit until whoever built the next invoice happened to
+      // trigger applyAvailableCredit. The common case is a deposit that lands
+      // *after* the family's invoice already exists, which never triggers
+      // that path at all: the credit is invisible on the invoice until
+      // someone notices the family still shows a balance. Sweep it onto
+      // whatever's already open the moment it's recorded instead.
+      if (upperType === 'PAYMENT' && !invoiceId) {
+        await sweepPaymentOntoOpenInvoices(db, { familyId, studentId: studentId || null, amount: txAmount });
+      }
+
       return { created, invoiceNumber };
     });
 
@@ -1135,6 +1150,55 @@ export const splitInvoice = async (req, res, next) => {
     res.json({
       message: `Split into ${created.length} invoices — one per student.`,
       invoices: created.map(shape),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/billing/invoices/:id/apply-credit
+ * Recompute this invoice's available credit from scratch and apply it.
+ *
+ * createTransaction now sweeps a new payment onto whatever's already open the
+ * moment it's recorded (see sweepPaymentOntoOpenInvoices), but that only
+ * covers payments made *after* this existed. This is the manual counterpart —
+ * for a deposit that landed before that sweep existed, one recorded through a
+ * path that doesn't call it (the EMA/Step Up reconciler, an import), or
+ * simply an admin double-checking a balance that looks wrong. Safe to call on
+ * any invoice, any time: it only ever raises amountPaid, never lowers it.
+ */
+export const applyCreditToInvoice = async (req, res, next) => {
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      include: { lines: { include: { transaction: { select: { studentId: true } } } } },
+    });
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+    if (['PAID', 'CANCELLED'].includes(invoice.status)) {
+      return res.json({ message: 'Nothing to apply — this invoice is already settled.', applied: 0 });
+    }
+
+    const before = Number(invoice.amountPaid);
+    const updated = await prisma.$transaction(async (tx) => {
+      await applyCreditToExistingInvoice(tx, { invoice });
+      return tx.invoice.findUnique({ where: { id: invoice.id } });
+    });
+    const applied = Math.round((Number(updated.amountPaid) - before) * 100) / 100;
+
+    console.log(`[Billing] ${req.user.email} applied $${applied} of existing credit to ${invoice.invoiceNumber}`);
+
+    res.json({
+      message: applied > 0 ? `Applied $${applied.toFixed(2)} of existing credit.` : 'No available credit found for this invoice.',
+      applied,
+      invoice: {
+        id: updated.invoiceNumber,
+        amount: Number(updated.totalAmount),
+        amountPaid: Number(updated.amountPaid),
+        status: updated.status.charAt(0).toUpperCase() + updated.status.slice(1).toLowerCase(),
+      },
     });
   } catch (error) {
     next(error);

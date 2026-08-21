@@ -8,6 +8,7 @@
 
 const BALANCE_INCREASING_TYPES = new Set(['CHARGE', 'REFUND']);
 const BALANCE_DECREASING_TYPES = new Set(['PAYMENT', 'DISCOUNT', 'CREDIT']);
+const round2 = (n) => Math.round(n * 100) / 100;
 
 export const calculateFamilyBalance = async (tx, familyId) => {
   const transactions = await tx.transaction.findMany({ where: { familyId }, select: { type: true, amount: true } });
@@ -188,4 +189,93 @@ export const applyPerStudentCredit = async (tx, { familyId, studentId, batchTxId
   });
 
   return { applied };
+};
+
+/**
+ * Sweeps a just-recorded payment onto whatever open invoice it was actually
+ * for, instead of leaving it as floating credit until someone happens to
+ * notice the family still shows a balance.
+ *
+ * This is the gap a manual "Add Transaction → Payment" left open: its
+ * "Apply to Invoice" field defaults to nothing, and a registration deposit
+ * paid after the family's invoice already existed (the common case — the
+ * deposit usually lands days after the first charge) sat unattributed
+ * forever. applyAvailableCredit/applyPerStudentCredit only ever ran at the
+ * *invoice's* creation time, so a payment that arrived later never triggered
+ * them.
+ *
+ * Scoped by student when the payment names one (paid down oldest-first,
+ * across as many of that student's open invoices as it takes), or by family
+ * when it doesn't (same, but restricted to invoices with no student
+ * attribution — crediting a family-level payment onto one specific child's
+ * bill would misattribute it to a sibling who didn't pay).
+ *
+ * Purely an allocation step, same as its single-invoice cousins: the payment
+ * Transaction itself is left exactly as recorded (still invoiceId: null,
+ * still the full amount) — only the target invoices' amountPaid/status move.
+ */
+export const sweepPaymentOntoOpenInvoices = async (tx, { familyId, studentId, amount }) => {
+  if (!AUTO_APPLY_CREDIT || !familyId || amount <= 0) return { applied: 0 };
+
+  const candidates = await tx.invoice.findMany({
+    where: { familyId, status: { notIn: ['PAID', 'CANCELLED'] } },
+    include: { lines: { include: { transaction: { select: { studentId: true } } } } },
+    orderBy: [{ date: 'asc' }, { invoiceNumber: 'asc' }],
+  });
+
+  const matches = candidates.filter((inv) => {
+    const students = new Set(inv.lines.map((l) => l.transaction?.studentId).filter(Boolean));
+    return studentId ? (students.size === 1 && students.has(studentId)) : students.size === 0;
+  });
+
+  let remaining = amount;
+  let applied = 0;
+  for (const inv of matches) {
+    if (remaining <= 0) break;
+    const due = Number(inv.totalAmount) - Number(inv.amountPaid);
+    if (due <= 0) continue;
+    const give = Math.round(Math.min(remaining, due) * 100) / 100;
+    const newPaid = round2(Number(inv.amountPaid) + give);
+    await tx.invoice.update({
+      where: { id: inv.id },
+      data: { amountPaid: newPaid, status: newPaid >= Number(inv.totalAmount) ? 'PAID' : 'PARTIAL' },
+    });
+    remaining = round2(remaining - give);
+    applied = round2(applied + give);
+  }
+
+  return { applied };
+};
+
+/**
+ * Same sweep, run against ledger history rather than a payment just made —
+ * for an invoice that already existed when its family's credit arrived, or
+ * for cleaning up whatever an earlier bug left unattributed. Safe to call on
+ * any invoice at any time: it recomputes from scratch and only ever raises
+ * amountPaid, never lowers it below whatever real Payments already put there.
+ */
+export const applyCreditToExistingInvoice = async (tx, { invoice }) => {
+  const students = new Set(
+    invoice.lines.map((l) => l.transaction?.studentId).filter(Boolean)
+  );
+  if (students.size === 1) {
+    // Every charge already on THIS invoice has to be excluded from the debt
+    // side of the calculation, or applyPerStudentCredit counts the very
+    // charges being paid down as additional debt on top of themselves —
+    // available credit comes out near zero instead of covering the invoice.
+    // (batchTxIds exists for exactly this; an empty array excludes nothing.)
+    const batchTxIds = invoice.lines.map((l) => l.transactionId).filter(Boolean);
+    return applyPerStudentCredit(tx, {
+      familyId: invoice.familyId,
+      studentId: [...students][0],
+      batchTxIds,
+      invoiceId: invoice.id,
+      invoiceTotal: Number(invoice.totalAmount),
+    });
+  }
+  return applyAvailableCredit(tx, {
+    familyId: invoice.familyId,
+    invoiceId: invoice.id,
+    invoiceTotal: Number(invoice.totalAmount),
+  });
 };
