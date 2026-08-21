@@ -990,7 +990,11 @@ export const getParentBilling = async (req, res, next) => {
 
     const [invoices, transactions] = await Promise.all([
       prisma.invoice.findMany({
-        where: { familyId },
+        // A draft is a document the admin has not finished reading, let alone
+        // sent. Showing it here put unreviewed numbers in front of the family
+        // and invited questions about a bill that did not exist yet. The money
+        // is not hidden — uninvoiced charges still count in `balance` below.
+        where: { familyId, status: { not: 'DRAFT' } },
         orderBy: { date: 'desc' },
         include: { lines: true },
       }),

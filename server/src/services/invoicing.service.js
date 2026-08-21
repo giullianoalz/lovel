@@ -48,7 +48,11 @@ export const raiseInvoicedCharge = async (tx, { familyId, studentId = null, term
       studentId,
       subtotal: amount,
       totalAmount: amount,
-      status: 'DRAFT',
+      // SENT, not DRAFT, unlike an invoice an admin assembles for a period.
+      // Nobody drafts this one: the family raised it themselves by
+      // registering, it is due on the spot, and the portal hides drafts — a
+      // draft here would be a deposit the family could neither see nor pay.
+      status: 'SENT',
       dateRange: dateRange || 'Registration Deposit',
       dueDate: new Date(Date.now() + 30 * 86400000),
       lines: { create: [{ description, amount, transactionId: transaction.id }] },

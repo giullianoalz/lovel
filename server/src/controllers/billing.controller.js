@@ -734,7 +734,7 @@ export const createTransaction = async (req, res, next) => {
       }
 
       const txDate = date ? new Date(date) : new Date();
-      let created = await db.transaction.create({
+      const created = await db.transaction.create({
         data: {
           familyId,
           studentId: studentId || null,
@@ -747,33 +747,17 @@ export const createTransaction = async (req, res, next) => {
         },
       });
 
-      // A charge is money owed, so it gets its invoice — and therefore its
-      // LC-#### number — the moment it's raised, matching what registration
-      // deposits already do. Without this a charge sat unbilled until someone
-      // remembered to run "New Invoice", which is how a family ends up owing
-      // money no document ever told them about.
-      let invoiceNumber = null;
-      if (upperType === 'CHARGE' && !invoiceId) {
-        invoiceNumber = `LC-${await nextLcNumber(db)}`;
-        const invoice = await db.invoice.create({
-          data: {
-            invoiceNumber,
-            familyId,
-            studentId: studentId || null,
-            date: txDate,
-            subtotal: txAmount,
-            totalAmount: txAmount,
-            status: 'DRAFT',
-            dateRange: description || 'Charge',
-            dueDate: new Date(txDate.getTime() + 30 * 86400000),
-            lines: {
-              create: [{ description: description || 'Charge', amount: txAmount, transactionId: created.id }],
-            },
-          },
-        });
-        created = await db.transaction.update({ where: { id: created.id }, data: { invoiceId: invoice.id } });
-        await applyAvailableCredit(db, { familyId, invoiceId: invoice.id, invoiceTotal: txAmount });
-      }
+      // A charge lands on the ledger and waits there. It is *not* invoiced
+      // here: one invoice per charge is how a family ends up holding three
+      // documents for one week of the same programme, each with its own
+      // LC-#### number, none of which is the bill they were expecting.
+      //
+      // The invoice is a statement of a period, raised from Billing → the
+      // family → "Bill a period", which sweeps every pending charge in the
+      // window the admin names. The family still sees the money owed
+      // immediately — the ledger balance in the portal counts uninvoiced
+      // charges, which is what the earlier auto-invoicing was really for.
+      const invoiceNumber = null;
 
       if (excess > 0) {
         await db.transaction.create({
@@ -1631,34 +1615,29 @@ export const generateSessionCharges = async (req, res, next) => {
       skipDuplicates: true,
     });
 
-    // A charge with no invoice is money a family owes with no document telling
-    // them so — and, because the portal's card payment runs off an invoice, no
-    // way to pay it either. So the approval that raises the charge also raises
-    // the paperwork, the same way a manual charge already does.
+    // Approving a batch raises the charges and stops there — no invoice.
     //
-    // One invoice per family, not per charge: a workshop approved for six
-    // families is six invoices, and a family with three priced meetings in the
-    // batch gets one invoice with three lines. That is how an admin reads it
-    // and what the family would expect in the post.
+    // It used to raise one invoice per family per run, which sounds right
+    // until you approve two batches: the same family gets a second document
+    // for the same week, and neither is the bill they were expecting. The
+    // invoice is a statement of a *period*, not of whatever an admin happened
+    // to tick in one sitting, so it is raised from Billing → the family →
+    // "Bill a period" once the period's charges are all on the ledger.
     //
-    // Deliberately not emailed. The invoice exists and is payable from the
-    // portal; sending it is a separate, reviewed step (see sendInvoice), and
-    // approving a batch must never post 39 emails on its own.
-    const invoices = await invoiceUnbilledSessionCharges(billable);
-
+    // Until then the family sees the money in their portal balance, which
+    // counts uninvoiced charges; what they cannot do is pay it by card, since
+    // the portal's checkout runs off an invoice.
     console.log(
       `[Billing] ${req.user.email} raised ${created.count} session charge(s) `
-      + `totalling $${billable.reduce((sum, l) => sum + l.amount, 0).toFixed(2)} `
-      + `across ${invoices.length} invoice(s)`
+      + `totalling $${billable.reduce((sum, l) => sum + l.amount, 0).toFixed(2)}`
     );
 
     res.json({
       message: created.count === 0
         ? 'Nothing new to charge — those meetings are already billed.'
-        : `Raised ${created.count} charge${created.count === 1 ? '' : 's'} on `
-          + `${invoices.length} invoice${invoices.length === 1 ? '' : 's'}.`,
+        : `Raised ${created.count} charge${created.count === 1 ? '' : 's'}. `
+          + 'Bill them from the family\'s Invoices tab when the period is complete.',
       created: created.count,
-      invoices: invoices.length,
       skipped: lines.length - billable.length,
     });
   } catch (error) {
@@ -1788,80 +1767,4 @@ export const setSessionChargeOverride = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-};
-
-/**
- * Puts the just-raised session charges onto invoices, one per family.
- *
- * Read back from the ledger rather than trusting what was just written: the
- * createMany above skips duplicates silently, so the rows that actually need a
- * document are the uninvoiced ones sitting against these sessions — which is
- * also exactly the set a retry after a half-finished run should pick up.
- *
- * Each family is its own transaction. A batch is dozens of unrelated families,
- * and one of them failing (a credit application going wrong, say) must not
- * abandon the invoices for everyone else — the worst case is that family's
- * charges stay uninvoiced, which is where they would have been anyway.
- */
-const invoiceUnbilledSessionCharges = async (billable) => {
-  const sessionIds = [...new Set(billable.map((l) => l.sessionId))];
-  const pending = await prisma.transaction.findMany({
-    where: { sessionId: { in: sessionIds }, invoiceId: null, familyId: { not: null } },
-    select: { id: true, familyId: true, amount: true, description: true, type: true },
-  });
-
-  const byFamily = new Map();
-  for (const t of pending) {
-    if (!byFamily.has(t.familyId)) byFamily.set(t.familyId, []);
-    byFamily.get(t.familyId).push(t);
-  }
-
-  const invoices = [];
-  for (const [familyId, txs] of byFamily) {
-    const subtotal = round2(txs.reduce((sum, t) => sum + Number(t.amount), 0));
-    // Nothing to bill for is not a document worth creating.
-    if (subtotal <= 0) continue;
-
-    try {
-      const invoice = await prisma.$transaction(async (tx) => {
-        const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
-        const doc = await tx.invoice.create({
-          data: {
-            invoiceNumber,
-            familyId,
-            subtotal,
-            totalAmount: subtotal,
-            status: 'DRAFT',
-            dateRange: 'Classes on the calendar',
-            dueDate: new Date(Date.now() + 30 * 86400000),
-            lines: {
-              create: txs.map((t) => ({
-                description: t.description || 'Class',
-                amount: t.amount,
-                transactionId: t.id,
-              })),
-            },
-          },
-        });
-
-        await tx.transaction.updateMany({
-          where: { id: { in: txs.map((t) => t.id) } },
-          data: { invoiceId: doc.id },
-        });
-
-        // Credit already on the books — an EMA overpayment, a refunded class —
-        // comes off this invoice rather than sitting unused while the family is
-        // asked for the full amount.
-        await applyAvailableCredit(tx, { familyId, invoiceId: doc.id, invoiceTotal: subtotal });
-        return doc;
-      });
-      invoices.push(invoice);
-    } catch (error) {
-      // Loud, and then on to the next family: the charge is raised either way,
-      // and an admin can bundle it by hand from the family's account.
-      console.error(`[Billing] Could not invoice session charges for family ${familyId}:`, error);
-    }
-  }
-
-  return invoices;
 };

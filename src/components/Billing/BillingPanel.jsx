@@ -140,12 +140,11 @@ const BillingPanel = () => {
         invoiceId: newTxForm.type === 'Payment' ? (newTxForm.invoiceId || null) : null,
       });
 
-      // The server already raises the invoice for a charge as part of creating
-      // the transaction (see createTransaction) — newTx.invoiceId is that
-      // invoice's number. A second call here would find nothing left to
-      // invoice (the transaction is no longer invoiceId: null) and fail.
+      // No invoice is raised here. The charge sits on the ledger until the
+      // period it belongs to is billed from the Invoices tab — see
+      // openBillRange, and createTransaction on the server for why.
       if (newTx.type.toLowerCase() === 'charge') {
-        toast.success(`Charge added. Invoice ${newTx.invoiceId} created.`);
+        toast.success('Charge added to the ledger. Bill it with the rest of its period.');
       }
 
       // 3. If it repeats, record the arrangement for the months after this one.
@@ -1319,11 +1318,16 @@ const BillingPanel = () => {
                 {/* Only offered when it has something to sweep. Rendering it
                     always is how the old single button came to look broken:
                     with nothing unbilled it could only shrug. */}
-                {pendingChargeCount > 0 && (
-                  <button className="action-btn" onClick={openBillRange}>
-                    <Receipt size={16} /> Bill {pendingChargeCount} pending charge{pendingChargeCount === 1 ? '' : 's'}…
-                  </button>
-                )}
+                {/* Always offered, even at zero. Hiding it when nothing is
+                    pending is how it became invisible: an admin looking for
+                    "where do I make an invoice for September" found no button
+                    at all and no reason why. It says its own count instead. */}
+                <button className="action-btn" onClick={openBillRange} disabled={pendingChargeCount === 0}>
+                  <Receipt size={16} />
+                  {pendingChargeCount === 0
+                    ? 'Bill a period — nothing pending'
+                    : `Bill a period (${pendingChargeCount} charge${pendingChargeCount === 1 ? '' : 's'} waiting)`}
+                </button>
                 {selectedInvoiceIds.length >= 2 && (
                   <button className="action-btn" onClick={handleMergeInvoices} disabled={merging}>
                     <Layers size={16} /> Combine {selectedInvoiceIds.length} invoices
