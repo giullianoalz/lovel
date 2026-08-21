@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, ChevronRight, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt
+  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
@@ -284,6 +284,48 @@ const BillingPanel = () => {
     }
   };
 
+  // Combining several of a family's invoices into one document. Approving
+  // calendar charges in two batches leaves the family holding two invoices for
+  // the same weeks, and nobody wants three envelopes for one month.
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
+  const [merging, setMerging] = useState(false);
+
+  // Ids left ticked from the family you were just looking at would otherwise
+  // still be armed on the next one's screen.
+  useEffect(() => { setSelectedInvoiceIds([]); }, [selectedFamily?.id]);
+
+  const toggleInvoiceSelected = (dbId) => {
+    setSelectedInvoiceIds(prev => (
+      prev.includes(dbId) ? prev.filter(id => id !== dbId) : [...prev, dbId]
+    ));
+  };
+
+  const handleMergeInvoices = async () => {
+    const picked = familyInvoices.filter(i => selectedInvoiceIds.includes(i.dbId));
+    const total = picked.reduce((sum, i) => sum + i.amount, 0);
+    const keeps = [...picked].sort((a, b) => (
+      new Date(a.date) - new Date(b.date) || a.id.localeCompare(b.id, 'en', { numeric: true })
+    ))[0];
+
+    if (!window.confirm(
+      `Combine ${picked.length} invoices into ${keeps.id} ($${total.toFixed(2)})?\n\n`
+      + `The others disappear and their charges move onto ${keeps.id}, which goes `
+      + `back to draft for you to review. The family's balance does not change.`
+    )) return;
+
+    setMerging(true);
+    try {
+      const res = await database.mergeInvoices(selectedInvoiceIds);
+      setSelectedInvoiceIds([]);
+      toast.success(res.message || 'Invoices combined.');
+      await loadBilling();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not combine those invoices.');
+    } finally {
+      setMerging(false);
+    }
+  };
+
   // The invoice document: its full specification, its PDF, and emailing it.
   // `detail` is fetched rather than taken from the list row — the list carries
   // only what the table shows, and this panel states what a family owes.
@@ -463,15 +505,43 @@ const BillingPanel = () => {
     }
   };
 
-  const handleGenerateInvoice = async () => {
-    const uninvoicedCharges = transactions.filter(t => t.familyId === selectedFamily.id && t.type === 'Charge' && !t.invoiceId);
-    if (uninvoicedCharges.length === 0) {
+  // Billing a period, not "everything outstanding". A family accumulates
+  // charges continuously — calendar sweeps, manual entries, standing monthly
+  // arrangements — and sweeping the lot into one document mixes September's
+  // tuition with a snack reload from July. The admin names the window, so the
+  // invoice matches the period the family is actually being asked about.
+  const [billRangeModal, setBillRangeModal] = useState(null); // { from, to }
+
+  const pendingCharges = selectedFamily
+    ? transactions.filter(t => t.familyId === selectedFamily.id && t.type === 'Charge' && !t.invoiceId)
+    : [];
+
+  const openBillRange = () => {
+    if (pendingCharges.length === 0) {
       toast.info('No pending charges to invoice.');
       return;
     }
+    // Opens spanning everything outstanding, which is what the button used to
+    // do without asking. Narrowing from there is the point; widening past the
+    // oldest pending charge would have nothing to find.
+    const dates = pendingCharges.map(t => t.date).sort();
+    setBillRangeModal({ from: dates[0], to: dates[dates.length - 1] });
+  };
+
+  // Dates are plain yyyy-mm-dd strings on both sides, so comparing them as
+  // strings is the same as comparing the days — and avoids parsing them into
+  // Dates, which would drag the browser's timezone into a date-only question.
+  const chargesInRange = billRangeModal
+    ? pendingCharges.filter(t => t.date >= billRangeModal.from && t.date <= billRangeModal.to)
+    : [];
+  const rangeTotal = chargesInRange.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+  const handleGenerateInvoice = async () => {
+    if (chargesInRange.length === 0) return;
     setLoading(true);
     try {
-      await database.generateInvoice(selectedFamily.id, uninvoicedCharges.map(t => t.id));
+      await database.generateInvoice(selectedFamily.id, chargesInRange.map(t => t.id));
+      setBillRangeModal(null);
       setActiveTab('Invoices');
       await loadBilling();
     } catch (err) {
@@ -1048,10 +1118,9 @@ const BillingPanel = () => {
   const familyStudents = students.filter(s => s.familyId === selectedFamily.id);
 
   // Charges sitting on the ledger that no invoice has picked up yet — what the
-  // "Bill pending charges" button would sweep, and why it only appears at all.
-  const pendingChargeCount = transactions.filter(
-    t => t.familyId === selectedFamily.id && t.type === 'Charge' && !t.invoiceId
-  ).length;
+  // "Bill pending charges" button offers to sweep, and why it only appears at
+  // all. The window it actually bills is chosen in the modal (see openBillRange).
+  const pendingChargeCount = pendingCharges.length;
 
   return (
     <div className="billing-container">
@@ -1251,8 +1320,13 @@ const BillingPanel = () => {
                     always is how the old single button came to look broken:
                     with nothing unbilled it could only shrug. */}
                 {pendingChargeCount > 0 && (
-                  <button className="action-btn" onClick={handleGenerateInvoice}>
-                    <Receipt size={16} /> Bill {pendingChargeCount} pending charge{pendingChargeCount === 1 ? '' : 's'}
+                  <button className="action-btn" onClick={openBillRange}>
+                    <Receipt size={16} /> Bill {pendingChargeCount} pending charge{pendingChargeCount === 1 ? '' : 's'}…
+                  </button>
+                )}
+                {selectedInvoiceIds.length >= 2 && (
+                  <button className="action-btn" onClick={handleMergeInvoices} disabled={merging}>
+                    <Layers size={16} /> Combine {selectedInvoiceIds.length} invoices
                   </button>
                 )}
               </div>
@@ -1260,6 +1334,7 @@ const BillingPanel = () => {
               <table className="ledger-table">
                 <thead>
                   <tr>
+                    <th style={{ width: '32px' }}></th>
                     <th>Invoice Date</th>
                     <th>Date Range</th>
                     <th>Invoice Amount</th>
@@ -1270,6 +1345,20 @@ const BillingPanel = () => {
                 <tbody>
                   {familyInvoices.map(inv => (
                     <tr key={inv.id}>
+                      <td>
+                        {/* Only an invoice nothing has been paid against can
+                            be folded into another — same rule the server
+                            enforces, shown here so the box isn't offered on a
+                            row that would only come back refused. */}
+                        {inv.voidable && inv.amountPaid === 0 && (
+                          <input
+                            type="checkbox"
+                            checked={selectedInvoiceIds.includes(inv.dbId)}
+                            onChange={() => toggleInvoiceSelected(inv.dbId)}
+                            title="Select to combine with another invoice"
+                          />
+                        )}
+                      </td>
                       <td style={{color: 'var(--primary)', fontWeight: 600}}>{formatDateUS(inv.date)}</td>
                       <td>{inv.dateRange}</td>
                       <td style={{fontWeight: 700}}>${inv.amount.toFixed(2)}</td>
@@ -1323,7 +1412,7 @@ const BillingPanel = () => {
                       </td>
                     </tr>
                   ))}
-                  {familyInvoices.length === 0 && <tr><td colSpan="5" className="text-center text-muted">No invoices generated yet.</td></tr>}
+                  {familyInvoices.length === 0 && <tr><td colSpan="6" className="text-center text-muted">No invoices generated yet.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -1418,6 +1507,87 @@ const BillingPanel = () => {
               <button className="action-btn" onClick={() => setStudentInvoice(null)}>Cancel</button>
               <button className="action-btn primary" onClick={handleCreateStudentInvoice} disabled={loading}>
                 {loading ? 'Creating…' : 'Create Invoice'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {billRangeModal && (
+        <div className="modal-overlay" onClick={() => setBillRangeModal(null)}>
+          <div className="tx-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Bill a period</h3>
+              <button onClick={() => setBillRangeModal(null)}><X size={20}/></button>
+            </div>
+
+            <div className="tx-form">
+              <p className="text-muted" style={{ marginTop: 0, fontSize: '13px' }}>
+                One invoice for every pending charge dated inside this window.
+                Anything outside it stays unbilled and waits for its own invoice.
+              </p>
+
+              <div className="br-range">
+                <div className="form-group">
+                  <label htmlFor="br-from">From</label>
+                  <input
+                    id="br-from"
+                    type="date"
+                    className="form-control"
+                    value={billRangeModal.from}
+                    max={billRangeModal.to}
+                    onChange={e => setBillRangeModal({ ...billRangeModal, from: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="br-to">To</label>
+                  <input
+                    id="br-to"
+                    type="date"
+                    className="form-control"
+                    value={billRangeModal.to}
+                    min={billRangeModal.from}
+                    onChange={e => setBillRangeModal({ ...billRangeModal, to: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* The charges themselves, not just a count — this is the last
+                  screen before a family is asked for money, so what lands on
+                  the invoice should be readable here first. */}
+              <div className="form-group">
+                <label>{chargesInRange.length} charge{chargesInRange.length === 1 ? '' : 's'} in this period</label>
+                {chargesInRange.length === 0 ? (
+                  <p className="text-muted" style={{ fontSize: '13px' }}>
+                    No pending charges fall in this window. Widen the dates.
+                  </p>
+                ) : (
+                  <ul className="br-lines">
+                    {chargesInRange.map(t => (
+                      <li key={t.id}>
+                        <span>{formatDateUS(t.date)}</span>
+                        <span className="br-desc">{t.description}</span>
+                        <strong>${Math.abs(t.amount).toFixed(2)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="si-total">
+                <span>Invoice total</span>
+                <strong>${rangeTotal.toFixed(2)}</strong>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="action-btn" onClick={() => setBillRangeModal(null)}>Cancel</button>
+              <button
+                className="action-btn primary"
+                onClick={handleGenerateInvoice}
+                disabled={loading || chargesInRange.length === 0}
+              >
+                {loading ? 'Creating…' : `Create Invoice ($${rangeTotal.toFixed(2)})`}
               </button>
             </div>
           </div>

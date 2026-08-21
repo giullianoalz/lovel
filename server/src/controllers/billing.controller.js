@@ -808,6 +808,146 @@ export const createTransaction = async (req, res, next) => {
 };
 
 /**
+ * POST /api/billing/invoices/merge
+ * Fold several of one family's invoices into a single document.
+ *
+ * The calendar sweep groups charges by family *within one run*, so approving
+ * two batches leaves a family holding two invoices for the same week. Nobody
+ * wants three envelopes for one month of the same programme, and paying them
+ * separately is how a family ends up half-paid across documents.
+ *
+ * The oldest invoice absorbs the others rather than a fresh number being
+ * minted: whichever number the family has already seen stays the one that is
+ * still good. The absorbed invoices are deleted, but — unlike voidInvoice —
+ * their charges are *moved*, never dropped. A merge changes the document
+ * count, never the ledger total.
+ *
+ * Refused once any Payment row references any of them, same reasoning as
+ * voidInvoice: money that landed against a specific invoice number cannot be
+ * silently reassigned to a different one.
+ *
+ * Body: { invoiceIds: string[] }
+ */
+export const mergeInvoices = async (req, res, next) => {
+  try {
+    const { invoiceIds } = req.body;
+
+    if (!Array.isArray(invoiceIds) || invoiceIds.length < 2) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Pick at least two invoices to combine.',
+      });
+    }
+
+    const ids = [...new Set(invoiceIds)];
+    const invoices = await prisma.invoice.findMany({ where: { id: { in: ids } } });
+
+    if (invoices.length !== ids.length) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'One of those invoices no longer exists. Reload and try again.',
+      });
+    }
+
+    if (new Set(invoices.map((i) => i.familyId)).size > 1 || !invoices[0].familyId) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Invoices can only be combined within a single family.',
+      });
+    }
+
+    // amountPaid without a Payment row is family credit auto-applied at
+    // creation. Unlike voiding — which releases that credit back for reuse —
+    // a merge has nowhere to put it, so both cases block here.
+    const paid = invoices.filter((i) => Number(i.amountPaid) > 0);
+    if (paid.length > 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: `${paid.map((i) => i.invoiceNumber).join(', ')} already `
+          + `${paid.length === 1 ? 'has' : 'have'} money applied. Only unpaid invoices can be combined.`,
+      });
+    }
+
+    const paymentCount = await prisma.payment.count({ where: { invoiceId: { in: ids } } });
+    if (paymentCount > 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A payment already exists against one of those invoices. Refund it before combining.',
+      });
+    }
+
+    // Oldest wins, and the lower LC number breaks a same-day tie so the same
+    // pick happens every time rather than however Postgres ordered the rows.
+    const ordered = [...invoices].sort((a, b) => (
+      a.date.getTime() - b.date.getTime()
+      || a.invoiceNumber.localeCompare(b.invoiceNumber, 'en', { numeric: true })
+    ));
+    const [target, ...absorbed] = ordered;
+    const absorbedIds = absorbed.map((i) => i.id);
+
+    const subtotal = round2(invoices.reduce((sum, i) => sum + Number(i.totalAmount), 0));
+
+    // A student's name survives only if every invoice already carried that
+    // same one. A combined document spanning siblings belongs to the family,
+    // and each line already says who its charge is for.
+    const studentIds = new Set(invoices.map((i) => i.studentId).filter(Boolean));
+    const studentId = studentIds.size === 1 && invoices.every((i) => i.studentId)
+      ? [...studentIds][0]
+      : null;
+
+    const ranges = [...new Set(invoices.map((i) => i.dateRange).filter(Boolean))];
+
+    const merged = await prisma.$transaction(async (tx) => {
+      await tx.invoiceLine.updateMany({
+        where: { invoiceId: { in: absorbedIds } },
+        data: { invoiceId: target.id },
+      });
+      await tx.transaction.updateMany({
+        where: { invoiceId: { in: absorbedIds } },
+        data: { invoiceId: target.id },
+      });
+
+      // Their lines and charges have moved by now, so this deletes empty
+      // shells — nothing of value cascades away with them.
+      await tx.invoice.deleteMany({ where: { id: { in: absorbedIds } } });
+
+      return tx.invoice.update({
+        where: { id: target.id },
+        data: {
+          subtotal,
+          totalAmount: subtotal,
+          studentId,
+          dateRange: ranges.length === 1 ? ranges[0] : 'Combined charges',
+          // Back to a draft deliberately: this document is not the one any
+          // family was shown, so an admin reads it before it goes out.
+          status: 'DRAFT',
+        },
+      });
+    });
+
+    console.log(
+      `[Billing] ${req.user.email} combined ${absorbed.map((i) => i.invoiceNumber).join(', ')} `
+      + `into ${target.invoiceNumber} ($${subtotal}, family ${target.familyId})`
+    );
+
+    res.json({
+      message: `Combined ${invoices.length} invoices into ${target.invoiceNumber}.`,
+      invoice: {
+        id: merged.invoiceNumber,
+        familyId: merged.familyId,
+        date: merged.date.toISOString().split('T')[0],
+        dateRange: merged.dateRange,
+        amount: Number(merged.totalAmount),
+        status: merged.status.charAt(0).toUpperCase() + merged.status.slice(1).toLowerCase(),
+      },
+      absorbed: absorbed.map((i) => i.invoiceNumber),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * GET /api/billing/invoices
  * List all invoices, optionally filtered by familyId
  */

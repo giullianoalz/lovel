@@ -9,6 +9,7 @@ import {
   deleteTransaction,
   listInvoices,
   createInvoice,
+  mergeInvoices,
   voidInvoice,
   editInvoice,
   getInvoice,
@@ -60,6 +61,11 @@ router.get('/invoices', authenticate, requireRole('ADMIN'), listInvoices);
 
 // POST /api/billing/invoices — Generate an invoice (Admin)
 router.post('/invoices', authenticate, requireRole('ADMIN'), validate(createInvoiceSchema), createInvoice);
+
+// POST /api/billing/invoices/merge — Fold several of one family's invoices
+// into one document (Admin). Declared before "/invoices/:id" so "merge" is
+// never read as an id.
+router.post('/invoices/merge', authenticate, requireRole('ADMIN'), mergeInvoices);
 
 // The invoice document: its full specification, its PDF, and emailing it
 // (Admin). Declared before "/invoices/:id" itself so neither suffix is ever

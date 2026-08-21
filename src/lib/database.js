@@ -447,6 +447,15 @@ export const database = {
     return response.data;
   },
 
+  // Folds several of one family's invoices into the oldest of them, which
+  // keeps its LC-#### number and comes back as a draft to review. Moves the
+  // charges rather than dropping them, so the family's balance is unchanged.
+  // Refused if any of them has money applied.
+  mergeInvoices: async (invoiceIds) => {
+    const response = await api.post('/billing/invoices/merge', { invoiceIds });
+    return response.data;
+  },
+
   // The full specification of one invoice, plus who it would be emailed to.
   fetchInvoice: async (id) => {
     const response = await api.get(`/billing/invoices/${id}`);

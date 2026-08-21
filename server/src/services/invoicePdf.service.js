@@ -13,6 +13,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PAYMENT_METHODS, paymentMethodValue } from '../config/paymentMethods.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,13 +33,33 @@ const money = (n) => `$${Number(n).toFixed(2)}`;
 const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—';
 
+/**
+ * Text the standard fonts can actually draw.
+ *
+ * These are WinAnsi-encoded, and pdf-lib does not substitute a missing glyph
+ * — it throws, which fails the whole document. Descriptions and names are
+ * typed by people and pasted from spreadsheets, so a curly quote or an emoji
+ * is a matter of time, and none of them is worth losing an invoice over.
+ * Anything outside the encoding is replaced rather than dropped, so a mangled
+ * character never silently changes what a line says.
+ */
+const safe = (text) => String(text ?? '')
+  .replace(/[‐-―−]/g, '-')   // dashes and the typographic minus
+  .replace(/[‘’‛]/g, "'")
+  .replace(/[“”‟]/g, '"')
+  .replace(/…/g, '...')
+  .replace(/\s/g, ' ')                       // tabs/newlines have no meaning on one line
+  // WinAnsi is Latin-1 plus a handful of extras already handled above; the
+  // rest (CJK, emoji, combining marks) has no glyph to fall back to.
+  .replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+
 // pdf-lib draws a string wherever it is told and will happily run it off the
 // page, so anything of unknown length has to be measured and truncated.
 const fit = (text, font, size, maxWidth) => {
-  let s = String(text ?? '');
+  let s = safe(text);
   if (font.widthOfTextAtSize(s, size) <= maxWidth) return s;
-  while (s.length > 1 && font.widthOfTextAtSize(`${s}…`, size) > maxWidth) s = s.slice(0, -1);
-  return `${s}…`;
+  while (s.length > 1 && font.widthOfTextAtSize(`${s}...`, size) > maxWidth) s = s.slice(0, -1);
+  return `${s}...`;
 };
 
 export const buildInvoicePdf = async (invoice) => {
@@ -120,7 +141,11 @@ export const buildInvoicePdf = async (invoice) => {
   };
 
   totalsRow('Subtotal', money(invoice.subtotal));
-  if (Number(invoice.amountPaid) > 0) totalsRow('Paid', `−${money(invoice.amountPaid)}`);
+  // An ASCII hyphen, not the typographic minus U+2212 the email uses: the
+  // standard fonts here are WinAnsi-encoded and pdf-lib *throws* on a
+  // character it cannot encode. With U+2212 every part-paid invoice failed to
+  // render at all — no PDF to download, and the emailed copy erroring out.
+  if (Number(invoice.amountPaid) > 0) totalsRow('Paid', `-${money(invoice.amountPaid)}`);
 
   // Drawn as a self-contained block rather than through totalsRow: that helper
   // treats `y` as a text baseline, but a filled box needs `y` to be its own
@@ -141,11 +166,55 @@ export const buildInvoicePdf = async (invoice) => {
 
   y = boxBottom - 14;
 
-  // ── Footer ──
   const footerY = MARGIN + 24;
-  page.drawLine({ start: { x: MARGIN, y: footerY + 22 }, end: { x: right, y: footerY + 22 }, thickness: 1, color: RULE });
-  page.drawText('Love Learning Explorers', { x: MARGIN, y: footerY + 6, size: 9, font: bold, color: INK });
-  page.drawText('Questions about this invoice? Reply to the email it came with and the front desk will help.', {
+  const footerRuleY = footerY + 22;
+
+  // ── How to pay ──
+  // The PDF is the copy that gets printed, filed, and forwarded to a
+  // scholarship administrator — detached from the email that carried the
+  // accounts. A document that states a balance without saying where to send
+  // it makes the family come back and ask.
+  //
+  // Pinned just above the footer rather than flowing under the total, so it
+  // sits in the same place on every invoice — a family that has paid once
+  // knows where to look, whether the invoice has three lines or thirty.
+  //
+  // Suppressed once the balance is settled, same as the email: instructions
+  // for paying something already paid only invite paying it twice.
+  const ROW = 15;
+  const lastRowY = footerRuleY + 20;
+  const firstRowY = lastRowY + (PAYMENT_METHODS.length - 1) * ROW;
+  const headingY = firstRowY + 17;
+  const blockRuleY = headingY + 12;
+
+  let lastPage = page;
+  if (balance > 0) {
+    // Totals that ran this far down would collide with the block, which is
+    // anchored and cannot move — so the block takes a page of its own,
+    // pinned the same way at the bottom of that one.
+    if (y < blockRuleY + 12) lastPage = doc.addPage([PAGE.width, PAGE.height]);
+
+    lastPage.drawLine({ start: { x: MARGIN, y: blockRuleY }, end: { x: right, y: blockRuleY }, thickness: 1, color: RULE });
+    lastPage.drawText('HOW TO PAY', { x: MARGIN, y: headingY, size: 8, font: bold, color: MUTED });
+
+    PAYMENT_METHODS.forEach((method, i) => {
+      const rowY = firstRowY - i * ROW;
+      const label = safe(`${method.name} - ${method.detail}: `);
+      lastPage.drawText(label, { x: MARGIN, y: rowY, size: 9.5, font: bold, color: INK });
+      const valueX = MARGIN + bold.widthOfTextAtSize(label, 9.5);
+      lastPage.drawText(
+        fit(paymentMethodValue(method, invoice.invoiceNumber), font, 9.5, right - valueX),
+        { x: valueX, y: rowY, size: 9.5, font, color: MUTED },
+      );
+    });
+  }
+
+  // ── Footer ──
+  // On whichever page ended up last, so a spilled payment block doesn't leave
+  // the contact line stranded on page one.
+  lastPage.drawLine({ start: { x: MARGIN, y: footerRuleY }, end: { x: right, y: footerRuleY }, thickness: 1, color: RULE });
+  lastPage.drawText('Love Learning Explorers', { x: MARGIN, y: footerY + 6, size: 9, font: bold, color: INK });
+  lastPage.drawText('Questions about this invoice? Reply to the email it came with and the front desk will help.', {
     x: MARGIN, y: footerY - 6, size: 8.5, font, color: MUTED,
   });
 

@@ -6,6 +6,7 @@ import nodemailer from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { google } from 'googleapis';
 import { formatCurrency } from '../utils/helpers.js';
+import { PAYMENT_METHODS, paymentMethodValue } from '../config/paymentMethods.js';
 
 // Node 17+ changed the default DNS resolution order to use the OS resolver,
 // which often tries IPv6 first. On cloud platforms like Render the IPv6 route
@@ -455,21 +456,10 @@ export const defaultInvoiceSubject = (invoice) =>
 export const defaultInvoiceMessage = (invoice) =>
   `Here is invoice ${invoice.invoiceNumber}. A PDF copy is attached for your records.`;
 
-// Mirrors PAYMENT_METHODS in src/components/Portal/ParentPortal.jsx — the
-// same accounts, kept in sync by hand like the other admin-editable defaults
-// in this file, since an email template and a React component can't share a
-// literal without a shared package neither side has.
-const PAYMENT_METHODS = [
-  { name: 'Zelle', detail: 'Send to', value: 'lovelearningfl@gmail.com' },
-  { name: 'Venmo', detail: 'Username', value: '@LoveLearningFL' },
-  { name: 'PayPal', detail: 'Send to', value: 'lovelearningfl@gmail.com' },
-  { name: 'EMA · Step Up for Students', detail: 'Direct Pay on EMA Marketplace/Providers/Love Camp using invoice #', value: invoiceNum => invoiceNum },
-];
-
 const paymentMethodRow = (invoiceNumber) => PAYMENT_METHODS.map((m) => `
   <tr>
     <td style="padding:8px 0;font-family:${FONT};font-size:13px;color:${BRAND.text};border-bottom:1px solid #f1f5f9;">
-      <strong>${m.name}</strong> — ${m.detail}: <span style="color:${BRAND.muted};">${typeof m.value === 'function' ? m.value(invoiceNumber) : m.value}</span>
+      <strong>${m.name}</strong> — ${m.detail}: <span style="color:${BRAND.muted};">${paymentMethodValue(m, invoiceNumber)}</span>
     </td>
   </tr>
 `).join('');
