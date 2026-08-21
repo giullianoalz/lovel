@@ -140,10 +140,12 @@ const BillingPanel = () => {
         invoiceId: newTxForm.type === 'Payment' ? (newTxForm.invoiceId || null) : null,
       });
 
-      // 2. Auto-Generate Invoice if it's a Charge
+      // The server already raises the invoice for a charge as part of creating
+      // the transaction (see createTransaction) — newTx.invoiceId is that
+      // invoice's number. A second call here would find nothing left to
+      // invoice (the transaction is no longer invoiceId: null) and fail.
       if (newTx.type.toLowerCase() === 'charge') {
-        const newInv = await database.generateInvoice(selectedFamily.id, [newTx.id]);
-        toast.success(`Charge added. Invoice ${newInv.id} generated and sent to parent automatically.`);
+        toast.success(`Charge added. Invoice ${newTx.invoiceId} created.`);
       }
 
       // 3. If it repeats, record the arrangement for the months after this one.

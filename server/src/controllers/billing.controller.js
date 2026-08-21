@@ -168,9 +168,10 @@ export const deleteTransaction = async (req, res, next) => {
         data: {
           subtotal: newTotal,
           totalAmount: newTotal,
-          status: amountPaid <= 0
-            ? (invoice.status === 'OVERDUE' ? 'OVERDUE' : 'SENT')
-            : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
+          // amountPaid is untouched by this edit, so if it's still <=0 the
+          // invoice can't have been PAID/PARTIAL before — its DRAFT/SENT/
+          // OVERDUE status is unaffected by a line's total changing.
+          status: amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
         },
       });
     });
@@ -277,9 +278,7 @@ export const updateTransaction = async (req, res, next) => {
             ...(newDate !== undefined && { date: newDate }),
             subtotal: newTotal,
             totalAmount: newTotal,
-            status: amountPaid <= 0
-              ? (invoice.status === 'OVERDUE' ? 'OVERDUE' : 'SENT')
-              : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
+            status: amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
           },
         });
       }
@@ -458,9 +457,7 @@ export const editInvoice = async (req, res, next) => {
 
       const newTotal = round2(lines.reduce((sum, l) => sum + Number(l.amount), 0));
       const amountPaid = Number(invoice.amountPaid);
-      const status = amountPaid <= 0
-        ? (invoice.status === 'OVERDUE' ? 'OVERDUE' : 'SENT')
-        : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL');
+      const status = amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL');
 
       return tx.invoice.update({
         where: { id: invoice.id },
@@ -666,6 +663,12 @@ export const sendInvoice = async (req, res, next) => {
       });
     }
 
+    // Only a DRAFT graduates to SENT here — an invoice already PARTIAL/PAID/
+    // OVERDUE keeps its accounting status even if an admin re-sends the copy.
+    if (invoice.status === 'DRAFT') {
+      await prisma.invoice.update({ where: { id: invoice.id }, data: { status: 'SENT' } });
+    }
+
     console.log(`[Billing] ${req.user.email} emailed invoice ${invoice.invoiceNumber} to ${recipient.email}`);
     res.json({ message: `Invoice ${invoice.invoiceNumber} sent to ${recipient.email}.`, to: recipient.email });
   } catch (error) {
@@ -760,7 +763,7 @@ export const createTransaction = async (req, res, next) => {
             date: txDate,
             subtotal: txAmount,
             totalAmount: txAmount,
-            status: 'SENT',
+            status: 'DRAFT',
             dateRange: description || 'Charge',
             dueDate: new Date(txDate.getTime() + 30 * 86400000),
             lines: {
@@ -904,7 +907,7 @@ const createManualInvoice = async (req, res, next, { studentId, lines }) => {
           studentId,
           subtotal,
           totalAmount: subtotal,
-          status: 'SENT',
+          status: 'DRAFT',
           dateRange: 'Manual',
           dueDate: new Date(Date.now() + 30 * 86400000), // 30 days, same as the sweep
         },
@@ -1002,7 +1005,7 @@ export const createInvoice = async (req, res, next) => {
           familyId,
           subtotal,
           totalAmount: subtotal,
-          status: 'SENT',
+          status: 'DRAFT',
           dateRange: 'Current Unbilled',
           dueDate: new Date(Date.now() + 30 * 86400000), // 30 days from now
           // One line per transaction, each linked back by transactionId — what
@@ -1475,7 +1478,11 @@ export const generateSessionCharges = async (req, res, next) => {
         familyId: l.familyId,
         amount: l.amount,
         type: 'CHARGE',
-        description: l.description,
+        // Carries the student's name onto the charge itself, not just the
+        // meeting's name — a sibling pair in the same class raises two
+        // otherwise-identical lines, and this is what tells them apart on the
+        // invoice a family actually reads.
+        description: `${l.description} — ${l.studentName}`,
         date: l.date,
         sessionId: l.sessionId,
       })),
@@ -1684,7 +1691,7 @@ const invoiceUnbilledSessionCharges = async (billable) => {
             familyId,
             subtotal,
             totalAmount: subtotal,
-            status: 'SENT',
+            status: 'DRAFT',
             dateRange: 'Classes on the calendar',
             dueDate: new Date(Date.now() + 30 * 86400000),
             lines: {

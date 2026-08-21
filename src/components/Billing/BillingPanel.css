@@ -342,6 +342,11 @@
   color: #075985;
 }
 
+.status-badge.draft {
+  background: #f1f5f9;
+  color: #475569;
+}
+
 .status-badge.partial {
   background: #fef3c7;
   color: #92400e;

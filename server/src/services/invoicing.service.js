@@ -48,7 +48,7 @@ export const raiseInvoicedCharge = async (tx, { familyId, studentId = null, term
       studentId,
       subtotal: amount,
       totalAmount: amount,
-      status: 'SENT',
+      status: 'DRAFT',
       dateRange: dateRange || 'Registration Deposit',
       dueDate: new Date(Date.now() + 30 * 86400000),
       lines: { create: [{ description, amount, transactionId: transaction.id }] },
