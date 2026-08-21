@@ -84,3 +84,108 @@ export const applyAvailableCredit = async (tx, { familyId, invoiceId, invoiceTot
 
   return { applied };
 };
+
+/**
+ * Spreads whatever credit a family has across several invoices raised together
+ * — one per child, from one billing run.
+ *
+ * applyAvailableCredit measures the surplus that exists *outside the invoice it
+ * is applying to*, which is right for a single document and wrong for a batch:
+ * called in a loop, each sibling's invoice counts the other sibling's brand-new
+ * charges as debt and both come back under-credited. A family with $300 credit
+ * and two $200 children would absorb $100 twice instead of $300 once, leaving
+ * the parent looking at a balance their credit already covers.
+ *
+ * So the surplus is measured once, against the ledger minus *every* charge in
+ * this batch, and then handed out in order until it runs out.
+ *
+ * @param {string[]} batchTxIds every charge being invoiced in this run
+ * @param {{id: string, total: number}[]} invoices in the order they should be paid down
+ * @returns {Promise<Map<string, number>>} invoice id → amount applied
+ */
+export const applyCreditAcrossInvoices = async (tx, { familyId, batchTxIds, invoices }) => {
+  const applied = new Map(invoices.map((i) => [i.id, 0]));
+  if (!AUTO_APPLY_CREDIT || !familyId) return applied;
+
+  const batch = new Set(batchTxIds);
+  const familyTx = await tx.transaction.findMany({
+    where: { familyId },
+    select: { id: true, type: true, amount: true },
+  });
+
+  const priorBalance = familyTx.reduce((acc, t) => {
+    if (batch.has(t.id)) return acc; // this run's own charges
+    const amount = Number(t.amount);
+    if (BALANCE_INCREASING_TYPES.has(t.type)) return acc + amount;
+    if (BALANCE_DECREASING_TYPES.has(t.type)) return acc - amount;
+    return acc;
+  }, 0);
+
+  let remaining = Math.max(0, -priorBalance);
+  if (remaining <= 0) return applied;
+
+  for (const inv of invoices) {
+    if (remaining <= 0 || inv.total <= 0) continue;
+    const amount = Math.round(Math.min(remaining, inv.total) * 100) / 100;
+    remaining -= amount;
+    applied.set(inv.id, amount);
+
+    // Allocation only, no ledger row — same reasoning as applyAvailableCredit:
+    // the surplus is already on the books, and writing a CREDIT here would
+    // count it twice.
+    await tx.invoice.update({
+      where: { id: inv.id },
+      data: { amountPaid: amount, status: amount >= inv.total ? 'PAID' : 'PARTIAL' },
+    });
+  }
+
+  return applied;
+};
+
+/**
+ * Credit traced to one specific student, for splitting a household invoice
+ * back apart.
+ *
+ * applyCreditAcrossInvoices treats a family's credit as one pooled surplus,
+ * because for a fresh billing run that's usually all the ledger tells you —
+ * a Zelle payment recorded against the family carries no student. But a
+ * *split* is un-mixing money that was already attributed: the registration
+ * deposit Remi's parent paid is a Transaction with Remi's studentId on it,
+ * same for Presley's. Pooling that and handing it out by invoice order (see
+ * splitInvoice) would give one child's own payment to the other. Tracing it
+ * back to the student it was actually paid for is what "split" is supposed
+ * to mean.
+ *
+ * Transactions with no studentId (paid at the family level, not earmarked to
+ * either child) are deliberately excluded here — that money stays pooled and
+ * is not this function's to hand out; a future family-level invoice is where
+ * it would apply.
+ */
+export const applyPerStudentCredit = async (tx, { familyId, studentId, batchTxIds, invoiceId, invoiceTotal }) => {
+  if (!AUTO_APPLY_CREDIT || !familyId || !studentId || invoiceTotal <= 0) return { applied: 0 };
+
+  const batch = new Set(batchTxIds);
+  const studentTx = await tx.transaction.findMany({
+    where: { familyId, studentId },
+    select: { id: true, type: true, amount: true },
+  });
+
+  const priorBalance = studentTx.reduce((acc, t) => {
+    if (batch.has(t.id)) return acc; // this split's own charges
+    const amount = Number(t.amount);
+    if (BALANCE_INCREASING_TYPES.has(t.type)) return acc + amount;
+    if (BALANCE_DECREASING_TYPES.has(t.type)) return acc - amount;
+    return acc;
+  }, 0);
+
+  const available = Math.max(0, -priorBalance);
+  if (available <= 0) return { applied: 0 };
+
+  const applied = Math.round(Math.min(available, invoiceTotal) * 100) / 100;
+  await tx.invoice.update({
+    where: { id: invoiceId },
+    data: { amountPaid: applied, status: applied >= invoiceTotal ? 'PAID' : 'PARTIAL' },
+  });
+
+  return { applied };
+};

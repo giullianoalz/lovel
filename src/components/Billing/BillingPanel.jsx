@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, ChevronRight, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers
+  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers, GitFork
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { database } from '../../lib/database';
@@ -268,6 +268,27 @@ const BillingPanel = () => {
   };
 
   const [voidingInvoiceId, setVoidingInvoiceId] = useState(null);
+
+  const [splittingInvoiceId, setSplittingInvoiceId] = useState(null);
+
+  const handleSplitInvoice = async (inv) => {
+    if (!window.confirm(
+      `Split ${inv.id} into one invoice per student?\n\n`
+      + `${inv.id} keeps its number for whichever student owes the most; `
+      + `every other student gets a new LC-#### number. The family's total `
+      + `balance does not change.`
+    )) return;
+    setSplittingInvoiceId(inv.dbId);
+    try {
+      const res = await database.splitInvoice(inv.dbId);
+      toast.success(res.message || 'Invoice split.');
+      await loadBilling();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not split the invoice.');
+    } finally {
+      setSplittingInvoiceId(null);
+    }
+  };
 
   const handleVoidInvoice = async (inv) => {
     if (!window.confirm(`Void invoice ${inv.id} ($${inv.amount.toFixed(2)})? This removes it and its charge from the family's ledger. This cannot be undone.`)) return;
@@ -535,13 +556,36 @@ const BillingPanel = () => {
     : [];
   const rangeTotal = chargesInRange.reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
+  // How the server is about to split them: one invoice per child, plus one for
+  // anything charged to the household rather than a student. Shown before the
+  // click so "Create 2 Invoices" is never a surprise.
+  const rangeGroups = (() => {
+    const map = new Map();
+    for (const t of chargesInRange) {
+      const key = t.studentId || '';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(t);
+    }
+    return [...map.entries()].map(([studentId, charges]) => ({
+      studentId,
+      name: studentId
+        ? (students.find(s => s.id === studentId)?.name ?? 'Student')
+        : 'Family charges',
+      charges,
+      total: charges.reduce((sum, t) => sum + Math.abs(t.amount), 0),
+    }));
+  })();
+
   const handleGenerateInvoice = async () => {
     if (chargesInRange.length === 0) return;
     setLoading(true);
     try {
-      await database.generateInvoice(selectedFamily.id, chargesInRange.map(t => t.id));
+      const created = await database.generateInvoice(selectedFamily.id, chargesInRange.map(t => t.id));
       setBillRangeModal(null);
       setActiveTab('Invoices');
+      toast.success(created.length === 1
+        ? `Invoice ${created[0].id} created.`
+        : `${created.length} invoices created — one per student.`);
       await loadBilling();
     } catch (err) {
       setLoading(false);
@@ -1403,6 +1447,16 @@ const BillingPanel = () => {
                             <Pencil size={14} />
                           </button>
                         )}
+                        {inv.splittable && (
+                          <button
+                            className="tx-delete-btn"
+                            title="Split into one invoice per student"
+                            onClick={() => handleSplitInvoice(inv)}
+                            disabled={splittingInvoiceId === inv.dbId}
+                          >
+                            <GitFork size={14} />
+                          </button>
+                        )}
                         {inv.voidable && (
                           <button
                             className="tx-delete-btn"
@@ -1558,28 +1612,40 @@ const BillingPanel = () => {
 
               {/* The charges themselves, not just a count — this is the last
                   screen before a family is asked for money, so what lands on
-                  the invoice should be readable here first. */}
+                  each invoice should be readable here first. Grouped by child
+                  because that is how they are about to be billed. */}
               <div className="form-group">
-                <label>{chargesInRange.length} charge{chargesInRange.length === 1 ? '' : 's'} in this period</label>
+                <label>
+                  {chargesInRange.length} charge{chargesInRange.length === 1 ? '' : 's'} in this period
+                  {rangeGroups.length > 1 && ` — ${rangeGroups.length} separate invoices`}
+                </label>
                 {chargesInRange.length === 0 ? (
                   <p className="text-muted" style={{ fontSize: '13px' }}>
                     No pending charges fall in this window. Widen the dates.
                   </p>
                 ) : (
-                  <ul className="br-lines">
-                    {chargesInRange.map(t => (
-                      <li key={t.id}>
-                        <span>{formatDateUS(t.date)}</span>
-                        <span className="br-desc">{t.description}</span>
-                        <strong>${Math.abs(t.amount).toFixed(2)}</strong>
-                      </li>
-                    ))}
-                  </ul>
+                  rangeGroups.map(g => (
+                    <div key={g.studentId || 'family'} className="br-group">
+                      <div className="br-group-head">
+                        <span>{g.name}</span>
+                        <strong>${g.total.toFixed(2)}</strong>
+                      </div>
+                      <ul className="br-lines">
+                        {g.charges.map(t => (
+                          <li key={t.id}>
+                            <span>{formatDateUS(t.date)}</span>
+                            <span className="br-desc">{t.description}</span>
+                            <strong>${Math.abs(t.amount).toFixed(2)}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))
                 )}
               </div>
 
               <div className="si-total">
-                <span>Invoice total</span>
+                <span>{rangeGroups.length > 1 ? 'Total across all invoices' : 'Invoice total'}</span>
                 <strong>${rangeTotal.toFixed(2)}</strong>
               </div>
             </div>
@@ -1591,7 +1657,11 @@ const BillingPanel = () => {
                 onClick={handleGenerateInvoice}
                 disabled={loading || chargesInRange.length === 0}
               >
-                {loading ? 'Creating…' : `Create Invoice ($${rangeTotal.toFixed(2)})`}
+                {loading
+                  ? 'Creating…'
+                  : rangeGroups.length > 1
+                    ? `Create ${rangeGroups.length} Invoices ($${rangeTotal.toFixed(2)})`
+                    : `Create Invoice ($${rangeTotal.toFixed(2)})`}
               </button>
             </div>
           </div>

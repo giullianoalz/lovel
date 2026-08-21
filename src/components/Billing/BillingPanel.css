@@ -1604,3 +1604,18 @@ select.form-control {
 @media (max-width: 520px) {
   .br-range { grid-template-columns: 1fr; }
 }
+
+/* Each child's invoice-to-be, inside the "Bill a period" modal. */
+.br-group + .br-group { margin-top: 14px; }
+
+.br-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 2px 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.br-group-head strong { font-variant-numeric: tabular-nums; }

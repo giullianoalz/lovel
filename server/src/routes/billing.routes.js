@@ -10,6 +10,7 @@ import {
   listInvoices,
   createInvoice,
   mergeInvoices,
+  splitInvoice,
   voidInvoice,
   editInvoice,
   getInvoice,
@@ -72,6 +73,10 @@ router.post('/invoices/merge', authenticate, requireRole('ADMIN'), mergeInvoices
 // read as part of an id.
 router.get('/invoices/:id/pdf', authenticate, requireRole('ADMIN'), downloadInvoicePdf);
 router.post('/invoices/:id/send', authenticate, requireRole('ADMIN'), sendInvoice);
+// POST /api/billing/invoices/:id/split — Break a household invoice back into
+// one per student (Admin). Same "before the generic GET/PATCH/DELETE :id
+// routes" placement as pdf/send, for the same reason.
+router.post('/invoices/:id/split', authenticate, requireRole('ADMIN'), splitInvoice);
 router.get('/invoices/:id', authenticate, requireRole('ADMIN'), getInvoice);
 
 // PATCH /api/billing/invoices/:id — Rewrite an invoice's line items (Admin).

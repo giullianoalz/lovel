@@ -456,6 +456,14 @@ export const database = {
     return response.data;
   },
 
+  // Breaks an invoice covering more than one student back into one per
+  // student — the fix for an invoice raised before billing went per-child, or
+  // built by hand across siblings. Refused once a real payment has touched it.
+  splitInvoice: async (id) => {
+    const response = await api.post(`/billing/invoices/${id}/split`);
+    return response.data;
+  },
+
   // The full specification of one invoice, plus who it would be emailed to.
   fetchInvoice: async (id) => {
     const response = await api.get(`/billing/invoices/${id}`);
@@ -533,9 +541,12 @@ export const database = {
     return response.data;
   },
 
+  // Returns one invoice PER STUDENT, not one for the household — a family with
+  // two children in the same class gets a readable document each. Charges with
+  // no student on them come back as one more, for the family itself.
   generateInvoice: async (familyId, transactionIds) => {
     const response = await api.post('/billing/invoices', { familyId, transactionIds });
-    return response.data.invoice;
+    return response.data.invoices ?? [response.data.invoice];
   },
 
   // Writes an invoice for one student from typed lines, with no charges needing

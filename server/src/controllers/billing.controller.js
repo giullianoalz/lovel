@@ -1,6 +1,6 @@
 import prisma from '../config/database.js';
 import stripe from '../config/stripe.js';
-import { applyAvailableCredit } from '../services/billingCredit.service.js';
+import { applyAvailableCredit, applyCreditAcrossInvoices, applyPerStudentCredit } from '../services/billingCredit.service.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
 import { notifyAdmins } from '../jobs/notification.helper.js';
 import { round2 } from '../services/registrationPricing.service.js';
@@ -840,6 +840,18 @@ export const mergeInvoices = async (req, res, next) => {
       });
     }
 
+    // Siblings keep their own documents. Billing raises one invoice per child
+    // on purpose (see createInvoice); folding two of them back together would
+    // rebuild exactly the unreadable household invoice that was the problem.
+    // Combining several invoices belonging to the *same* child is the point.
+    const students = new Set(invoices.map((i) => i.studentId ?? ''));
+    if (students.size > 1) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Those invoices belong to different students. Each student is billed separately — combine only invoices for the same one.',
+      });
+    }
+
     // amountPaid without a Payment row is family credit auto-applied at
     // creation. Unlike voiding — which releases that credit back for reuse —
     // a merge has nowhere to put it, so both cases block here.
@@ -871,13 +883,9 @@ export const mergeInvoices = async (req, res, next) => {
 
     const subtotal = round2(invoices.reduce((sum, i) => sum + Number(i.totalAmount), 0));
 
-    // A student's name survives only if every invoice already carried that
-    // same one. A combined document spanning siblings belongs to the family,
-    // and each line already says who its charge is for.
-    const studentIds = new Set(invoices.map((i) => i.studentId).filter(Boolean));
-    const studentId = studentIds.size === 1 && invoices.every((i) => i.studentId)
-      ? [...studentIds][0]
-      : null;
+    // Guaranteed single by the check above, so the merged document keeps
+    // whichever student it already belonged to (null for a family invoice).
+    const studentId = invoices[0].studentId;
 
     const ranges = [...new Set(invoices.map((i) => i.dateRange).filter(Boolean))];
 
@@ -932,6 +940,191 @@ export const mergeInvoices = async (req, res, next) => {
 };
 
 /**
+ * POST /api/billing/invoices/:id/split
+ * Break a household invoice back apart into one invoice per student.
+ *
+ * For invoices raised before createInvoice started billing per child (or
+ * built by hand across siblings), where two children's charges landed on one
+ * document with no way to tell whose line was whose. Keeps the original
+ * invoice number for whichever student has the largest share — that number
+ * is the one a family may already have seen — and mints a fresh LC-#### for
+ * every other student. Lines with no linked student stay together as one
+ * "Family charges" invoice, same as a manual entry with no student picked.
+ *
+ * Refused once a real Payment exists against the invoice, same as
+ * voidInvoice/mergeInvoices: money already receipted against this specific
+ * number cannot be silently reassigned to a different one. An invoice paid
+ * down from account credit (amountPaid > 0, zero Payment rows) is fine —
+ * splitting re-runs the same credit allocation createInvoice uses, so the
+ * money follows the charges it was actually covering.
+ */
+export const splitInvoice = async (req, res, next) => {
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      include: { lines: { include: { transaction: { select: { id: true, studentId: true } } } } },
+    });
+    if (!invoice) {
+      return res.status(404).json({ error: 'Not Found', message: 'That invoice does not exist.' });
+    }
+
+    const paymentCount = await prisma.payment.count({ where: { invoiceId: invoice.id } });
+    if (paymentCount > 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A payment already exists against this invoice. Refund it before splitting.',
+      });
+    }
+
+    const groups = new Map(); // studentId ('' for none) -> lines[]
+    for (const line of invoice.lines) {
+      const key = line.transaction?.studentId ?? '';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(line);
+    }
+
+    if (groups.size < 2) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'This invoice already belongs to a single student — there is nothing to split.',
+      });
+    }
+
+    const studentIds = [...groups.keys()].filter(Boolean);
+    const students = studentIds.length
+      ? await prisma.user.findMany({ where: { id: { in: studentIds } }, select: { id: true, fullName: true } })
+      : [];
+    const studentName = new Map(students.map((s) => [s.id, s.fullName]));
+
+    // The student with the largest dollar share keeps the original number —
+    // arbitrary in principle, but consistent and it means the child owing the
+    // most keeps the number a parent is most likely to already reference.
+    const ranked = [...groups.entries()]
+      .map(([studentId, lines]) => ({
+        studentId,
+        lines,
+        total: round2(lines.reduce((sum, l) => sum + Number(l.amount), 0)),
+      }))
+      .sort((a, b) => b.total - a.total);
+    const [keeper, ...rest] = ranked;
+
+    const created = await prisma.$transaction(async (tx) => {
+      const out = [];
+
+      // The keeper: re-point at only its own lines and re-total. amountPaid
+      // and status reset to zero/DRAFT along with everything else — whatever
+      // was covering the old combined total is about to be recomputed from
+      // scratch below, and leaving the old PARTIAL/amountPaid in place here
+      // would only matter if applyCreditAcrossInvoices found less credit than
+      // before, which cannot happen: splitting does not spend or create any.
+      await tx.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          studentId: keeper.studentId || null,
+          subtotal: keeper.total,
+          totalAmount: keeper.total,
+          amountPaid: 0,
+          status: 'DRAFT',
+          dateRange: keeper.studentId ? (studentName.get(keeper.studentId) ?? invoice.dateRange) : invoice.dateRange,
+        },
+      });
+      out.push({ id: invoice.id, studentId: keeper.studentId || null, total: keeper.total });
+
+      // Every other student gets a brand-new invoice, and their lines (and the
+      // transactions those lines came from) move onto it.
+      for (const group of rest) {
+        const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
+        const doc = await tx.invoice.create({
+          data: {
+            invoiceNumber,
+            familyId: invoice.familyId,
+            studentId: group.studentId || null,
+            subtotal: group.total,
+            totalAmount: group.total,
+            status: 'DRAFT',
+            dateRange: group.studentId ? (studentName.get(group.studentId) ?? invoice.dateRange) : invoice.dateRange,
+            dueDate: invoice.dueDate,
+          },
+        });
+
+        await tx.invoiceLine.updateMany({
+          where: { id: { in: group.lines.map((l) => l.id) } },
+          data: { invoiceId: doc.id },
+        });
+        const txIds = group.lines.map((l) => l.transaction?.id).filter(Boolean);
+        if (txIds.length) {
+          await tx.transaction.updateMany({ where: { id: { in: txIds } }, data: { invoiceId: doc.id } });
+        }
+
+        out.push({ id: doc.id, studentId: group.studentId || null, total: group.total });
+      }
+
+      // Whatever was covering the original invoice (credit only — a real
+      // Payment would have blocked this above) is re-attributed per student,
+      // not pooled and handed out in invoice order. A split is un-mixing
+      // money that the ledger already knows whose it was — Remi's deposit is
+      // a Transaction with Remi's studentId, Presley's likewise — and giving
+      // Remi's own payment to whichever invoice happened to be built first
+      // would defeat the point of splitting them apart. See
+      // applyPerStudentCredit. Lines the split could not attribute to a
+      // student (studentId '') fall back to the family-pooled measure, same
+      // as any other family-level invoice.
+      const batchTxIds = invoice.lines.map((l) => l.transaction?.id).filter(Boolean);
+      for (const o of out) {
+        if (!o.studentId) continue; // handled below, pooled with the same batch exclusion
+        await applyPerStudentCredit(tx, {
+          familyId: invoice.familyId,
+          studentId: o.studentId,
+          batchTxIds,
+          invoiceId: o.id,
+          invoiceTotal: o.total,
+        });
+      }
+      // Any invoice this split could not attribute to a student (a line with
+      // no linked transaction, or a transaction with no studentId) falls back
+      // to family-pooled credit — but still excluding the *entire* batch, via
+      // applyCreditAcrossInvoices, not applyAvailableCredit's single-invoice
+      // exclusion: the other invoices' charges above have already moved onto
+      // their own invoiceId, and counting them as this one's debt would be
+      // the exact double-count applyCreditAcrossInvoices exists to avoid.
+      const unattributed = out.filter((o) => !o.studentId);
+      if (unattributed.length) {
+        await applyCreditAcrossInvoices(tx, { familyId: invoice.familyId, batchTxIds, invoices: unattributed });
+      }
+
+      // Every invoice was just reset to (amountPaid: 0, status: DRAFT) — the
+      // keeper explicitly above, every new one by its create defaults — and
+      // the credit calls above already wrote the real numbers over that for
+      // whichever ones actually received any. A plain re-read is the truth.
+      return tx.invoice.findMany({ where: { id: { in: out.map((o) => o.id) } } });
+    });
+
+    const shape = (d) => ({
+      id: d.invoiceNumber,
+      familyId: d.familyId,
+      studentId: d.studentId,
+      studentName: d.studentId ? (studentName.get(d.studentId) ?? null) : null,
+      date: d.date.toISOString().split('T')[0],
+      dateRange: d.dateRange,
+      amount: Number(d.totalAmount),
+      status: d.status.charAt(0).toUpperCase() + d.status.slice(1).toLowerCase(),
+    });
+
+    console.log(
+      `[Billing] ${req.user.email} split ${invoice.invoiceNumber} into `
+      + `${created.map((d) => d.invoiceNumber).join(', ')} (family ${invoice.familyId})`
+    );
+
+    res.json({
+      message: `Split into ${created.length} invoices — one per student.`,
+      invoices: created.map(shape),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * GET /api/billing/invoices
  * List all invoices, optionally filtered by familyId
  */
@@ -945,7 +1138,7 @@ export const listInvoices = async (req, res, next) => {
       where,
       orderBy: { date: 'desc' },
       include: {
-        lines: true,
+        lines: { include: { transaction: { select: { studentId: true } } } },
         payments: {
           where: { status: { in: ['COMPLETED', 'PARTIAL_REFUND'] } },
           select: { id: true, amount: true, method: true, status: true },
@@ -961,6 +1154,7 @@ export const listInvoices = async (req, res, next) => {
       id: inv.invoiceNumber,
       dbId: inv.id,
       familyId: inv.familyId,
+      studentId: inv.studentId,
       date: inv.date.toISOString().split('T')[0],
       dateRange: inv.dateRange || 'N/A',
       amount: Number(inv.totalAmount),
@@ -973,6 +1167,11 @@ export const listInvoices = async (req, res, next) => {
       // no real Payment has touched the invoice yet.
       voidable: inv._count.payments === 0,
       editable: inv._count.payments === 0,
+      // Whether POST /invoices/:id/split has anything to do — more than one
+      // student's charges sharing this document. Same no-real-payment gate as
+      // void/edit; splitInvoice enforces it server-side regardless.
+      splittable: inv._count.payments === 0
+        && new Set(inv.lines.map((l) => l.transaction?.studentId ?? '')).size > 1,
     }));
 
     res.json({ invoices: mapped });
@@ -1112,60 +1311,109 @@ export const createInvoice = async (req, res, next) => {
       return res.status(400).json({ error: 'No uninvoiced transactions found for this family.' });
     }
 
-    const subtotal = txs.reduce((acc, t) => {
-      if (t.type === 'CHARGE') return acc + Number(t.amount);
-      return acc - Number(t.amount);
-    }, 0);
+    // One invoice per child, not one per family. A household with two children
+    // in the same class produced a document with two identical $130 lines and
+    // nothing saying which was whose — unreadable for the parent, and useless
+    // to a scholarship administrator who has to file per student. Charges with
+    // no student on them (a family-level fee) still get their own document.
+    const byStudent = new Map();
+    for (const t of txs) {
+      const key = t.studentId ?? '';
+      if (!byStudent.has(key)) byStudent.set(key, []);
+      byStudent.get(key).push(t);
+    }
+
+    const studentNames = new Map();
+    const studentIds = [...byStudent.keys()].filter(Boolean);
+    if (studentIds.length) {
+      const users = await prisma.user.findMany({
+        where: { id: { in: studentIds } },
+        select: { id: true, fullName: true },
+      });
+      for (const u of users) studentNames.set(u.id, u.fullName);
+    }
 
     // Invoice creation + marking the source transactions as billed must be
     // atomic — a crash between the two steps would leave transactions free
     // to be picked up again by a second invoice (double-billing the family).
-    const invoice = await prisma.$transaction(async (tx) => {
-      const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
+    // One transaction spans every student's invoice so a failure part-way
+    // cannot leave a household half-billed.
+    const invoices = await prisma.$transaction(async (tx) => {
+      const out = [];
+      const totals = [];
 
-      const created = await tx.invoice.create({
-        data: {
-          invoiceNumber,
-          familyId,
-          subtotal,
-          totalAmount: subtotal,
-          status: 'DRAFT',
-          dateRange: 'Current Unbilled',
-          dueDate: new Date(Date.now() + 30 * 86400000), // 30 days from now
-          // One line per transaction, each linked back by transactionId — what
-          // lets an admin edit or remove a single line later without guessing
-          // which ledger row it came from (createMany can't take relations, so
-          // this is per-row rather than a single nested create).
-          lines: {
-            create: txs.map((t) => ({
-              description: t.description || 'Charge',
-              amount: t.amount,
-              transactionId: t.id,
-            })),
+      for (const [key, group] of byStudent) {
+        const subtotal = round2(group.reduce((acc, t) => (
+          t.type === 'CHARGE' ? acc + Number(t.amount) : acc - Number(t.amount)
+        ), 0));
+
+        const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
+        const created = await tx.invoice.create({
+          data: {
+            invoiceNumber,
+            familyId,
+            studentId: key || null,
+            subtotal,
+            totalAmount: subtotal,
+            status: 'DRAFT',
+            dateRange: key ? (studentNames.get(key) ?? 'Current Unbilled') : 'Family charges',
+            dueDate: new Date(Date.now() + 30 * 86400000), // 30 days from now
+            // One line per transaction, each linked back by transactionId — what
+            // lets an admin edit or remove a single line later without guessing
+            // which ledger row it came from (createMany can't take relations, so
+            // this is per-row rather than a single nested create).
+            lines: {
+              create: group.map((t) => ({
+                description: t.description || 'Charge',
+                amount: t.amount,
+                transactionId: t.id,
+              })),
+            },
           },
-        },
+        });
+
+        await tx.transaction.updateMany({
+          where: { id: { in: group.map((t) => t.id) } },
+          data: { invoiceId: created.id },
+        });
+
+        out.push(created);
+        totals.push({ id: created.id, total: subtotal });
+      }
+
+      // Credit is allocated once the whole batch exists, not per invoice as it
+      // is built: measuring it invoice-by-invoice makes each sibling's charges
+      // look like debt against the other's credit. See applyCreditAcrossInvoices.
+      const applied = await applyCreditAcrossInvoices(tx, {
+        familyId,
+        batchTxIds: txs.map((t) => t.id),
+        invoices: totals,
       });
 
-      await tx.transaction.updateMany({
-        where: { id: { in: txs.map((t) => t.id) } },
-        data: { invoiceId: created.id },
+      return out.map((inv) => {
+        const amount = applied.get(inv.id) ?? 0;
+        if (amount <= 0) return inv;
+        const total = totals.find((t) => t.id === inv.id).total;
+        return { ...inv, amountPaid: amount, status: amount >= total ? 'PAID' : 'PARTIAL' };
       });
+    });
 
-      // If the family has credit sitting on the books (e.g. a prior EMA
-      // overpayment), apply it to this new invoice automatically.
-      const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
-      return applied > 0 ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' } : created;
+    const shape = (invoice) => ({
+      id: invoice.invoiceNumber,
+      familyId: invoice.familyId,
+      studentId: invoice.studentId,
+      studentName: invoice.studentId ? (studentNames.get(invoice.studentId) ?? null) : null,
+      date: invoice.date.toISOString().split('T')[0],
+      dateRange: invoice.dateRange,
+      amount: Number(invoice.totalAmount),
+      status: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).toLowerCase(),
     });
 
     res.status(201).json({
-      invoice: {
-        id: invoice.invoiceNumber,
-        familyId: invoice.familyId,
-        date: invoice.date.toISOString().split('T')[0],
-        dateRange: invoice.dateRange,
-        amount: Number(invoice.totalAmount),
-        status: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).toLowerCase(),
-      },
+      invoices: invoices.map(shape),
+      // Kept so a caller written against the single-invoice shape still reads
+      // something sensible rather than undefined.
+      invoice: shape(invoices[0]),
     });
   } catch (error) {
     next(error);
