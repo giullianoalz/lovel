@@ -22,7 +22,7 @@
 
 @media (min-width: 769px) {
   .calendar-header-top {
-    padding-right: 48px; /* Avoid overlapping with fixed desktop bell */
+    padding-right: 80px; /* Avoid overlapping with fixed desktop bell */
   }
 }
 
