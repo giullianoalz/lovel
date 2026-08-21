@@ -824,7 +824,10 @@ export const mergeInvoices = async (req, res, next) => {
     }
 
     const ids = [...new Set(invoiceIds)];
-    const invoices = await prisma.invoice.findMany({ where: { id: { in: ids } } });
+    const invoices = await prisma.invoice.findMany({
+      where: { id: { in: ids } },
+      include: { lines: { include: { transaction: { select: { studentId: true } } } } },
+    });
 
     if (invoices.length !== ids.length) {
       return res.status(404).json({
@@ -844,8 +847,19 @@ export const mergeInvoices = async (req, res, next) => {
     // on purpose (see createInvoice); folding two of them back together would
     // rebuild exactly the unreadable household invoice that was the problem.
     // Combining several invoices belonging to the *same* child is the point.
-    const students = new Set(invoices.map((i) => i.studentId ?? ''));
-    if (students.size > 1) {
+    //
+    // Derived from each invoice's own LINES, not its studentId column: every
+    // invoice raised before per-student billing existed has that column
+    // NULL, even when every one of its lines is unmistakably one student's
+    // (e.g. LC-4434, all Abigail Celli, studentId column still null). Trusting
+    // the column here would treat two different siblings' old invoices as
+    // "the same null student" and wave the merge through — exactly the
+    // regression this check exists to prevent, just for older invoices.
+    const studentsOf = (inv) => new Set(
+      inv.lines.map((l) => l.transaction?.studentId).filter(Boolean)
+    );
+    const allStudents = new Set(invoices.flatMap((i) => [...studentsOf(i)]));
+    if (allStudents.size > 1) {
       return res.status(400).json({
         error: 'Validation Error',
         message: 'Those invoices belong to different students. Each student is billed separately — combine only invoices for the same one.',
@@ -883,9 +897,12 @@ export const mergeInvoices = async (req, res, next) => {
 
     const subtotal = round2(invoices.reduce((sum, i) => sum + Number(i.totalAmount), 0));
 
-    // Guaranteed single by the check above, so the merged document keeps
-    // whichever student it already belonged to (null for a family invoice).
-    const studentId = invoices[0].studentId;
+    // Guaranteed at most one real student by the check above. Written from
+    // that derived set, not copied off invoices[0].studentId — same reasoning
+    // as the guard: the column can be null on an invoice whose lines are all
+    // one real student, and copying it forward would leave the merged
+    // invoice just as mislabeled as the one it absorbed.
+    const studentId = allStudents.size === 1 ? [...allStudents][0] : null;
 
     const ranges = [...new Set(invoices.map((i) => i.dateRange).filter(Boolean))];
 
