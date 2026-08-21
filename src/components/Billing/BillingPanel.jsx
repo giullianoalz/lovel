@@ -192,6 +192,26 @@ const BillingPanel = () => {
     }
   };
 
+  const [generatingInvoiceTxId, setGeneratingInvoiceTxId] = useState(null);
+
+  // Bills exactly this one charge — the row-level counterpart to "Bill a
+  // period". A charge created or edited straight in the ledger (a manual
+  // entry, a correction after a voided invoice) has no invoice until someone
+  // sweeps it up, and "Bill a period" only surfaces from the Invoices tab and
+  // pulls in everything pending, not just the row an admin is looking at.
+  const handleGenerateInvoiceForTx = async (tx) => {
+    setGeneratingInvoiceTxId(tx.id);
+    try {
+      const created = await database.generateInvoice(selectedFamily.id, [tx.id]);
+      toast.success(`Invoice ${created[0]?.id} created.`);
+      await loadBilling();
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not generate the invoice.');
+    } finally {
+      setGeneratingInvoiceTxId(null);
+    }
+  };
+
   // The row-level "⋮" menu, and the edit panel it (or clicking the date)
   // opens. Only one menu is ever open, so the open row's id is the whole
   // state — no per-row component needed.
@@ -1346,6 +1366,14 @@ const BillingPanel = () => {
                                 <button onClick={() => openEditTx(tx)}>
                                   <Pencil size={14} /> Edit Transaction
                                 </button>
+                                {type === 'charge' && !tx.invoiceId && (
+                                  <button
+                                    onClick={() => { setOpenRowMenuId(null); handleGenerateInvoiceForTx(tx); }}
+                                    disabled={generatingInvoiceTxId === tx.id}
+                                  >
+                                    <Receipt size={14} /> Generate Invoice
+                                  </button>
+                                )}
                                 <button
                                   className="danger"
                                   onClick={() => { setOpenRowMenuId(null); handleDeleteTransaction(tx); }}
