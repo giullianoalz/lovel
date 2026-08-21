@@ -4,7 +4,7 @@ import {
   CreditCard, History, ChevronLeft, ChevronRight, Plus, MoreVertical, Calendar as CalendarIcon, Search,
   UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers, GitFork, HandCoins
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { database } from '../../lib/database';
 import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
@@ -24,6 +24,7 @@ const formatDateUS = (dateStr) => {
 const BillingPanel = () => {
   const toast = useToast();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [families, setFamilies] = useState([]);
   const [students, setStudents] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -31,8 +32,32 @@ const BillingPanel = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [selectedFamily, setSelectedFamily] = useState(null);
+  const [selectedFamily, setSelectedFamilyState] = useState(null);
   const [activeTab, setActiveTab] = useState('Account'); // 'Account' | 'Invoices'
+
+  // Which family is open lives in the URL (?family=<id>), not just component
+  // state — a refresh, a bookmark, or a link pasted from Slack all reload
+  // this component from scratch, and state-only selection had nothing to
+  // rebuild it from, dropping the admin back on the family list every time.
+  const selectFamily = (family) => {
+    setSelectedFamilyState(family);
+    setSearchParams(family ? { family: family.id } : {}, { replace: !family });
+  };
+
+  // Restores the URL's family once the list has loaded — the id alone isn't
+  // enough to render the detail view, so this waits for `families` rather
+  // than racing it.
+  useEffect(() => {
+    if (selectedFamily || families.length === 0) return;
+    const familyId = searchParams.get('family');
+    if (!familyId) return;
+    const match = families.find(f => f.id === familyId);
+    if (match) setSelectedFamilyState(match);
+    // A stale/bad id in the URL (family deleted, typo'd link) is left alone
+    // rather than silently cleared — falling through to the family list is
+    // enough, and rewriting the URL here would fight the effect that's
+    // meant to keep it in sync with a real selection.
+  }, [families]);
   const [familySearch, setFamilySearch] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(false);
   const [onlyActive, setOnlyActive] = useState(false);
@@ -933,12 +958,12 @@ const BillingPanel = () => {
                   const bal = calculateFamilyBalance(f.id);
                   const primary = f.contacts.find(c => c.isInvoiceRecipient) || f.contacts[0];
                   return (
-                    <tr key={f.id} onClick={() => setSelectedFamily(f)} className="clickable-row">
+                    <tr key={f.id} onClick={() => selectFamily(f)} className="clickable-row">
                       <td style={{fontWeight: 600, color: 'var(--primary)'}}>{f.name}</td>
                       <td>{primary ? primary.name : 'N/A'}</td>
                       <td style={{fontWeight: 700, color: bal > 0 ? '#dc2626' : 'var(--text-main)'}}>${bal.toFixed(2)}</td>
                       <td style={{ textAlign: 'center' }}>
-                        <button className="icon-btn ghost" onClick={(e) => { e.stopPropagation(); setSelectedFamily(f); }}>
+                        <button className="icon-btn ghost" onClick={(e) => { e.stopPropagation(); selectFamily(f); }}>
                           <ChevronRight size={20} />
                         </button>
                       </td>
@@ -1201,7 +1226,7 @@ const BillingPanel = () => {
 
   return (
     <div className="billing-container">
-      <button className="btn-back" onClick={() => setSelectedFamily(null)}>
+      <button className="btn-back" onClick={() => selectFamily(null)}>
         <ChevronLeft size={16} /> Back to Families & Invoices
       </button>
 
