@@ -30,6 +30,11 @@ model User {
   // once every student has one backfilled.
   birthday               DateTime?                 @db.Date
   allergies              String?
+  // School grade the student is in: "K" or "1st".."12th". Free text rather than
+  // an enum because it is a label we show, not something we branch on, and it
+  // has to survive a student arriving mid-year from a school that numbers
+  // things differently.
+  gradeLevel             String?                   @map("grade_level") @db.VarChar(10)
   snackAuthorized        Boolean                   @default(false) @map("snack_authorized")
   snackPunches           Int                       @default(0) @map("snack_punches")
   seashells              Int                       @default(0) @map("prize_points")

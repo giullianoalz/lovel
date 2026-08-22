@@ -26,7 +26,7 @@ const parseBirthday = (v) => {
 /**
  * POST /api/import/students
  * Body: { rows: [{ studentName, studentEmail?, studentPhone?, age?, birthday?,
- *                  allergies?, status?, parentName?, parentEmail?, parentPhone?,
+ *                  allergies?, gradeLevel?, status?, parentName?, parentEmail?, parentPhone?,
  *                  familyName?, tags? }] }
  * Idempotent: matches families by name and users by email, so re-running won't duplicate.
  */
@@ -102,6 +102,7 @@ export const importStudents = async (req, res, next) => {
             birthday,
             phone: studentPhone,
             allergies: clean(row.allergies) || null,
+            gradeLevel: clean(row.gradeLevel).slice(0, 10) || null,
           };
 
           const existing = await tx.user.findUnique({ where: { email: studentEmail } });
@@ -113,6 +114,7 @@ export const importStudents = async (req, res, next) => {
             const updateData = { ...studentData };
             if (!birthday) delete updateData.birthday;
             if (!studentPhone) delete updateData.phone;
+            if (!studentData.gradeLevel) delete updateData.gradeLevel;
             student = await tx.user.update({ where: { id: existing.id }, data: updateData });
             summary.studentsUpdated++;
           } else {

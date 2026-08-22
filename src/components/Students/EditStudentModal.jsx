@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Check } from 'lucide-react';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
+import { GRADE_LEVELS } from '../../constants/gradeLevels';
 import './AddStudentModal.css';
 
 const toDateInput = (value) => (value ? String(value).slice(0, 10) : '');
@@ -19,6 +20,7 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
     status: (student.status || 'Active').toUpperCase(),
     birthday: toDateInput(student.birthday),
     allergies: student.allergies === 'None' ? '' : (student.allergies || ''),
+    gradeLevel: orBlank(student.gradeLevel),
     accommodationNotes: student.accommodationNotes || '',
     familyId: student.familyId || '',
   });
@@ -48,6 +50,7 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
         status: form.status,
         birthday: form.birthday,
         allergies: form.allergies.trim(),
+        gradeLevel: form.gradeLevel,
         accommodationNotes: form.accommodationNotes.trim(),
         familyId: form.familyId || undefined,
       });
@@ -103,9 +106,17 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
                 <input type="date" value={form.birthday} onChange={e => update('birthday', e.target.value)} />
               </div>
               <div className="asm-field">
-                <label>Allergies</label>
-                <input type="text" placeholder="e.g. Peanuts, Shellfish (or leave blank)" value={form.allergies} onChange={e => update('allergies', e.target.value)} />
+                <label>Grade Level</label>
+                <select value={form.gradeLevel} onChange={e => update('gradeLevel', e.target.value)}>
+                  <option value="">Select...</option>
+                  {GRADE_LEVELS.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
               </div>
+            </div>
+
+            <div className="asm-field">
+              <label>Allergies</label>
+              <input type="text" placeholder="e.g. Peanuts, Shellfish (or leave blank)" value={form.allergies} onChange={e => update('allergies', e.target.value)} />
             </div>
 
             <div className="asm-field">

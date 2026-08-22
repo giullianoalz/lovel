@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, ChevronDown, ChevronUp, Plus, Trash2, Check, User, Users, BookOpen, CreditCard } from 'lucide-react';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
+import { GRADE_LEVELS } from '../../constants/gradeLevels';
 import './AddStudentModal.css';
 
 const TUTORS = [
@@ -37,7 +38,7 @@ const INITIAL_STUDENT = {
   school: '',
   allergies: '',
   subjects: '',
-  skillLevel: '',
+  gradeLevel: '',
   groupTags: [],
   note: '',
   studentSince: new Date().toISOString().split('T')[0]
@@ -159,6 +160,7 @@ const AddStudentModal = ({ onClose, onSaved, families = [], preselectedFamilyId 
       birthday: student.birthday,
       age: ageFromBirthday(student.birthday),
       allergies: student.allergies.trim(),
+      gradeLevel: student.gradeLevel,
       status: student.status,
       tags: student.groupTags.map(t => t.label).join(','),
       // Family / parent
@@ -309,12 +311,10 @@ const AddStudentModal = ({ onClose, onSaved, families = [], preselectedFamilyId 
                         <input type="text" placeholder="Math, Science, English..." value={student.subjects} onChange={e => updateStudent('subjects', e.target.value)} />
                       </div>
                       <div className="asm-field">
-                        <label>Skill Level</label>
-                        <select value={student.skillLevel} onChange={e => updateStudent('skillLevel', e.target.value)}>
+                        <label>Grade Level</label>
+                        <select value={student.gradeLevel} onChange={e => updateStudent('gradeLevel', e.target.value)}>
                           <option value="">Select...</option>
-                          <option value="Beginner">Beginner</option>
-                          <option value="Intermediate">Intermediate</option>
-                          <option value="Advanced">Advanced</option>
+                          {GRADE_LEVELS.map(g => <option key={g} value={g}>{g}</option>)}
                         </select>
                       </div>
                     </div>

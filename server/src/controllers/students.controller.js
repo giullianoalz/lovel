@@ -140,6 +140,7 @@ export const exportStudentsCsv = async (req, res, next) => {
         age: true,
         birthday: true,
         allergies: true,
+        gradeLevel: true,
         status: true,
         familyMembers: {
           select: {
@@ -159,7 +160,7 @@ export const exportStudentsCsv = async (req, res, next) => {
     });
 
     const headers = [
-      'studentName', 'studentEmail', 'studentPhone', 'age', 'birthday', 'allergies', 'status',
+      'studentName', 'studentEmail', 'studentPhone', 'age', 'birthday', 'allergies', 'gradeLevel', 'status',
       'parentName', 'parentEmail', 'parentPhone', 'familyName', 'tags',
     ];
 
@@ -178,6 +179,7 @@ export const exportStudentsCsv = async (req, res, next) => {
         // Emitted as YYYY-MM-DD, which is exactly what the importer parses back.
         s.birthday ? s.birthday.toISOString().slice(0, 10) : '',
         s.allergies ?? '',
+        s.gradeLevel ?? '',
         s.status,
         parent?.fullName ?? '',
         parent?.email ?? '',
@@ -367,7 +369,7 @@ export const updateStudentHealth = async (req, res, next) => {
  */
 export const updateStudentInfo = async (req, res, next) => {
   try {
-    const { fullName, email, phone, status, birthday, allergies, accommodationNotes, familyId } = req.body;
+    const { fullName, email, phone, status, birthday, allergies, gradeLevel, accommodationNotes, familyId } = req.body;
 
     if (fullName !== undefined && !fullName.trim()) {
       return res.status(400).json({ error: 'Validation Error', message: 'Full name cannot be empty.' });
@@ -417,6 +419,7 @@ export const updateStudentInfo = async (req, res, next) => {
         ...(status !== undefined && { status }),
         ...(birthday !== undefined && { birthday: birthday ? new Date(`${birthday}T00:00:00.000Z`) : null }),
         ...(allergies !== undefined && { allergies }),
+        ...(gradeLevel !== undefined && { gradeLevel: gradeLevel?.trim() || null }),
         ...(accommodationNotes !== undefined && { accommodationNotes }),
       },
     });
