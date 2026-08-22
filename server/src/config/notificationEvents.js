@@ -131,6 +131,16 @@ export const NOTIFICATION_EVENTS = [
       { key: 'reloadPrice', label: 'charged at', default: 10, min: 1, max: 500, unit: '$ per reload' },
     ],
   },
+  {
+    key: 'NEW_INVOICE',
+    label: 'New invoice available',
+    description: 'Sent to a parent when a new invoice is emailed to them.',
+    category: 'payment_reminders',
+    defaults: { enabled: true, audience: ['PARENTS'], channels: ['IN_APP'] },
+    allowedAudience: ['PARENTS'],
+    allowedChannels: ['IN_APP', 'EMAIL', 'SMS'],
+    params: [],
+  },
 ];
 
 // Fast lookup by key.

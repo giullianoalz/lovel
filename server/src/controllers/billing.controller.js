@@ -5,7 +5,7 @@ import {
   sweepPaymentOntoOpenInvoices, applyCreditToExistingInvoice,
 } from '../services/billingCredit.service.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
-import { notifyAdmins } from '../jobs/notification.helper.js';
+import { notifyAdmins, sendNotification } from '../jobs/notification.helper.js';
 import { round2 } from '../services/registrationPricing.service.js';
 import { nextLcNumber } from '../services/invoicing.service.js';
 import { buildInvoicePdf, invoicePdfFilename } from '../services/invoicePdf.service.js';
@@ -670,6 +670,15 @@ export const sendInvoice = async (req, res, next) => {
     // OVERDUE keeps its accounting status even if an admin re-sends the copy.
     if (invoice.status === 'DRAFT') {
       await prisma.invoice.update({ where: { id: invoice.id }, data: { status: 'SENT' } });
+    }
+
+    if (recipient.id) {
+      sendNotification({
+        userId: recipient.id,
+        type: 'NEW_INVOICE',
+        title: 'New Invoice Available',
+        message: `Invoice ${invoice.invoiceNumber} for $${invoice.totalAmount} is now ready.`,
+      }).catch(err => console.error('Failed to notify parent about new invoice:', err));
     }
 
     console.log(`[Billing] ${req.user.email} emailed invoice ${invoice.invoiceNumber} to ${recipient.email}`);
