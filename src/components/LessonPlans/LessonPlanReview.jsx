@@ -21,6 +21,7 @@ const LessonPlanReview = () => {
   const [filterTeacher, setFilterTeacher] = useState('');
   const [filterDay, setFilterDay] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [showPurchased, setShowPurchased] = useState(false);
   const [reviewPlan, setReviewPlan] = useState(null);
   const [feedback, setFeedback] = useState('');
   const [notesSummary, setNotesSummary] = useState('');
@@ -343,6 +344,12 @@ const LessonPlanReview = () => {
         </>
       ) : (
         <>
+          <div className="lpr-filter" style={{ justifyContent: 'flex-end' }}>
+            <label className="lpr-archived-toggle">
+              <input type="checkbox" checked={showPurchased} onChange={e => setShowPurchased(e.target.checked)} />
+              Show purchased items
+            </label>
+          </div>
           {supplyLoading ? (
             <div className="lpr-empty"><span className="app-inline-loader"><span className="app-spinner-sm" />Loading shopping list…</span></div>
           ) : supplyItems.length === 0 ? (
@@ -421,7 +428,7 @@ const LessonPlanReview = () => {
                           ))}
 
                           {/* Purchased Items */}
-                          {group.purchased.map(item => (
+                          {showPurchased && group.purchased.map(item => (
                             <div 
                               key={item.id} 
                               className="lpr-supply-row purchased clickable-row"
