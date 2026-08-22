@@ -1,5 +1,6 @@
 import prisma from '../config/database.js';
 import stripe from '../config/stripe.js';
+import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 
 // POST /api/payments/stripe/webhook
 // Confirms Checkout Sessions started from the parent portal (createPaymentSession)
@@ -27,7 +28,7 @@ export const handleStripeWebhook = async (req, res) => {
   try {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      await settleCheckoutSession(session);
+      await settleCheckoutSession(session, req.app.get('io'));
     }
     res.json({ received: true });
   } catch (error) {
@@ -36,7 +37,7 @@ export const handleStripeWebhook = async (req, res) => {
   }
 };
 
-const settleCheckoutSession = async (session) => {
+const settleCheckoutSession = async (session, io) => {
   const { invoiceId, familyId } = session.metadata || {};
   if (!invoiceId) return;
 
@@ -50,11 +51,12 @@ const settleCheckoutSession = async (session) => {
   if (!invoice) return;
 
   const amount = (session.amount_total ?? 0) / 100;
+  const resolvedFamilyId = familyId || invoice.familyId;
 
   await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.create({
       data: {
-        familyId: familyId || invoice.familyId,
+        familyId: resolvedFamilyId,
         invoiceId: invoice.id,
         amount,
         netAmount: amount,
@@ -77,7 +79,7 @@ const settleCheckoutSession = async (session) => {
 
     await tx.transaction.create({
       data: {
-        familyId: familyId || invoice.familyId,
+        familyId: resolvedFamilyId,
         amount,
         type: 'PAYMENT',
         description: `Stripe card payment — Invoice ${invoice.invoiceNumber}`,
@@ -85,5 +87,54 @@ const settleCheckoutSession = async (session) => {
         paymentId: payment.id,
       },
     });
+  });
+
+  // Wake up anyone looking at billing right now — the parent portal and the
+  // admin Billing screen both poll nothing on their own, so without this a
+  // card payment is invisible until someone manually reloads.
+  await notifyFamilyAndAdmins({ familyId: resolvedFamilyId, invoice, amount, io });
+};
+
+const notifyFamilyAndAdmins = async ({ familyId, invoice, amount, io }) => {
+  const title = 'Payment received';
+  const message = `We received a $${amount.toFixed(2)} card payment for Invoice ${invoice.invoiceNumber}. Thank you!`;
+
+  const members = await prisma.familyMember.findMany({
+    where: { familyId },
+    select: { userId: true },
+  });
+
+  await Promise.all(members.map(({ userId }) =>
+    sendNotification({
+      userId,
+      type: 'BILLING',
+      title,
+      message,
+      referenceType: 'invoice',
+      referenceId: invoice.id,
+      dedupKey: `stripe-payment:${invoice.id}:${amount}`,
+      link: '/portal/parent?tab=billing',
+    })));
+
+  if (io) {
+    members.forEach(({ userId }) => {
+      io.to(`user_${userId}`).emit('notification', {
+        type: 'BILLING', title, message,
+        referenceType: 'invoice', referenceId: invoice.id, createdAt: new Date(),
+      });
+      // Dedicated event so the billing screen itself refetches, not just the bell.
+      io.to(`user_${userId}`).emit('billing_updated', { familyId, invoiceId: invoice.id });
+    });
+    io.to('admin_room').emit('billing_updated', { familyId, invoiceId: invoice.id });
+  }
+
+  await notifyAdmins({
+    type: 'BILLING',
+    title,
+    message: `${message} (family ${familyId})`,
+    referenceType: 'invoice',
+    referenceId: invoice.id,
+    dedupKey: `stripe-payment-admin:${invoice.id}:${amount}`,
+    io,
   });
 };

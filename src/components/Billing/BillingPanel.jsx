@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { database } from '../../lib/database';
+import { getSocket } from '../../lib/socket';
 import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
 import EmailPreviewModal from '../Layout/EmailPreviewModal';
@@ -107,6 +108,18 @@ const BillingPanel = () => {
 
   useEffect(() => {
     loadBilling();
+  }, []);
+
+  // Live push: a parent paying by card settles via the Stripe webhook, which
+  // may land while an admin is sitting on this exact screen. Join admin_room
+  // and refetch on the signal instead of leaving the invoice looking unpaid
+  // until someone happens to reload.
+  useEffect(() => {
+    const socket = getSocket();
+    socket.emit('join_admin');
+    const onBillingUpdated = () => loadBilling();
+    socket.on('billing_updated', onBillingUpdated);
+    return () => socket.off('billing_updated', onBillingUpdated);
   }, []);
 
   const calculateFamilyBalance = (familyId) => {
