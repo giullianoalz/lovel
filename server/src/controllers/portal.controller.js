@@ -2,7 +2,7 @@ import prisma from '../config/database.js';
 import crypto from 'crypto';
 import stripe from '../config/stripe.js';
 import { invalidate } from '../middleware/cache.js';
-import { sendNotification } from '../jobs/notification.helper.js';
+import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 import { getAdminUserIds } from '../services/notificationConfig.service.js';
 import { isOnly } from '../utils/roles.js';
 import { childIdsOfParent, familyIdsOfUser, ensureFamilyCheckInCode } from '../utils/family.js';
@@ -515,6 +515,99 @@ export const downloadParentChildClassNotes = async (req, res, next) => {
   }
 };
 
+// The fields a parent may write on their own child, and how each is cleaned.
+// Deliberately narrow: name, email, status and family assignment stay with
+// staff, because those are what the rest of the system keys off — a parent
+// renaming a child would silently break the roster and every invoice line
+// already addressed to them. What's here is the health and school information
+// the family is the actual authority on and staff can only get by asking.
+const PARENT_EDITABLE_FIELDS = {
+  allergies: (v) => v.trim() || null,
+  medicalNotes: (v) => v.trim() || null,
+  accommodationNotes: (v) => v.trim() || null,
+  gradeLevel: (v) => v.trim().slice(0, 10) || null,
+};
+
+// The subset above that staff must hear about when it changes — a new allergy
+// or a medication note is a safety fact, and nobody would think to re-read a
+// child's profile on the off chance a parent edited it overnight.
+const HEALTH_FIELDS = ['allergies', 'medicalNotes', 'accommodationNotes'];
+
+const FIELD_LABELS = {
+  allergies: 'Allergies',
+  medicalNotes: 'Medical conditions',
+  accommodationNotes: 'Accommodations',
+  gradeLevel: 'Grade level',
+};
+
+/**
+ * PUT /api/portal/parent/children/:studentId
+ *
+ * Lets a parent maintain their own child's health and school details. Family
+ * membership is the authorization check, and a child outside the caller's
+ * family gets the same 404 as one that doesn't exist.
+ */
+export const updateChildProfile = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    if (!(await childIdsOfParent(req.user.id)).includes(studentId)) {
+      return res.status(404).json({ error: 'Not Found', message: 'That student is not in your family.' });
+    }
+
+    const data = {};
+    for (const [field, clean] of Object.entries(PARENT_EDITABLE_FIELDS)) {
+      const raw = req.body[field];
+      if (raw === undefined) continue;
+      if (typeof raw !== 'string') {
+        return res.status(400).json({ error: 'Validation Error', message: `${FIELD_LABELS[field]} must be text.` });
+      }
+      if (raw.length > 1000) {
+        return res.status(400).json({ error: 'Validation Error', message: `${FIELD_LABELS[field]} is too long.` });
+      }
+      data[field] = clean(raw);
+    }
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'Bad Request', message: 'Nothing to update.' });
+    }
+
+    const before = await prisma.user.findUnique({
+      where: { id: studentId },
+      select: { fullName: true, ...Object.fromEntries(Object.keys(data).map(f => [f, true])) },
+    });
+
+    const student = await prisma.user.update({
+      where: { id: studentId },
+      data,
+      select: {
+        id: true, fullName: true, allergies: true, medicalNotes: true,
+        accommodationNotes: true, gradeLevel: true,
+      },
+    });
+
+    // The portal is cached per parent for a minute; without this the parent
+    // saves, the card re-renders from cache, and their edit appears to have
+    // been thrown away.
+    invalidate(`portal:parent:${req.user.id}`);
+
+    const changedHealth = HEALTH_FIELDS.filter(f => f in data && before?.[f] !== student[f]);
+    if (changedHealth.length > 0) {
+      await notifyAdmins({
+        type: 'CHILD_PROFILE_UPDATED',
+        title: `${student.fullName}: health info updated`,
+        message: `${req.user.fullName} updated ${changedHealth.map(f => FIELD_LABELS[f].toLowerCase()).join(', ')} from the parent portal.`,
+        referenceType: 'student',
+        referenceId: student.id,
+        io: req.app.get('io') || null,
+      });
+    }
+
+    res.json({ message: 'Profile updated.', student });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/portal/parent/pickup — Create a temporary pickup authorization
 export const createPickupAuth = async (req, res, next) => {
   try {
@@ -721,6 +814,8 @@ export const getParentPortal = async (req, res, next) => {
                     age: true,
                     allergies: true,
                     medicalNotes: true,
+                    accommodationNotes: true,
+                    gradeLevel: true,
                     snackPunches: true,
                     seashells: true,
                     avatarUrl: true,

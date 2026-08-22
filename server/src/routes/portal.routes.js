@@ -19,6 +19,7 @@ import {
   downloadStudentClassNotes,
   getParentChildClassNotes,
   downloadParentChildClassNotes,
+  updateChildProfile,
 } from '../controllers/portal.controller.js';
 
 const router = Router();
@@ -67,6 +68,10 @@ router.get('/parent/children/:studentId/classes/:classId/notes', authenticate, r
 router.get('/parent/children/:studentId/classes/:classId/notes/pdf', authenticate, requireRole('PARENT'), downloadParentChildClassNotes);
 
 // Pickup Authorization routes
+// A parent maintaining their own child's health / school details. Not cached
+// and not role-shared: the controller checks family membership per request.
+router.put('/parent/children/:studentId', authenticate, requireRole('PARENT'), updateChildProfile);
+
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);
 router.post('/parent/pickup', authenticate, requireRole('PARENT'), validate(createPickupAuthSchema), createPickupAuth);
 router.delete('/parent/pickup/:id', authenticate, requireRole('PARENT'), deletePickupAuth);

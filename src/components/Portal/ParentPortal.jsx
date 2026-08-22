@@ -5,16 +5,18 @@ import {
   Shell, AlertTriangle, ThumbsUp, Clock, Calendar, Gift, BookOpen,
   CreditCard, Receipt, CheckCircle, AlertCircle, ExternalLink, Download,
   ChevronDown, ChevronUp, Bell, Award, GraduationCap, Smartphone, Landmark, Copy,
-  ClipboardList, Lock, Star, Hourglass, FileSignature, DoorOpen,
+  ClipboardList, Lock, Star, Hourglass, FileSignature, DoorOpen, Pencil, HeartPulse,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
+import { getSocket } from '../../lib/socket';
 import { useAuth } from '../../context/AuthContext';
 import ErrorBanner from '../Layout/ErrorBanner';
 import StatHistoryModal from './StatHistoryModal';
 import FamilyCodeModal from './FamilyCodeModal';
 import LessonNotesModal from './LessonNotesModal';
 import WaiverForm from '../Waiver/WaiverForm';
+import { GRADE_LEVELS } from '../../constants/gradeLevels';
 import './ParentPortal.css';
 
 const RELATIONSHIPS = ['Parent', 'Guardian', 'Grandparent', 'Aunt/Uncle', 'Sibling', 'Family Friend', 'Other'];
@@ -345,6 +347,83 @@ const PickupModal = ({ children, onClose, onCreated, initialAuth = null }) => {
   );
 };
 
+/* ────────── Child Profile Modal ────────── */
+/* What a parent can maintain about their own child. Deliberately just the
+   health and school details the family is the authority on — name, email and
+   status stay with staff, since the roster and every invoice key off those. */
+const ChildProfileModal = ({ child, onClose, onSaved }) => {
+  const [form, setForm] = useState({
+    allergies: child.allergies || '',
+    medicalNotes: child.medicalNotes || '',
+    accommodationNotes: child.accommodationNotes || '',
+    gradeLevel: child.gradeLevel || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const update = (field, value) => setForm(f => ({ ...f, [field]: value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.put(`/portal/parent/children/${child.id}`, form);
+      onSaved(res.data.student);
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.message || err.userMessage || 'Could not save those details.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="pickup-modal">
+        <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        <div className="modal-header">
+          <div className="modal-icon"><HeartPulse size={22} /></div>
+          <div>
+            <h2>{child.fullName?.split(' ')[0]}'s details</h2>
+            <p>Keep us up to date — teachers and the front desk see this.</p>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="pickup-form">
+          {error && <ErrorBanner message={error} />}
+          <div className="form-group">
+            <label>Grade level</label>
+            <select value={form.gradeLevel} onChange={e => update('gradeLevel', e.target.value)}>
+              <option value="">Not set</option>
+              {GRADE_LEVELS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Allergies</label>
+            <textarea rows={2} maxLength={1000} placeholder="e.g. Peanuts, shellfish — or leave blank if none"
+              value={form.allergies} onChange={e => update('allergies', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Medical conditions</label>
+            <textarea rows={3} maxLength={1000}
+              placeholder="Asthma, epilepsy, medication taken during the day, anything staff should know in an emergency"
+              value={form.medicalNotes} onChange={e => update('medicalNotes', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Accommodations</label>
+            <textarea rows={3} maxLength={1000}
+              placeholder="How your child learns best — extra time, seating, reading support, an IEP or 504 plan"
+              value={form.accommodationNotes} onChange={e => update('accommodationNotes', e.target.value)} />
+          </div>
+          <button type="submit" className="pp-primary-btn" disabled={saving}>
+            {saving ? 'Saving...' : <><CheckCircle size={16} /> Save details</>}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 /* ────────── Invoice Row ────────── */
 const STATUS_META = {
   DRAFT:    { label: 'Draft',    cls: 'draft'    },
@@ -451,6 +530,8 @@ const ParentPortal = () => {
   const [regSubmitting, setRegSubmitting] = useState(null);
   const [reloadSubmitting, setReloadSubmitting] = useState(null);
   const [waiverChild, setWaiverChild] = useState(null);
+  // The child whose health / school details are open for editing.
+  const [profileChild, setProfileChild] = useState(null);
   const [waiverDownloading, setWaiverDownloading] = useState(null);
   // The class whose full note history is open — { studentId, classId, className }.
   const [notesFor, setNotesFor] = useState(null);
@@ -474,6 +555,9 @@ const ParentPortal = () => {
       ]);
       setData(portalRes.data);
       setPickupAuths(pickupRes.data);
+      
+      // Fetch billing in the background so the dashboard can show debt
+      loadBilling();
     } catch (err) {
       setError(err.userMessage || 'Could not load the family portal.');
     } finally {
@@ -495,6 +579,18 @@ const ParentPortal = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  // Live push: a Stripe card payment settles via webhook while the parent may
+  // be sitting on this very screen (or never left it, e.g. paid on their
+  // phone). Without this the paid invoice only shows up on a manual reload.
+  useEffect(() => {
+    if (!user?.id) return;
+    const socket = getSocket();
+    socket.emit('join_user', user.id);
+    const onBillingUpdated = () => loadBilling(true);
+    socket.on('billing_updated', onBillingUpdated);
+    return () => socket.off('billing_updated', onBillingUpdated);
+  }, [user?.id]);
 
   // Coming back from a Stripe Checkout redirect — jump to Billing and pull the
   // freshly-webhooked invoice status instead of showing stale/cached data.
@@ -569,6 +665,15 @@ const ParentPortal = () => {
       ),
     }));
     setWaiverChild(null);
+  };
+
+  // Same idea for the profile edit: the server hands back the saved columns, so
+  // merge those onto the child rather than refetching the portal.
+  const handleProfileSaved = (student) => {
+    setData(d => ({
+      ...d,
+      children: d.children.map(c => (c.id === student.id ? { ...c, ...student } : c)),
+    }));
   };
 
   // The PDF sits behind the same auth as everything else, so it has to be
@@ -720,6 +825,17 @@ const ParentPortal = () => {
         {/* ══════════ CHILDREN TAB ══════════ */}
         {tab === 'children' && (
           <>
+            {/* Outstanding Balance Banner */}
+            {billing && billing.balance > 0 && (
+              <div className="pp-dashboard-alert" style={{ background: '#fef2f2', border: '1px solid #fca5a5', padding: '16px', borderRadius: '8px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h4 style={{ color: '#991b1b', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}><AlertCircle size={18} /> Account Balance</h4>
+                  <p style={{ margin: '4px 0 0 0', color: '#7f1d1d' }}>You have an outstanding balance of <strong>${billing.balance.toFixed(2)}</strong>.</p>
+                </div>
+                <button className="pp-primary-btn" style={{ background: '#dc2626', borderColor: '#dc2626' }} onClick={() => setTab('billing')}>Pay Now</button>
+              </div>
+            )}
+
             {/* Child selector */}
             {children.length > 1 && (
               <div className="pp-child-tabs">
@@ -742,6 +858,7 @@ const ParentPortal = () => {
                     <div className="pp-child-info">
                       <h2>{child.fullName}</h2>
                       {child.age && <span className="pp-child-age">Age {child.age}</span>}
+                      {child.gradeLevel && <span className="pp-child-age">{child.gradeLevel} grade</span>}
                       {/* A self-registered child sits INACTIVE until staff place
                           them. "INACTIVE" reads like something is wrong with
                           their account; it only means we haven't placed them yet. */}
@@ -779,11 +896,31 @@ const ParentPortal = () => {
                   </div>
                 </div>
 
-                {(child.allergies || child.medicalNotes) && (
+                {/* Health and school details, kept by the family rather than
+                    guessed at by staff. Stays red-and-loud when there is
+                    something to flag, and turns into a plain invitation when
+                    there isn't — an empty allergy field is not an alert, but a
+                    parent who never noticed they could fill it in is a problem. */}
+                {(child.allergies || child.medicalNotes || child.accommodationNotes) ? (
                   <div className="pp-health-banner">
                     <AlertTriangle size={15} />
                     {child.allergies && <span><strong>Allergies:</strong> {child.allergies}</span>}
                     {child.medicalNotes && <span><strong>Medical:</strong> {child.medicalNotes}</span>}
+                    {child.accommodationNotes && <span><strong>Accommodations:</strong> {child.accommodationNotes}</span>}
+                    <button type="button" className="pp-health-edit" onClick={() => setProfileChild(child)}>
+                      <Pencil size={13} /> Edit
+                    </button>
+                  </div>
+                ) : (
+                  <div className="pp-health-banner empty">
+                    <HeartPulse size={15} />
+                    <span>
+                      No allergies, medical conditions or accommodations on file for
+                      {' '}{child.fullName?.split(' ')[0]}.
+                    </span>
+                    <button type="button" className="pp-health-edit" onClick={() => setProfileChild(child)}>
+                      <Plus size={13} /> Add details
+                    </button>
                   </div>
                 )}
 
@@ -1295,6 +1432,14 @@ const ParentPortal = () => {
           parentName={user?.fullName || ''}
           onClose={() => setWaiverChild(null)}
           onSigned={(waiver) => handleWaiverSigned(waiverChild.id, waiver)}
+        />
+      )}
+
+      {profileChild && (
+        <ChildProfileModal
+          child={profileChild}
+          onClose={() => setProfileChild(null)}
+          onSaved={handleProfileSaved}
         />
       )}
 
