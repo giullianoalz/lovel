@@ -310,7 +310,6 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   gap: 16px;
   background: #f8fafc;
 }
