@@ -30,6 +30,81 @@ const RATE_SOURCE_TEXT = {
   frozen: 'rate at the time',
 };
 
+/**
+ * How somebody is paid, as a choice rather than something inferred from
+ * whatever is in the salary box.
+ *
+ * The box alone could not tell these apart: empty meant "nobody has said",
+ * a figure meant a salary, and `0` meant — depending on who you asked — either
+ * "the owners draw nothing" or "salaried at zero", which the engine read as
+ * "your salary covers every hour you work" and paid the person nothing. Making
+ * the arrangement the first thing the admin picks means the ambiguous state
+ * cannot be typed.
+ */
+const ARRANGEMENTS = [
+  {
+    key: 'hourly',
+    label: 'Paid by the hour',
+    hint: 'Every hour on the calendar is priced by the kind of work it was.',
+  },
+  {
+    key: 'salaried',
+    label: 'On a salary',
+    hint: 'The salary covers the hours worked — nothing is paid per hour on top.',
+  },
+  {
+    key: 'unpaid',
+    label: 'Draws no pay',
+    hint: 'On the roster, but the academy pays them nothing. For the owners.',
+  },
+];
+
+/** Which arrangement a saved payroll record represents. Mirrors `rateSetup`. */
+const arrangementOf = (payroll) => {
+  if (payroll?.rateSetup === 'salaried') return 'salaried';
+  // An explicit zero with no hourly rate anywhere is somebody recorded as
+  // taking nothing, not somebody nobody has got round to pricing.
+  if (payroll?.salaryAmount === 0 && payroll?.hourlyRate == null && !payroll?.flatRateOnly
+      && !(payroll?.categoryRates || []).some((c) => c.rate != null)) {
+    return 'unpaid';
+  }
+  return 'hourly';
+};
+
+const num = (value) => {
+  if (value == null || String(value).trim() === '') return null;
+  const n = parseFloat(String(value).replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * What one hour of a given category would pay under the rates currently typed
+ * into the form — the server's cascade, run in the browser.
+ *
+ * Deliberately a copy, and deliberately only ever used to *show* a number:
+ * payroll is computed on the server and stays that way. What this buys is that
+ * an admin can see the consequence of a rate before saving it, instead of
+ * saving, closing, re-reading the month and working out what changed. It is
+ * kept in the same order as `resolveRate` in payroll.service.js so the two can
+ * be read side by side.
+ */
+const previewRate = (categoryKey, form, categories) => {
+  if (form.arrangement === 'salaried') return { rate: 0, source: 'salaried' };
+  if (form.arrangement === 'unpaid') return { rate: 0, source: 'unpaid' };
+
+  const hourly = num(form.hourlyRate);
+  if (form.flatRateOnly && hourly != null) return { rate: hourly, source: 'flat' };
+
+  const own = num(form.categoryRates[categoryKey]);
+  if (own != null) return { rate: own, source: 'teacher' };
+
+  const category = categories.find((c) => c.category === categoryKey);
+  if (category?.categoryDefault != null) return { rate: category.categoryDefault, source: 'category' };
+
+  if (hourly != null) return { rate: hourly, source: 'base' };
+  return { rate: 0, source: 'unset' };
+};
+
 /** A TIME column comes back as an ISO timestamp on a placeholder day. */
 const clock = (value) => {
   if (!value) return '';
@@ -51,8 +126,13 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
   // same rule, this only keeps the controls out of a teacher's way.
   const canEditPay = hasRole('ADMIN');
   const [isEditingRates, setIsEditingRates] = useState(false);
-  const [rateForm, setRateForm] = useState({ baseSalary: '', salaryPeriod: 'MONTHLY', hourlyRate: '', flatRateOnly: false, categoryRates: {} });
+  const [rateForm, setRateForm] = useState({ arrangement: 'hourly', baseSalary: '', salaryPeriod: 'MONTHLY', hourlyRate: '', flatRateOnly: false, categoryRates: {} });
   const [savingRates, setSavingRates] = useState(false);
+  // The hours already on this person's calendar, so the editor can price them
+  // live. Fetched once when the card is opened for editing rather than with the
+  // month: it is a forecast, it does not change while somebody types, and
+  // nobody reading their own payslip needs it.
+  const [committed, setCommitted] = useState(null);
 
   const loadPayroll = async () => {
     setLoading(true);
@@ -81,19 +161,28 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
       categoryRates[c.category] = c.rate != null ? String(c.rate) : '';
     });
     setRateForm({
+      arrangement: arrangementOf(payroll),
       // The agreed figure, not the month's share: someone hired at $63,000 a
       // year must see 63,000 here, or saving would file a twelfth of their
-      // salary as the new yearly one.
-      // `!= null`, not truthiness: an agreed salary of zero has to prefill as
-      // "0", or opening the card and saving would silently downgrade it to
-      // "not set" — which is a different thing, even though both pay nothing.
-      baseSalary: payroll?.salaryAmount != null ? String(payroll.salaryAmount) : '',
+      // salary as the new yearly one. A zero prefills as "0" and reads as the
+      // "draws no pay" arrangement, which is what it always meant.
+      baseSalary: payroll?.salaryAmount ? String(payroll.salaryAmount) : '',
       salaryPeriod: payroll?.salaryPeriod || 'MONTHLY',
       hourlyRate: payroll?.hourlyRate != null ? String(payroll.hourlyRate) : '',
       flatRateOnly: Boolean(payroll?.flatRateOnly),
       categoryRates,
     });
     setIsEditingRates(true);
+
+    // What this person is already booked for. Priced against whatever is in the
+    // form, it turns "$50 an hour" — a number nobody can size — into "$11,900
+    // between now and December", which is the number the decision is actually
+    // about. Failing to load it costs the preview and nothing else, so it is
+    // swallowed rather than shown as an error over a card that works.
+    setCommitted(null);
+    database.fetchMyProjectedPayroll(teacher.id, { weeks: 12 })
+      .then((res) => setCommitted(res?.row || null))
+      .catch(() => setCommitted(null));
   };
 
   const handleSaveRates = async () => {

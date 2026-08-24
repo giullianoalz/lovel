@@ -63,6 +63,11 @@ const CATEGORIES = [
 
 const salaried = { id: 'p-salaried', hourlyRate: null, flatRateOnly: false, baseSalary: '63000', payRates: [] };
 const hourly = { id: 'p-hourly', hourlyRate: null, flatRateOnly: false, baseSalary: null, payRates: [] };
+// A salary of zero is the opposite of being salaried: it is somebody saying
+// there is no salary here. The academy's owners are on it deliberately, and the
+// editor writes it whenever an admin types 0 into the salary box meaning "none"
+// — so this fixture is not a curiosity, it is what production holds.
+const zeroSalary = { id: 'p-zero', hourlyRate: null, flatRateOnly: false, baseSalary: '0', payRates: [] };
 
 const sessionFor = (teacher) => ({
   id: `s-${teacher.id}`,
@@ -152,6 +157,21 @@ test('an hourly teacher does get a rate frozen onto their session', async () => 
   assert.deepEqual(errors, [], 'the freeze should not have errored');
   assert.equal(frozen, 1);
   assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].data, { paidRate: 50, paidRateSource: 'category' });
+});
+
+test('a salary of zero is not a salary — those hours are paid by the hour', async () => {
+  // The trap this guards: `baseSalary != null` treats an agreed zero as "the
+  // salary covers these hours", so a person on $0 works for nothing and the
+  // payslip says "Covered by salary" about a salary that does not exist. It was
+  // live — one teacher had $0 saved alongside a $20/hr online rate that could
+  // never be reached.
+  stubPrisma({ sessions: [sessionFor(zeroSalary)] });
+
+  const frozen = await freezeSessionRates([sessionFor(zeroSalary).id]);
+
+  assert.deepEqual(errors, [], 'the freeze should not have errored');
+  assert.equal(frozen, 1, 'nothing covers this hour, so it prices like any other hourly one');
   assert.deepEqual(writes[0].data, { paidRate: 50, paidRateSource: 'category' });
 });
 

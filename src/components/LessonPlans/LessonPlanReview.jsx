@@ -18,8 +18,10 @@ const LessonPlanReview = () => {
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterClass, setFilterClass] = useState('');
   const [filterTeacher, setFilterTeacher] = useState('');
   const [filterDay, setFilterDay] = useState('');
+  const [sortOrder, setSortOrder] = useState('desc');
   const [showArchived, setShowArchived] = useState(false);
   const [showPurchased, setShowPurchased] = useState(false);
   const [filterSupplyTeacher, setFilterSupplyTeacher] = useState('');
@@ -143,6 +145,7 @@ const LessonPlanReview = () => {
   };
 
   const uniqueTeachers = Array.from(new Set(plans.map(p => p.teacher?.fullName).filter(Boolean))).sort();
+  const uniqueClasses = Array.from(new Set(plans.map(p => p.class?.name).filter(Boolean))).sort();
   
   const uniqueDaysSet = new Set();
   plans.forEach(p => {
@@ -152,6 +155,7 @@ const LessonPlanReview = () => {
 
   const filteredPlans = plans.filter(p => {
     if (filterTeacher && p.teacher?.fullName !== filterTeacher) return false;
+    if (filterClass && p.class?.name !== filterClass) return false;
     if (filterDay) {
       const pDays = (p.sessionDates || []).map(d => parseDateOnly(d).toISOString());
       if (!pDays.includes(filterDay)) return false;
@@ -170,7 +174,19 @@ const LessonPlanReview = () => {
     acc[key].push(plan);
     return acc;
   }, {});
-  const sortedPlanWeeks = Object.keys(plansByWeek).sort((a, b) => new Date(b) - new Date(a));
+
+  Object.keys(plansByWeek).forEach(key => {
+    plansByWeek[key].sort((a, b) => {
+      if (a.status === 'SUBMITTED' && b.status !== 'SUBMITTED') return -1;
+      if (a.status !== 'SUBMITTED' && b.status === 'SUBMITTED') return 1;
+      return 0;
+    });
+  });
+
+  const sortedPlanWeeks = Object.keys(plansByWeek).sort((a, b) => {
+    if (sortOrder === 'asc') return new Date(a) - new Date(b);
+    return new Date(b) - new Date(a);
+  });
 
   const uniqueSupplyTeachers = Array.from(new Set(supplyItems.map(i => i.teacher?.fullName).filter(Boolean))).sort();
   const uniqueSupplyClasses = Array.from(new Set(supplyItems.map(i => i.lessonPlan?.class?.name || 'General'))).sort();
@@ -270,6 +286,12 @@ const LessonPlanReview = () => {
               <option value="NEEDS_REVISION">Needs Revision</option>
               <option value="APPROVED">Approved</option>
             </select>
+            <select value={filterClass} onChange={e => setFilterClass(e.target.value)}>
+              <option value="">All Classes</option>
+              {uniqueClasses.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
             <select value={filterTeacher} onChange={e => setFilterTeacher(e.target.value)}>
               <option value="">All Teachers</option>
               {uniqueTeachers.map(t => (
@@ -283,6 +305,10 @@ const LessonPlanReview = () => {
                   {new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })}
                 </option>
               ))}
+            </select>
+            <select value={sortOrder} onChange={e => setSortOrder(e.target.value)}>
+              <option value="desc">Newest First</option>
+              <option value="asc">Oldest First</option>
             </select>
             <label className="lpr-archived-toggle">
               <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />

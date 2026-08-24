@@ -343,9 +343,17 @@ const mondayOf = (input) => {
 const rateContextFor = (person, categories) => ({
   hourlyRate: toNumber(person.hourlyRate),
   flatRateOnly: Boolean(person.flatRateOnly),
-  // Anyone with a base salary is paid for their hours through that salary, not
-  // a second time per hour worked — see resolveRate.
-  salaried: person.baseSalary != null,
+  // Anyone on a base salary is paid for their hours through that salary, not a
+  // second time per hour worked — see resolveRate.
+  //
+  // A salary of zero is not that arrangement. `null` means nobody has agreed a
+  // salary and `0` means somebody agreed there isn't one — the academy's owners
+  // draw nothing — and reading the second as "your salary covers these hours"
+  // pays them nothing for work a salary of $0 cannot possibly cover. It is a
+  // live trap in the editor too: the salary box saves what you type, so an
+  // admin writing 0 to mean "no salary" silently zeroes every hour that person
+  // works. Only a positive figure is a salary.
+  salaried: toNumber(person.baseSalary) > 0,
   overrides: new Map((person.payRates || []).map((r) => [r.category, parseFloat(r.hourlyRate)])),
   categories,
 });
@@ -558,7 +566,7 @@ const wasLateCancelled = (session) =>
  * matter here — when, how long, at what rate, for how much — so they are
  * flattened into one shape and the screen renders a single list.
  */
-const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled }, context, categories) => {
+const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled, role }, context, categories) => {
   const hours = sessionHours({ startTime, endTime });
   // A frozen rate wins outright: this hour was confirmed under a contract that
   // may since have changed, and re-resolving it would rewrite history.
@@ -584,6 +592,12 @@ const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categor
     // the class ran. Says so on the payslip so nobody reading it later has to
     // guess why an hour with no attendance was paid.
     lateCancelled: Boolean(lateCancelled),
+    // Which chair this person was in. The rate does not depend on it — a
+    // co-teacher is paid the same full hour as the teacher whose class it is —
+    // but the cost does: every co-taught hour is bought twice, and a screen
+    // that cannot say so leaves an admin reading one number for two people.
+    // Null on a shift, which nobody co-staffs.
+    role: role || null,
     category: categoryKey,
     categoryLabel: categories.get(categoryKey)?.label || (categoryKey ? categoryKey : 'Uncategorised'),
     categoryColor: categories.get(categoryKey)?.color || null,
@@ -781,6 +795,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
           categoryKey: sessionCategory(s, cls),
           override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
           lateCancelled: wasLateCancelled(s),
+          role,
         },
         context,
         categories
@@ -878,6 +893,18 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
       salaryPeriod: teacher.salaryPeriod,
       hourlyRate: context.hourlyRate,
       flatRateOnly: context.flatRateOnly,
+      // The one word the editor opens on: 'salaried' | 'hourly' | 'default' |
+      // 'unset'. See the same field on the roster row — the editor and the
+      // screen that sends you to it have to agree about how somebody is paid.
+      rateSetup: context.salaried
+        ? 'salaried'
+        : (context.hourlyRate != null || context.overrides.size > 0 || context.flatRateOnly)
+          ? 'hourly'
+          : lines.some((l) => l.rateSource === 'category' || l.rateSource === 'frozen')
+            ? 'default'
+            : 'unset',
+      coTeachingHours: round2(lines.filter((l) => l.role === 'co-teacher').reduce((n, l) => n + l.hours, 0)),
+      coTeachingAmount: round2(lines.filter((l) => l.role === 'co-teacher').reduce((n, l) => n + l.amount, 0)),
       categoryRates: categoryList.map((c) => ({
         category: c.key,
         label: c.label,
@@ -1090,12 +1117,20 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     const personAbsences = [...(absencesByPerson.get(person.id) || [])];
 
     const lines = [];
-    for (const cls of [...person.taughtClasses, ...person.coTaughtClasses]) {
+    // Tagged rather than concatenated: both lists price identically, but the
+    // roster has to be able to say how much of somebody's total came from
+    // covering somebody else's class.
+    const taught = [
+      ...person.taughtClasses.map((cls) => ({ cls, role: 'primary' })),
+      ...person.coTaughtClasses.map((cls) => ({ cls, role: 'co-teacher' })),
+    ];
+    for (const { cls, role } of taught) {
       for (const s of cls.sessions) {
         lines.push(lineItem({
           id: s.id, kind: 'session', date: s.date, startTime: s.startTime, endTime: s.endTime,
           title: cls.name, categoryKey: sessionCategory(s, cls), override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
           lateCancelled: wasLateCancelled(s),
+          role,
         }, context, categories));
       }
     }
@@ -1147,6 +1182,17 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     const upcoming = lines.filter((l) => !l.earned);
     const earned = lines.filter((l) => l.earned);
 
+    // Hours this person was paid for covering a class that is somebody else's.
+    // Separated because it is the one part of the total an admin cannot see
+    // coming: a seven-hour homeschool block with a co-teacher on it costs two
+    // people's seven hours, and the calendar shows one entry.
+    const coTaught = lines.filter((l) => l.role === 'co-teacher');
+    // Whether anybody has actually said what this person earns, or whether the
+    // money below is the category default answering for them. Both pay, and the
+    // screen must not call a default an agreement — see `rateSetup` on the row.
+    const hasOwnRate =
+      context.hourlyRate != null || context.overrides.size > 0 || context.flatRateOnly;
+
     return {
       teacher: {
         id: person.id,
@@ -1161,6 +1207,21 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
       salaryPeriod: person.salaryPeriod,
       hourlyRate: context.hourlyRate,
       flatRateOnly: context.flatRateOnly,
+      // How this person is paid, as one word, so the screen never has to infer
+      // it from a salary field that means three things. 'salaried' — a salary
+      // covers their hours; 'hourly' — somebody set a rate for them;
+      // 'default' — they are being paid, but only because the category has a
+      // rate and nobody has confirmed it is right for them; 'unset' — nothing
+      // anywhere, and their hours price at nothing.
+      rateSetup: context.salaried
+        ? 'salaried'
+        : hasOwnRate
+          ? 'hourly'
+          : lines.some((l) => l.rateSource === 'category' || l.rateSource === 'frozen')
+            ? 'default'
+            : 'unset',
+      coTeachingHours: round2(coTaught.reduce((n, l) => n + l.hours, 0)),
+      coTeachingAmount: round2(coTaught.reduce((n, l) => n + l.amount, 0)),
       categoryRates: categoryList.map((c) => ({
         category: c.key,
         label: c.label,
@@ -1241,6 +1302,15 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
       upcomingAmount: sum((r) => r.upcomingAmount),
       upcomingCount: rows.reduce((n, r) => n + r.upcomingCount, 0),
       unratedHours: sum((r) => r.unratedHours),
+      // The part of the bill that is second bodies in rooms that already have a
+      // teacher. Worth its own figure: it is the only cost on this screen that
+      // grows without a single extra entry appearing on the calendar.
+      coTeachingHours: sum((r) => r.coTeachingHours),
+      coTeachingAmount: sum((r) => r.coTeachingAmount),
+      // People whose rate is the category's, not theirs. They are being paid,
+      // so this is not the unpriced-hours warning — it is the list of prices
+      // nobody has actually agreed to.
+      unconfirmedRates: rows.filter((r) => r.rateSetup === 'default').length,
       // Summed across rows, unlike the session count above: a co-taught class
       // marked absent costs two people an hour each, and the screen is showing
       // what the absences cost, not how many calendar entries they were.
