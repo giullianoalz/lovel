@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Heart, Users, MessageSquare, QrCode, Plus, X, Trash2, ShieldCheck,
@@ -17,6 +17,7 @@ import FamilyCodeModal from './FamilyCodeModal';
 import LessonNotesModal from './LessonNotesModal';
 import WaiverForm from '../Waiver/WaiverForm';
 import { GRADE_LEVELS } from '../../constants/gradeLevels';
+import Linkified from '../../lib/linkify';
 import './ParentPortal.css';
 
 const RELATIONSHIPS = ['Parent', 'Guardian', 'Grandparent', 'Aunt/Uncle', 'Sibling', 'Family Friend', 'Other'];
@@ -360,6 +361,10 @@ const ChildProfileModal = ({ child, onClose, onSaved }) => {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState(child.avatarUrl);
+  const fileInputRef = useRef(null);
 
   const update = (field, value) => setForm(f => ({ ...f, [field]: value }));
 
@@ -370,11 +375,37 @@ const ChildProfileModal = ({ child, onClose, onSaved }) => {
     setError(null);
     try {
       const res = await api.put(`/portal/parent/children/${child.id}`, form);
-      onSaved(res.data.student);
+      // Ensure we preserve the avatarUrl from local state in case it just updated
+      const updatedStudent = { ...res.data.student, avatarUrl };
+      onSaved(updatedStudent);
       onClose();
     } catch (err) {
       setError(err.response?.data?.message || err.userMessage || 'Could not save those details.');
       setSaving(false);
+    }
+  };
+
+  const handleAvatarChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setAvatarUploading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append('avatar', file);
+
+    try {
+      const res = await api.post(`/portal/parent/children/${child.id}/avatar`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setAvatarUrl(res.data.student.avatarUrl);
+      onSaved(res.data.student);
+    } catch (err) {
+      setError(err.response?.data?.message || err.userMessage || 'Could not upload profile picture.');
+    } finally {
+      setAvatarUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -391,6 +422,23 @@ const ChildProfileModal = ({ child, onClose, onSaved }) => {
         </div>
         <form onSubmit={handleSubmit} className="pickup-form">
           {error && <ErrorBanner message={error} />}
+          
+          <div className="pp-avatar-upload">
+            <div className="pp-avatar-upload-preview">
+              {avatarUrl ? (
+                <img src={`${import.meta.env.VITE_API_URL || ''}${avatarUrl}`} alt="" />
+              ) : (
+                <>{child.fullName?.[0]}</>
+              )}
+            </div>
+            <div className="pp-avatar-upload-actions">
+              <input type="file" ref={fileInputRef} onChange={handleAvatarChange} style={{ display: 'none' }} accept="image/*" />
+              <button type="button" className="pp-avatar-upload-btn" onClick={() => fileInputRef.current?.click()} disabled={avatarUploading}>
+                {avatarUploading ? 'Uploading...' : 'Upload new photo'}
+              </button>
+              <p className="pp-avatar-upload-info">JPG or PNG, max 5MB</p>
+            </div>
+          </div>
           <div className="form-group">
             <label>Grade level</label>
             <select value={form.gradeLevel} onChange={e => update('gradeLevel', e.target.value)}>
@@ -842,7 +890,11 @@ const ParentPortal = () => {
                 {children.map((c, i) => (
                   <button key={c.id} className={`pp-child-tab ${activeChild === i ? 'active' : ''}`}
                     onClick={() => setActiveChild(i)}>
-                    <div className="pp-child-avatar">{c.fullName?.[0]}</div>
+                    {c.avatarUrl ? (
+                      <img src={`${import.meta.env.VITE_API_URL || ''}${c.avatarUrl}`} alt="" className="pp-child-avatar-img" />
+                    ) : (
+                      <div className="pp-child-avatar">{c.fullName?.[0]}</div>
+                    )}
                     <span>{c.fullName?.split(' ')[0]}</span>
                   </button>
                 ))}
@@ -854,7 +906,11 @@ const ParentPortal = () => {
                 {/* Child profile + stats */}
                 <div className="pp-child-overview">
                   <div className="pp-child-card">
-                    <div className="pp-child-avatar-lg">{child.fullName?.[0]}</div>
+                    {child.avatarUrl ? (
+                      <img src={`${import.meta.env.VITE_API_URL || ''}${child.avatarUrl}`} alt="" className="pp-child-avatar-lg-img" />
+                    ) : (
+                      <div className="pp-child-avatar-lg">{child.fullName?.[0]}</div>
+                    )}
                     <div className="pp-child-info">
                       <h2>{child.fullName}</h2>
                       {child.age && <span className="pp-child-age">Age {child.age}</span>}
@@ -1392,7 +1448,9 @@ const ParentPortal = () => {
                   <div key={i} className="pp-ann-card">
                     {a.isPinned && <span className="pp-pinned">📌 Pinned</span>}
                     <h4>{a.title}</h4>
-                    <p>{a.body.substring(0, 200)}{a.body.length > 200 ? '…' : ''}</p>
+                    {/* Truncate first, then linkify — cutting at 200 characters
+                        afterwards would leave half an anchor behind. */}
+                    <p><Linkified text={a.body.substring(0, 200)} />{a.body.length > 200 ? '…' : ''}</p>
                     <span className="pp-ann-date">
                       {fmt(a.publishedAt)}{a.author && ` — ${a.author.fullName}`}
                     </span>

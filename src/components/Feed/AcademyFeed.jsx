@@ -6,6 +6,7 @@ import {
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
+import Linkified from '../../lib/linkify';
 import './AcademyFeed.css';
 
 const CATEGORIES = [
@@ -59,6 +60,98 @@ const MediaCarousel = ({ media, alt }) => {
           <button onClick={() => setIdx(i => (i + 1) % media.length)}><ChevronRight size={16} /></button>
         </div>
       )}
+    </div>
+  );
+};
+
+/* ── Replies ──
+   A flat thread under each post. Deliberately not a chat: replies are visible
+   to whoever the post was aimed at, and the answer to "are siblings welcome at
+   the open house?" is worth as much to the family who didn't ask. */
+const CommentThread = ({ post, currentUser, isAdmin }) => {
+  const toast = useToast();
+  const [comments, setComments] = useState(post.comments || []);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  // Long threads collapse to the last three, so one busy post doesn't push
+  // every later announcement off the screen.
+  const [expanded, setExpanded] = useState(false);
+
+  const visible = expanded || comments.length <= 3 ? comments : comments.slice(-3);
+  const hidden = comments.length - visible.length;
+
+  const handleSend = async () => {
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      const res = await api.post(`/announcements/${post.id}/comments`, { body });
+      setComments(prev => [...prev, res.data.comment]);
+      setDraft('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not post your reply.');
+    }
+    setSending(false);
+  };
+
+  const handleDelete = async (commentId) => {
+    if (!confirm('Remove this reply?')) return;
+    try {
+      await api.delete(`/announcements/${post.id}/comments/${commentId}`);
+      setComments(prev => prev.filter(c => c.id !== commentId));
+    } catch {
+      toast.error('Could not remove the reply.');
+    }
+  };
+
+  return (
+    <div className="feed-comments">
+      {comments.length > 0 && (
+        <div className="feed-comment-list">
+          {hidden > 0 && (
+            <button className="feed-comments-more" onClick={() => setExpanded(true)}>
+              Show {hidden} earlier {hidden === 1 ? 'reply' : 'replies'}
+            </button>
+          )}
+          {visible.map(c => (
+            <div key={c.id} className="feed-comment">
+              <div className="feed-comment-avatar">{(c.author?.fullName || '?')[0]}</div>
+              <div className="feed-comment-bubble">
+                <div className="feed-comment-head">
+                  <strong>{c.author?.fullName || 'Someone'}</strong>
+                  <span className="feed-comment-time">{timeAgo(c.createdAt)}</span>
+                  {(isAdmin || c.author?.id === currentUser?.id) && (
+                    <button
+                      className="feed-comment-delete"
+                      onClick={() => handleDelete(c.id)}
+                      title="Remove reply"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                <p><Linkified text={c.body} /></p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="feed-comment-composer">
+        <input
+          type="text"
+          placeholder="Write a reply..."
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          // Enter sends: these are one-line answers, and a reply box that needs
+          // a mouse to submit is a reply box nobody uses.
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          maxLength={2000}
+        />
+        <button onClick={handleSend} disabled={sending || !draft.trim()} title="Send reply">
+          <Send size={14} />
+        </button>
+      </div>
     </div>
   );
 };
@@ -475,13 +568,20 @@ const AcademyFeed = () => {
                 ) : (
                   <>
                     <h3 className="feed-card-title">{post.title}</h3>
-                    <p className="feed-card-body">{post.body}</p>
+                    <p className="feed-card-body"><Linkified text={post.body} /></p>
 
                     {post.media && post.media.length > 0 ? (
                       <MediaCarousel media={post.media} alt={post.title} />
                     ) : post.imageUrl && (
                       <img className="feed-card-image" src={MEDIA_BASE + post.imageUrl} alt={post.title} />
                     )}
+
+                    <CommentThread
+                      key={post.id}
+                      post={post}
+                      currentUser={user}
+                      isAdmin={hasRole('ADMIN')}
+                    />
                   </>
                 )}
               </div>

@@ -168,6 +168,7 @@ const AddStudentModal = ({ onClose, onSaved, families = [], preselectedFamilyId 
       parentEmail: existingFamily ? '' : family.parentEmail.trim(),
       parentPhone: existingFamily ? '' : family.parentPhone.trim(),
       familyName: existingFamily ? existingFamily.name : '',
+      address: existingFamily ? '' : (family.address || '').trim(),
     };
 
     try {
@@ -240,9 +241,11 @@ const AddStudentModal = ({ onClose, onSaved, families = [], preselectedFamilyId 
                   <div className="asm-field">
                     <label>Status</label>
                     <select value={student.status} onChange={e => updateStudent('status', e.target.value)}>
+                      {/* Only the two the account actually stores. "Trial" and
+                          "Waiting" used to sit here and were both saved as
+                          Active, so the directory contradicted the form the
+                          moment you finished it. */}
                       <option value="Active">Active</option>
-                      <option value="Trial">Trial</option>
-                      <option value="Waiting">Waiting</option>
                       <option value="Inactive">Inactive</option>
                     </select>
                   </div>

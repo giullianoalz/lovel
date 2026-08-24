@@ -15,6 +15,7 @@ const EditFamilyModal = ({ familyId, onClose, onSaved }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [familyName, setFamilyName] = useState('');
+  const [address, setAddress] = useState('');
   const [guardians, setGuardians] = useState([]); // [{ memberId, userId, fullName, email, phone }]
 
   useEffect(() => {
@@ -25,6 +26,7 @@ const EditFamilyModal = ({ familyId, onClose, onSaved }) => {
         const family = res.data.family;
         if (cancelled) return;
         setFamilyName(family.name || '');
+        setAddress(family.address || '');
         setGuardians(
           (family.members || [])
             .filter(m => m.user?.role === 'PARENT')
@@ -55,7 +57,7 @@ const EditFamilyModal = ({ familyId, onClose, onSaved }) => {
     if (saving || !canSave) return;
     setSaving(true);
     try {
-      await api.put(`/families/${familyId}`, { name: familyName.trim() });
+      await api.put(`/families/${familyId}`, { name: familyName.trim(), address: address.trim() });
       await Promise.all(
         guardians.map(g =>
           api.put(`/users/${g.userId}`, { fullName: g.fullName.trim(), phone: g.phone.trim() })
@@ -89,6 +91,20 @@ const EditFamilyModal = ({ familyId, onClose, onSaved }) => {
               <div className="asm-field">
                 <label>Family Name <span className="required">*</span></label>
                 <input type="text" value={familyName} onChange={e => setFamilyName(e.target.value)} />
+              </div>
+
+              {/* The registration form asks for this, but nothing in the app
+                  could add or correct it afterwards — a family created by
+                  staff had no way to ever get an address on file. */}
+              <div className="asm-field">
+                <label>Home Address</label>
+                <input
+                  type="text"
+                  placeholder="Street, city, state, ZIP"
+                  value={address}
+                  onChange={e => setAddress(e.target.value)}
+                />
+                <span className="asm-hint">Shared by everyone in the household.</span>
               </div>
             </div>
 

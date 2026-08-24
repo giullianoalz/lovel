@@ -60,10 +60,19 @@ export const importStudents = async (req, res, next) => {
           const familyName = clean(row.familyName) || (parentName ? `${parentName.split(' ').slice(-1)[0]} Family` : `${studentName.split(' ').slice(-1)[0]} Family`);
           const tags = clean(row.tags) ? clean(row.tags).split(/[;,|]/).map(t => t.trim()).filter(Boolean) : [];
 
+          // The "Add Student" form asks for a home address and this dropped it
+          // on the floor, so a household created through the app started with
+          // no address and — until the Edit Family modal grew a field — had no
+          // way of ever getting one. Only fills a blank: an existing family's
+          // address isn't overwritten by a row that happens to carry one.
+          const address = clean(row.address) || null;
+
           let family = await tx.family.findFirst({ where: { name: familyName } });
           if (!family) {
-            family = await tx.family.create({ data: { name: familyName, tags } });
+            family = await tx.family.create({ data: { name: familyName, tags, address } });
             summary.familiesCreated++;
+          } else if (address && !family.address) {
+            family = await tx.family.update({ where: { id: family.id }, data: { address } });
           }
 
           // --- Parent (optional) ---
@@ -111,10 +120,15 @@ export const importStudents = async (req, res, next) => {
             // Only overwrite birthday/phone when the row actually carries one.
             // The export → edit → re-import round trip would otherwise wipe a
             // birthday recorded through the UI just because the CSV omitted it.
+            // Status is the same story with teeth: mapStatus() answers ACTIVE
+            // for a blank cell, so a roster CSV with no status column used to
+            // quietly reactivate every student an admin had just retired — and
+            // they'd reappear on the calendar and under the Active filter.
             const updateData = { ...studentData };
             if (!birthday) delete updateData.birthday;
             if (!studentPhone) delete updateData.phone;
             if (!studentData.gradeLevel) delete updateData.gradeLevel;
+            if (!clean(row.status)) delete updateData.status;
             student = await tx.user.update({ where: { id: existing.id }, data: updateData });
             summary.studentsUpdated++;
           } else {

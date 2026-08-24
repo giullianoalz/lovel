@@ -110,7 +110,7 @@ export const getFamily = async (req, res, next) => {
  */
 export const createFamily = async (req, res, next) => {
   try {
-    const { name, tags = [], members = [] } = req.body;
+    const { name, address, tags = [], members = [] } = req.body;
 
     if (!name) {
       return res.status(400).json({
@@ -122,6 +122,7 @@ export const createFamily = async (req, res, next) => {
     const family = await prisma.family.create({
       data: {
         name,
+        ...(address !== undefined && { address: address?.trim() || null }),
         tags,
         members: {
           create: members.map((m) => ({
@@ -154,12 +155,16 @@ export const createFamily = async (req, res, next) => {
  */
 export const updateFamily = async (req, res, next) => {
   try {
-    const { name, tags } = req.body;
+    const { name, address, tags } = req.body;
 
     const family = await prisma.family.update({
       where: { id: req.params.id },
       data: {
         ...(name && { name }),
+        // Present-but-empty clears it, which is why this tests for undefined
+        // rather than truthiness: a household that moved and hasn't given the
+        // new address yet is better recorded as blank than as the old one.
+        ...(address !== undefined && { address: address?.trim() || null }),
         ...(tags && { tags }),
       },
       include: {

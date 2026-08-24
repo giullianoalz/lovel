@@ -188,6 +188,7 @@ app.use(express.urlencoded({ extended: true }));
 // participation / role before streaming a byte). The frontend already fetches
 // both through those routes, so nothing reads them from here.
 app.use('/uploads/announcements', express.static(path.join(process.cwd(), 'uploads', 'announcements')));
+app.use('/uploads/avatars', express.static(path.join(process.cwd(), 'uploads', 'avatars')));
 
 // Rate limiting — the IP backstop runs first so a caller who evades the
 // credential bucket (by varying the Authorization header, which is unverified

@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
 import { withCache } from '../middleware/cache.js';
@@ -20,7 +23,29 @@ import {
   getParentChildClassNotes,
   downloadParentChildClassNotes,
   updateChildProfile,
+  uploadChildAvatar,
 } from '../controllers/portal.controller.js';
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(process.cwd(), 'uploads', 'avatars');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only images are allowed'));
+  }
+});
 
 const router = Router();
 
@@ -71,6 +96,7 @@ router.get('/parent/children/:studentId/classes/:classId/notes/pdf', authenticat
 // A parent maintaining their own child's health / school details. Not cached
 // and not role-shared: the controller checks family membership per request.
 router.put('/parent/children/:studentId', authenticate, requireRole('PARENT'), updateChildProfile);
+router.post('/parent/children/:studentId/avatar', authenticate, requireRole('PARENT'), upload.single('avatar'), uploadChildAvatar);
 
 router.get('/parent/pickup', authenticate, requireRole('PARENT'), getPickupAuths);
 router.post('/parent/pickup', authenticate, requireRole('PARENT'), validate(createPickupAuthSchema), createPickupAuth);

@@ -11,6 +11,8 @@ import {
   markAnnouncementRead,
   deleteAnnouncement,
   updateAnnouncement,
+  addAnnouncementComment,
+  deleteAnnouncementComment,
 } from '../controllers/announcements.controller.js';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'announcements');
@@ -50,6 +52,14 @@ router.post('/:id/read', authenticate, markAnnouncementRead);
 
 // PATCH /api/announcements/:id — admin or author only (edit text + add/remove media)
 router.patch('/:id', authenticate, requireRole('ADMIN'), upload.array('media', 10), updateAnnouncement);
+
+// POST /api/announcements/:id/comments — reply to a post.
+// No requireRole: anyone who can see the post can answer it, and the
+// controller checks the post's audience against the caller's roles.
+router.post('/:id/comments', authenticate, addAnnouncementComment);
+
+// DELETE /api/announcements/:id/comments/:commentId — the reply's author, or an admin
+router.delete('/:id/comments/:commentId', authenticate, deleteAnnouncementComment);
 
 // DELETE /api/announcements/:id — author or admin only
 router.delete('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), deleteAnnouncement);

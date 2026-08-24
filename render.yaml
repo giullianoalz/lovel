@@ -74,6 +74,14 @@ services:
       # /api/intake refuses every request.
       - key: FORM_INTAKE_SECRET
         sync: false
+      # Drive uploads act as the academy's Google account, not a service
+      # account: a service account owns what it uploads and has a storage quota
+      # of zero on a non-Workspace account, so every upload fails silently.
+      # Same value as GMAIL_REFRESH_TOKEN — one token, both scopes.
+      - key: DRIVE_REFRESH_TOKEN
+        sync: false
+      # Legacy service-account path, kept only for older deployments. It cannot
+      # store anything; DRIVE_REFRESH_TOKEN above supersedes it.
       - key: DRIVE_CLIENT_EMAIL
         sync: false
       - key: DRIVE_PRIVATE_KEY

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft, FileText, Download, CheckCircle2, Check, CheckCheck, MailOpen } from 'lucide-react';
+import { Search, MoreVertical, Send, Paperclip, Shield, MessageSquare, Bot, ArrowLeft, FileText, Download, CheckCircle2, Check, CheckCheck, MailOpen, Eye } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket, SOCKET_URL } from '../../lib/socket';
@@ -47,6 +47,7 @@ const ChatHub = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [chatThreads, setChatThreads] = useState([]);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const headerMenuRef = useRef(null);
 
   const [messages, setMessages] = useState({});
   // Per-thread read-receipt anchor: how far the OTHER participant(s) have read.
@@ -54,7 +55,7 @@ const ChatHub = () => {
   const [threadReadAt, setThreadReadAt] = useState({}); // { [threadId]: ISO string }
   const [searchQuery, setSearchQuery] = useState('');
   const [typingThreads, setTypingThreads] = useState({});
-  const [threadFilter, setThreadFilter] = useState('active'); // 'active' | 'resolved'
+  const [threadFilter, setThreadFilter] = useState('active'); // 'active' | 'all' | 'resolved'
   const [showNewMsgMenu, setShowNewMsgMenu] = useState(false);
   const [showTeacherPicker, setShowTeacherPicker] = useState(false);
   const [myTeachers, setMyTeachers] = useState([]);
@@ -73,6 +74,18 @@ const ChatHub = () => {
   const activeChatRef = useRef(null);
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
 
+  // Close the header ⋮ dropdown when clicking outside it.
+  useEffect(() => {
+    if (!isHeaderMenuOpen) return;
+    const handleOutsideClick = (e) => {
+      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target)) {
+        setIsHeaderMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isHeaderMenuOpen]);
+
   // Deep-link support: a chat notification lands here as /chat?thread=<id>.
   // Open that thread once the thread list has loaded, then strip the param so
   // a later manual refresh doesn't keep forcing it.
@@ -85,21 +98,34 @@ const ChatHub = () => {
   // reload). Load both and let the tabs split them.
   const loadThreads = async () => {
     try {
-      const [active, resolved] = await Promise.all([
-        api.get('/chat', { params: { status: 'ACTIVE' } }),
-        api.get('/chat', { params: { status: 'RESOLVED' } }),
-      ]);
-      const threads = [
-        ...(active.data.threads || []).map(t => ({ ...t, status: t.status || 'ACTIVE' })),
-        ...(resolved.data.threads || []).map(t => ({ ...t, status: t.status || 'RESOLVED' })),
-      ].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      setChatThreads(threads);
-
-      // Join all rooms to receive incoming messages for threads we are not currently viewing
-      if (socketRef.current) {
-        threads.forEach(thread => {
-          socketRef.current.emit('join_room', thread.id);
-        });
+      const isAll = hasRole('ADMIN') && threadFilter === 'all';
+      if (isAll) {
+        // Admin supervisory view: load all academy threads at once
+        const [active, resolved] = await Promise.all([
+          api.get('/chat', { params: { status: 'ACTIVE', scope: 'all' } }),
+          api.get('/chat', { params: { status: 'RESOLVED', scope: 'all' } }),
+        ]);
+        const threads = [
+          ...(active.data.threads || []).map(t => ({ ...t, status: t.status || 'ACTIVE' })),
+          ...(resolved.data.threads || []).map(t => ({ ...t, status: t.status || 'RESOLVED' })),
+        ].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        setChatThreads(threads);
+        if (socketRef.current) {
+          threads.forEach(thread => socketRef.current.emit('join_room', thread.id));
+        }
+      } else {
+        const [active, resolved] = await Promise.all([
+          api.get('/chat', { params: { status: 'ACTIVE' } }),
+          api.get('/chat', { params: { status: 'RESOLVED' } }),
+        ]);
+        const threads = [
+          ...(active.data.threads || []).map(t => ({ ...t, status: t.status || 'ACTIVE' })),
+          ...(resolved.data.threads || []).map(t => ({ ...t, status: t.status || 'RESOLVED' })),
+        ].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        setChatThreads(threads);
+        if (socketRef.current) {
+          threads.forEach(thread => socketRef.current.emit('join_room', thread.id));
+        }
       }
     } catch (error) {
       console.error("Error loading chat threads:", error);
@@ -108,6 +134,9 @@ const ChatHub = () => {
 
   useEffect(() => {
     loadThreads();
+  }, [threadFilter]);
+
+  useEffect(() => {
     notif.markReadByReferenceType('chat_thread');
 
     // Share the app-wide socket (also used by the notification bell) instead
@@ -176,7 +205,7 @@ const ChatHub = () => {
       socketRef.current?.off('messages_read');
       socketRef.current?.off('receive_message');
     };
-  }, []);
+  }, [user]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -491,7 +520,11 @@ const ChatHub = () => {
 
   const currentChatData = chatThreads.find(t => t.id === activeChat);
   const filteredThreads = chatThreads
-    .filter(t => threadFilter === 'active' ? t.status !== 'RESOLVED' : t.status === 'RESOLVED')
+    .filter(t => {
+      if (threadFilter === 'all') return true; // admin sees everything
+      if (threadFilter === 'resolved') return t.status === 'RESOLVED';
+      return t.status !== 'RESOLVED'; // 'active'
+    })
     .filter(t =>
       t.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (t.roles && t.roles.some(r => r.toLowerCase().includes(searchQuery.toLowerCase())))
@@ -517,7 +550,10 @@ const ChatHub = () => {
           </div>
           <div className="chat-filter-row">
             <div className="chat-filter-tabs">
-              <button className={`chat-filter-btn ${threadFilter === 'active' ? 'active' : ''}`} onClick={() => setThreadFilter('active')}>Active</button>
+              <button className={`chat-filter-btn ${threadFilter === 'active' ? 'active' : ''}`} onClick={() => setThreadFilter('active')}>My Chats</button>
+              {hasRole('ADMIN') && (
+                <button className={`chat-filter-btn ${threadFilter === 'all' ? 'active' : ''}`} onClick={() => setThreadFilter('all')}>All Chats</button>
+              )}
               <button className={`chat-filter-btn ${threadFilter === 'resolved' ? 'active' : ''}`} onClick={() => setThreadFilter('resolved')}>Resolved</button>
             </div>
             <div style={{position: 'relative'}}>
@@ -559,6 +595,7 @@ const ChatHub = () => {
                 </div>
                 <div className="thread-bottom">
                   <p className="thread-last-msg">{thread.lastMsg}</p>
+                  {thread.isSupervisor && <span className="role-tag" style={{ background: '#f0f4ff', color: '#4f46e5', fontSize: '9px' }}>Supervising</span>}
                   {thread.unread > 0 && <span className="unread-badge">{thread.unread}</span>}
                 </div>
                 <div className="thread-roles">
@@ -599,49 +636,40 @@ const ChatHub = () => {
               </div>
               
               <div className="chat-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {/* Resolve / Reopen is a visible header action (was buried in the ⋮ menu) */}
+                {/* Resolve / Reopen is a visible header action */}
                 {!currentChatData.isBot && (
                   currentChatData.status === 'RESOLVED' ? (
                     <button
-                      className="chat-status-btn resolved"
+                      className="chat-resolve-btn resolved"
                       onClick={() => handleSetThreadStatus(activeChat, 'ACTIVE')}
                       title="Reopen this conversation"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: 'color-mix(in srgb, #16a34a 12%, transparent)', color: '#16a34a', border: '1px solid color-mix(in srgb, #16a34a 30%, transparent)', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
                     >
                       <CheckCircle2 size={15} /> Resolved
                     </button>
                   ) : (
                     <button
-                      className="chat-status-btn"
+                      className="chat-resolve-btn"
                       onClick={() => handleSetThreadStatus(activeChat, 'RESOLVED')}
                       title="Mark this conversation as resolved"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
                     >
                       <CheckCircle2 size={15} /> Resolve
                     </button>
                   )
                 )}
-                <div style={{ position: 'relative' }}>
+                <div style={{ position: 'relative' }} ref={headerMenuRef}>
                   <button className="icon-btn" onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}>
                     <MoreVertical size={20} />
                   </button>
                   {isHeaderMenuOpen && (
-                    <div style={{ position: 'absolute', right: 0, top: '100%', background: 'white', border: '1px solid var(--border-light)', borderRadius: '8px', boxShadow: 'var(--shadow-md)', zIndex: 100, minWidth: '150px', padding: '8px 0' }}>
+                    <div className="chat-header-dropdown">
                       <button
+                        className={currentChatData.isBlocked ? '' : 'danger'}
                         onClick={handleBlockToggle}
-                        style={{ width: '100%', textAlign: 'left', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: currentChatData.isBlocked ? 'var(--text-main)' : '#dc2626', fontSize: '14px', fontWeight: '500' }}
-                        onMouseEnter={(e) => e.target.style.background = '#f1f5f9'}
-                        onMouseLeave={(e) => e.target.style.background = 'none'}
                       >
-                        {currentChatData.isBlocked ? "Unblock Contact" : "Block Contact"}
+                        {currentChatData.isBlocked ? 'Unblock Contact' : 'Block Contact'}
                       </button>
                       {!currentChatData.isBot && (
-                        <button
-                          onClick={() => handleMarkUnread(activeChat)}
-                          style={{ width: '100%', textAlign: 'left', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-main)', fontSize: '14px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}
-                          onMouseEnter={(e) => e.currentTarget.style.background = '#f1f5f9'}
-                          onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-                        >
+                        <button onClick={() => handleMarkUnread(activeChat)}>
                           <MailOpen size={15} /> Mark as unread
                         </button>
                       )}
@@ -652,6 +680,12 @@ const ChatHub = () => {
             </div>
             
             <div className="messages-area">
+              {(messages[activeChat] || []).length === 0 && (
+                <div className="chat-empty-thread">
+                  <MessageSquare size={36} />
+                  <p>No messages yet — start the conversation!</p>
+                </div>
+              )}
               {(messages[activeChat] || []).map((msg, i, all) => {
                 // A message just sent by this tab still shows its local blob:
                 // preview until the server round-trip replaces it with the
@@ -659,6 +693,7 @@ const ChatHub = () => {
                 const isLocalPreview = msg.fileUrl?.startsWith('blob:');
                 const key = dayKeyOf(msg);
                 const showDivider = i === 0 || key !== dayKeyOf(all[i - 1]);
+                const isGroup = currentChatData?.isGroup;
                 return (
                 <React.Fragment key={msg.id}>
                 {showDivider && (
@@ -666,6 +701,9 @@ const ChatHub = () => {
                 )}
                 <div className={`message ${msg.type}`}>
                   <div className="msg-bubble">
+                    {msg.type === 'received' && isGroup && msg.sender && (
+                      <span className="msg-sender-name">{msg.sender}</span>
+                    )}
                     {msg.fileUrl && (
                       msg.fileType?.startsWith('image/') ? (
                         isLocalPreview ? (
@@ -720,7 +758,11 @@ const ChatHub = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {currentChatData.isBlocked ? (
+            {currentChatData.isSupervisor ? (
+              <div style={{ padding: '16px 24px', textAlign: 'center', background: '#f0f4ff', borderTop: '1px solid #e0e7ff', color: '#4f46e5', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <Eye size={16} /> Supervisory view — read-only access
+              </div>
+            ) : currentChatData.isBlocked ? (
               <div style={{ padding: '20px', textAlign: 'center', background: '#f8fafc', borderTop: '1px solid var(--border-light)', color: '#64748b', fontSize: '14px' }}>
                 You have blocked this contact. You cannot send or receive messages.
                 <br />
@@ -765,7 +807,7 @@ const ChatHub = () => {
                       }
                     }}
                   />
-                  <button className="send-btn" onClick={handleSendMessage}>
+                  <button className="send-btn" onClick={handleSendMessage} disabled={!inputText.trim() || isUploadingFile}>
                     <Send size={20} />
                   </button>
                 </div>

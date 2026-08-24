@@ -115,16 +115,30 @@ const StudentsList = () => {
     loadFamilies();
   }, []);
 
+  // "Inactive" means "not Active" rather than literally INACTIVE: a suspended
+  // student otherwise answers to neither chip and can only be found under All.
+  const matchesStatusFilter = (status) =>
+    statusFilter === 'All' ||
+    (statusFilter === 'Active' ? status === 'Active' : status !== 'Active');
+
   const filteredStudents = students.filter(student => {
     const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'All' || student.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatusFilter(student.status);
   });
 
   const filteredTeachers = teachers.filter(t =>
     t.name.toLowerCase().includes(searchQuery.toLowerCase()) &&
-    (statusFilter === 'All' || t.status === statusFilter)
+    matchesStatusFilter(t.status)
   );
+
+  // Shown on the chips themselves. With 115 active students against 3 inactive
+  // ones, clicking "Active" changes almost nothing on screen and reads as a
+  // dead button — the count is the only proof the filter did anything.
+  const statusCounts = (rows) => ({
+    All: rows.length,
+    Active: rows.filter(r => r.status === 'Active').length,
+    Inactive: rows.filter(r => r.status !== 'Active').length,
+  });
 
   // The child's name counts as a match: the office knows families by the
   // student, so looking a guardian up by their own name first is backwards.
@@ -332,15 +346,19 @@ const StudentsList = () => {
           />
         </div>
         <div className="filter-chips">
-          {activeTab !== 'parents' && ['All', 'Active', 'Inactive'].map(status => (
-            <button
-              key={status}
-              className={`filter-chip ${statusFilter === status ? 'active' : ''}`}
-              onClick={() => setStatusFilter(status)}
-            >
-              {status === 'All' ? `All ${activeTab === 'students' ? 'Students' : 'Teachers'}` : status}
-            </button>
-          ))}
+          {activeTab !== 'parents' && (() => {
+            const counts = statusCounts(activeTab === 'students' ? students : teachers);
+            return ['All', 'Active', 'Inactive'].map(status => (
+              <button
+                key={status}
+                className={`filter-chip ${statusFilter === status ? 'active' : ''}`}
+                onClick={() => setStatusFilter(status)}
+              >
+                {status === 'All' ? `All ${activeTab === 'students' ? 'Students' : 'Teachers'}` : status}
+                <span className="filter-chip-count">{counts[status]}</span>
+              </button>
+            ));
+          })()}
         </div>
       </div>
 

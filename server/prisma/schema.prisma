@@ -123,6 +123,7 @@ model User {
   quietHoursFullDays     Int[]                     @default([]) @map("quiet_hours_full_days")
   autoResponderMessage   String?                   @map("auto_responder_message")
   announcementReads      AnnouncementRead[]
+  announcementComments   AnnouncementComment[]
   medicalLogsAsStudent   MedicalLog[]              @relation("StudentMedicalLogs")
   medicalLogsAsTeacher   MedicalLog[]              @relation("TeacherMedicalLogs")
   medicalLogsAsReviewer  MedicalLog[]              @relation("ReviewerMedicalLogs")
@@ -1080,10 +1081,30 @@ model Announcement {
   author         User?               @relation(fields: [authorId], references: [id])
   reads          AnnouncementRead[]
   media          AnnouncementMedia[]
+  comments       AnnouncementComment[]
 
   @@index([targetAudience])
   @@index([publishedAt])
   @@map("announcements")
+}
+
+/**
+ * A reply on an announcement. Anyone who can see the post can answer it, and
+ * the whole thread is visible to that same audience — this is a noticeboard,
+ * not a private line, and a question one parent asks is usually one four
+ * others were about to. Private matters belong in Chat.
+ */
+model AnnouncementComment {
+  id             String       @id @default(uuid()) @db.Uuid
+  announcementId String       @map("announcement_id") @db.Uuid
+  authorId       String       @map("author_id") @db.Uuid
+  body           String
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  author         User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([announcementId, createdAt])
+  @@map("announcement_comments")
 }
 
 model AnnouncementMedia {

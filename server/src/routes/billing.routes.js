@@ -25,6 +25,8 @@ import {
   setSessionChargeOverride,
   listBlockSessions,
   createBlockInvoice,
+  listBlockRoster,
+  createBlockInvoices,
 } from '../controllers/billing.controller.js';
 import {
   listRecurringCharges,
@@ -122,5 +124,10 @@ router.get('/block-sessions', authenticate, requireRole('ADMIN'), listBlockSessi
 // up front (Admin). Each meeting carries its sessionId, so the calendar sweep
 // skips it later instead of billing it twice.
 router.post('/block-invoice', authenticate, requireRole('ADMIN'), createBlockInvoice);
+
+// The same block across a whole roster (Admin). "block-roster" is the sheet;
+// "block-invoices" (plural) is the run that bills every family on it.
+router.get('/block-roster', authenticate, requireRole('ADMIN'), listBlockRoster);
+router.post('/block-invoices', authenticate, requireRole('ADMIN'), createBlockInvoices);
 
 export default router;

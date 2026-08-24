@@ -11,6 +11,7 @@ import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
 import EmailPreviewModal from '../Layout/EmailPreviewModal';
 import SessionChargesPanel from './SessionChargesPanel';
+import BlockBillingPanel from './BlockBillingPanel';
 import { defaultInvoiceSubject, defaultInvoiceMessage, INVOICE_FIXED_NOTE } from '../../lib/emailDefaults';
 import './BillingPanel.css';
 
@@ -68,6 +69,9 @@ const BillingPanel = () => {
   const [isEmaModalOpen, setIsEmaModalOpen] = useState(false);
   // Meetings priced on the calendar, waiting to be turned into real charges.
   const [isSessionChargesOpen, setIsSessionChargesOpen] = useState(false);
+  // Billing a block of classes to a whole roster before they are taught — the
+  // many-families counterpart of the per-family block on a family's ledger.
+  const [isBlockBillingOpen, setIsBlockBillingOpen] = useState(false);
   const [emaSyncState, setEmaSyncState] = useState({ step: 1, matched: 0, newInvoices: [] });
   const [isReconcileOpen, setIsReconcileOpen] = useState(false);
   const [reconcile, setReconcile] = useState({ step: 1, text: '', lines: [], report: null });
@@ -1017,6 +1021,11 @@ const BillingPanel = () => {
             <button className="btn-action outline" onClick={() => setIsSessionChargesOpen(true)}>
               <Receipt size={16} /> Calendar Charges
             </button>
+            {/* Forward-looking twin of Calendar Charges: that one releases what
+                has been taught, this one bills what has not. */}
+            <button className="btn-action outline" onClick={() => setIsBlockBillingOpen(true)}>
+              <Layers size={16} /> Bill Blocks
+            </button>
             <button className="btn-action primary" onClick={() => setIsEmaModalOpen(true)}>
               <UploadCloud size={16} /> EMA Auto-Sync
             </button>
@@ -1122,6 +1131,15 @@ const BillingPanel = () => {
         {isSessionChargesOpen && (
           <SessionChargesPanel
             onClose={() => setIsSessionChargesOpen(false)}
+            onDone={loadBilling}
+          />
+        )}
+
+        {/* A block of classes billed to a whole roster in advance. Same reload
+            on the way out, for the same reason. */}
+        {isBlockBillingOpen && (
+          <BlockBillingPanel
+            onClose={() => setIsBlockBillingOpen(false)}
             onDone={loadBilling}
           />
         )}

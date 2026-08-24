@@ -2107,23 +2107,175 @@ export const setSessionChargeOverride = async (req, res, next) => {
   }
 };
 
-/* ────────────────── BILLING A BLOCK OF MEETINGS UP FRONT ────────────────── */
-
-/**
- * Every meeting a student could be billed for in a window, including ones that
- * have not happened yet.
+/* ────────────────── BILLING A BLOCK OF MEETINGS UP FRONT ──────────────────
  *
  * The calendar sweep (previewSessionCharges) only surfaces meetings that
  * already carry a price, which is the right shape for "release what the term
- * has run so far". It cannot answer the other question an admin has: *this
- * family wants to pay for the next eight weeks now*. Those meetings exist on
+ * has run so far". It cannot answer the other question an admin has: *these
+ * families want to pay for the next eight weeks now*. Those meetings exist on
  * the calendar but are deliberately priceless — see sessionCharges.service.js
  * on why nothing auto-prices October — so they are invisible to that screen.
  *
- * So this lists the student's scheduled meetings whatever their price, says
- * what each would cost today (their own override first, then the meeting's
- * price, then nothing), and flags the ones already charged. The price for the
- * block is named by the admin at invoice time; nothing here writes.
+ * Everything below bills them anyway, before they are taught, with each charge
+ * carrying its `sessionId`. That link is the whole point of doing this here
+ * rather than as typed invoice lines: the unique index on
+ * (studentId, sessionId) means the sweep, when those weeks finally arrive,
+ * finds them already billed and skips them. Prepaying cannot double-charge.
+ *
+ * Two entry points, one set of rules: one student's block from their family's
+ * ledger, and the same block across a whole class roster.
+ */
+
+const readBlockMoney = (value, label) => {
+  if (value === undefined || value === null || value === '') return { value: null };
+  const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,\s]/g, ''));
+  if (!Number.isFinite(n)) return { error: `${label} must be a number.` };
+  if (n <= 0) return { error: `${label} must be greater than zero.` };
+  if (n > 99999999.99) return { error: `${label} is implausibly large.` };
+  return { value: round2(n) };
+};
+
+/**
+ * The two prices an admin may name for a block, validated together.
+ * They are alternatives, not a pair: one number per meeting, or one number for
+ * the run. Sending both is a contradiction rather than a preference, so it is
+ * refused instead of silently picking a winner.
+ */
+const readBlockPricing = ({ unitAmount, blockAmount }) => {
+  const unit = readBlockMoney(unitAmount, 'The amount per meeting');
+  if (unit.error) return { error: unit.error };
+  const block = readBlockMoney(blockAmount, 'The block total');
+  if (block.error) return { error: block.error };
+  if (unit.value != null && block.value != null) {
+    return { error: 'Price the block either per meeting or as one total, not both.' };
+  }
+  return { unit: unit.value, block: block.value };
+};
+
+/** What one meeting charges this student today; null if nobody has priced it. */
+const meetingPrice = (session, studentId) => {
+  const override = (session.chargeOverrides || []).find((o) => o.studentId === studentId);
+  if (override) return round2(Number(override.amount));
+  return session.chargeAmount == null ? null : round2(Number(session.chargeAmount));
+};
+
+/**
+ * A block total split across its meetings, to the cent, remainder on the first.
+ * The lines have to add up to the number the admin typed — a plain division
+ * leaves a few cents adrift, and a family's invoice that ends in a total nobody
+ * asked for is a phone call.
+ */
+const spreadBlock = (total, count) => {
+  const each = Math.floor((total * 100) / count) / 100;
+  const remainder = round2(total - each * count);
+  return Array.from({ length: count }, (_, i) => (i === 0 ? round2(each + remainder) : each));
+};
+
+const blockLineDescription = (session) => {
+  const day = session.date.toISOString().slice(0, 10);
+  const name = session.class?.name ?? 'Class';
+  return session.chargeNote?.trim() ? `${name} — ${session.chargeNote.trim()} (${day})` : `${name} — ${day}`;
+};
+
+/**
+ * What one student's block would cost, given the meetings picked and the price
+ * named. Pure — it reads nothing and writes nothing, so the bulk run can price
+ * forty students without forty round trips.
+ *
+ * Returns `{ error }` rather than throwing: in the bulk run one student's
+ * missing price is a row to report, not a reason to abandon the other thirty-
+ * nine.
+ */
+const planBlock = ({ sessions, studentId, unit, block, alreadyBilled }) => {
+  const billable = sessions.filter((s) => !alreadyBilled.has(s.id));
+  if (billable.length === 0) {
+    return { error: 'Every meeting in that block has already been charged to this student.' };
+  }
+
+  const spread = block != null ? spreadBlock(block, billable.length) : null;
+  const priced = billable.map((session, i) => ({
+    session,
+    amount: unit ?? spread?.[i] ?? meetingPrice(session, studentId),
+  }));
+
+  const unpriced = priced.filter((p) => p.amount == null || p.amount <= 0).length;
+  if (unpriced > 0) {
+    return { error: `${unpriced} of those meetings have no price. Name an amount for the block, or price them on the calendar first.` };
+  }
+
+  return { priced, subtotal: round2(priced.reduce((sum, p) => sum + p.amount, 0)) };
+};
+
+/** Writes one block invoice inside an already-open transaction. */
+const writeBlockInvoice = async (tx, { familyId, studentId, priced, subtotal, label, due }) => {
+  const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
+  const created = await tx.invoice.create({
+    data: {
+      invoiceNumber,
+      familyId,
+      studentId,
+      subtotal,
+      totalAmount: subtotal,
+      status: 'DRAFT',
+      dateRange: label.slice(0, 100),
+      dueDate: due,
+    },
+  });
+
+  for (const { session, amount } of priced) {
+    const description = blockLineDescription(session);
+    const charge = await tx.transaction.create({
+      data: {
+        familyId,
+        studentId,
+        invoiceId: created.id,
+        sessionId: session.id,
+        // Dated to the meeting it pays for, not to today: a charge for a
+        // November class belongs in November on the ledger, however early it
+        // was raised.
+        date: session.date,
+        amount,
+        type: 'CHARGE',
+        description,
+      },
+    });
+    await tx.invoiceLine.create({
+      data: { invoiceId: created.id, description, amount, transactionId: charge.id },
+    });
+  }
+
+  const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
+  return applied > 0
+    ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' }
+    : created;
+};
+
+const shapeBlockInvoice = (invoice) => ({
+  id: invoice.invoiceNumber,
+  dbId: invoice.id,
+  familyId: invoice.familyId,
+  studentId: invoice.studentId,
+  date: invoice.date.toISOString().split('T')[0],
+  dateRange: invoice.dateRange,
+  amount: Number(invoice.totalAmount),
+  amountPaid: Number(invoice.amountPaid),
+  status: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).toLowerCase(),
+});
+
+const blockLabel = (description, sessions, count) => (
+  description?.trim()
+  || `${[...new Set(sessions.map((s) => s.class?.name ?? 'Class'))].join(', ')} — block of ${count}`
+);
+
+const blockDueDate = (dueDate) => {
+  const due = dueDate ? new Date(`${String(dueDate).slice(0, 10)}T00:00:00.000Z`) : new Date(Date.now() + 30 * 86400000);
+  return Number.isNaN(due.getTime()) ? { error: 'dueDate must be a valid date.' } : { due };
+};
+
+/**
+ * A student's scheduled meetings in a window, priced or not, with the ones
+ * already charged flagged. Read-only — the price for the block is named by the
+ * admin at invoice time.
  *
  * GET /api/billing/block-sessions?studentId=&classId=&from=&to=
  */
@@ -2179,7 +2331,7 @@ export const listBlockSessions = async (req, res, next) => {
         id: true, classId: true, date: true, startTime: true,
         chargeAmount: true, chargeNote: true,
         class: { select: { name: true } },
-        chargeOverrides: { where: { studentId }, select: { amount: true, reason: true } },
+        chargeOverrides: { where: { studentId }, select: { studentId: true, amount: true } },
       },
     });
 
@@ -2196,7 +2348,6 @@ export const listBlockSessions = async (req, res, next) => {
       student: { id: student.id, name: student.fullName, familyId: student.familyMembers[0]?.familyId ?? null },
       classes,
       sessions: sessions.map((s) => {
-        const override = s.chargeOverrides[0];
         const done = chargedBy.get(s.id);
         return {
           id: s.id,
@@ -2208,10 +2359,8 @@ export const listBlockSessions = async (req, res, next) => {
           // The number this meeting would charge today. Null means nobody has
           // priced it — the ordinary case for a term's later weeks, and exactly
           // what the admin is here to put a number on.
-          price: override
-            ? round2(Number(override.amount))
-            : (s.chargeAmount == null ? null : round2(Number(s.chargeAmount))),
-          priceSource: override ? 'override' : (s.chargeAmount == null ? null : 'session'),
+          price: meetingPrice(s, studentId),
+          priceSource: s.chargeOverrides.length ? 'override' : (s.chargeAmount == null ? null : 'session'),
           alreadyCharged: Boolean(done),
           chargedAmount: done ? round2(Number(done.amount)) : null,
           chargedInvoice: done?.invoice?.invoiceNumber ?? null,
@@ -2227,25 +2376,8 @@ export const listBlockSessions = async (req, res, next) => {
  * POST /api/billing/block-invoice
  * Body: { studentId, sessionIds: string[], unitAmount?, blockAmount?, description?, dueDate? }
  *
- * One invoice for a block of meetings, raised before they are taught.
- *
- * Families on a block arrangement pay for the whole run up front — that is how
- * Anchored is sold, and how a parent asking to "settle the next eight weeks"
- * expects to be billed. Until now the only way to bill anything was after the
- * fact: price the calendar entry, wait for the meeting, sweep it. An admin
- * writing the block by hand (New Invoice, typed lines) got the money but no
- * link to the meetings, so the sweep would later bill every one of them again.
- *
- * So each meeting in the block gets its own CHARGE carrying its `sessionId`.
- * That is the whole point of doing it here rather than as typed lines: the
- * unique index on (studentId, sessionId) means the calendar sweep, when those
- * weeks finally arrive, finds them already billed and skips them. Prepaying
- * cannot double-charge.
- *
- * The price is named by the admin — `unitAmount` per meeting, or `blockAmount`
- * for the run — and falls back to whatever each meeting is already priced at.
- * Nothing is inferred from the published rates: this bills what somebody
- * decided, the same rule the rest of this file follows.
+ * One invoice for one student's block of meetings, raised before they are
+ * taught. See the section header for why the charges carry their sessionId.
  */
 export const createBlockInvoice = async (req, res, next) => {
   try {
@@ -2258,25 +2390,8 @@ export const createBlockInvoice = async (req, res, next) => {
       });
     }
 
-    const readMoney = (value, label) => {
-      if (value === undefined || value === null || value === '') return { value: null };
-      const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,\s]/g, ''));
-      if (!Number.isFinite(n)) return { error: `${label} must be a number.` };
-      if (n <= 0) return { error: `${label} must be greater than zero.` };
-      if (n > 99999999.99) return { error: `${label} is implausibly large.` };
-      return { value: round2(n) };
-    };
-
-    const unit = readMoney(unitAmount, 'The amount per meeting');
-    if (unit.error) return res.status(400).json({ error: 'Validation Error', message: unit.error });
-    const block = readMoney(blockAmount, 'The block total');
-    if (block.error) return res.status(400).json({ error: 'Validation Error', message: block.error });
-    if (unit.value != null && block.value != null) {
-      return res.status(400).json({
-        error: 'Validation Error',
-        message: 'Price the block either per meeting or as one total, not both.',
-      });
-    }
+    const pricing = readBlockPricing({ unitAmount, blockAmount });
+    if (pricing.error) return res.status(400).json({ error: 'Validation Error', message: pricing.error });
 
     const student = await prisma.user.findUnique({
       where: { id: studentId },
@@ -2303,7 +2418,7 @@ export const createBlockInvoice = async (req, res, next) => {
       select: {
         id: true, classId: true, date: true, chargeAmount: true, chargeNote: true,
         class: { select: { name: true } },
-        chargeOverrides: { where: { studentId }, select: { amount: true } },
+        chargeOverrides: { where: { studentId }, select: { studentId: true, amount: true } },
       },
     });
     if (sessions.length === 0) {
@@ -2332,115 +2447,333 @@ export const createBlockInvoice = async (req, res, next) => {
       select: { sessionId: true, invoice: { select: { invoiceNumber: true } } },
     });
     const already = new Map(existing.map((t) => [t.sessionId, t.invoice?.invoiceNumber ?? null]));
-    const billable = sessions.filter((s) => !already.has(s.id));
-    if (billable.length === 0) {
-      return res.status(409).json({
-        error: 'Conflict',
-        message: 'Every meeting in that block has already been charged to this student.',
-      });
+
+    const plan = planBlock({ sessions, studentId, unit: pricing.unit, block: pricing.block, alreadyBilled: already });
+    if (plan.error) {
+      // "All of it is already billed" is a conflict; "you never named a price"
+      // is the admin not having finished the form.
+      const status = already.size === sessions.length ? 409 : 400;
+      return res.status(status).json({ error: status === 409 ? 'Conflict' : 'Validation Error', message: plan.error });
     }
 
-    // Per meeting: the admin's number, else the block total spread evenly, else
-    // what the meeting is already priced at. Spreading is done to the cent with
-    // the remainder on the first line, so the lines add up to the total the
-    // admin typed rather than to a rounded-off approximation of it.
-    const spread = new Map();
-    if (block.value != null) {
-      const each = Math.floor((block.value * 100) / billable.length) / 100;
-      const remainder = round2(block.value - each * billable.length);
-      billable.forEach((s, i) => spread.set(s.id, i === 0 ? round2(each + remainder) : each));
-    }
+    const label = blockLabel(description, plan.priced.map((p) => p.session), plan.priced.length);
+    const dueParsed = blockDueDate(dueDate);
+    if (dueParsed.error) return res.status(400).json({ error: 'Validation Error', message: dueParsed.error });
 
-    const priced = billable.map((s) => {
-      const own = s.chargeOverrides[0]
-        ? round2(Number(s.chargeOverrides[0].amount))
-        : (s.chargeAmount == null ? null : round2(Number(s.chargeAmount)));
-      return { session: s, amount: unit.value ?? spread.get(s.id) ?? own };
-    });
-
-    const unpriced = priced.filter((p) => p.amount == null || p.amount <= 0);
-    if (unpriced.length > 0) {
-      return res.status(400).json({
-        error: 'Validation Error',
-        message: `${unpriced.length} of those meetings have no price. Name an amount for the block, or price them on the calendar first.`,
-      });
-    }
-
-    const subtotal = round2(priced.reduce((sum, p) => sum + p.amount, 0));
-    const classNames = [...new Set(billable.map((s) => s.class?.name ?? 'Class'))].join(', ');
-    const label = description?.trim() || `${classNames} — block of ${billable.length}`;
-    const due = dueDate
-      ? new Date(`${String(dueDate).slice(0, 10)}T00:00:00.000Z`)
-      : new Date(Date.now() + 30 * 86400000);
-    if (Number.isNaN(due.getTime())) {
-      return res.status(400).json({ error: 'Validation Error', message: 'dueDate must be a valid date.' });
-    }
-
-    const invoice = await prisma.$transaction(async (tx) => {
-      const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
-      const created = await tx.invoice.create({
-        data: {
-          invoiceNumber,
-          familyId,
-          studentId,
-          subtotal,
-          totalAmount: subtotal,
-          status: 'DRAFT',
-          dateRange: label.slice(0, 100),
-          dueDate: due,
-        },
-      });
-
-      for (const { session, amount } of priced) {
-        const day = session.date.toISOString().slice(0, 10);
-        const lineDescription = session.chargeNote?.trim()
-          ? `${session.class?.name ?? 'Class'} — ${session.chargeNote.trim()} (${day})`
-          : `${session.class?.name ?? 'Class'} — ${day}`;
-        const charge = await tx.transaction.create({
-          data: {
-            familyId,
-            studentId,
-            invoiceId: created.id,
-            sessionId: session.id,
-            // Dated to the meeting it pays for, not to today: a charge for a
-            // November class belongs in November on the ledger, however early
-            // it was raised.
-            date: session.date,
-            amount,
-            type: 'CHARGE',
-            description: lineDescription,
-          },
-        });
-        await tx.invoiceLine.create({
-          data: { invoiceId: created.id, description: lineDescription, amount, transactionId: charge.id },
-        });
-      }
-
-      const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
-      return applied > 0
-        ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' }
-        : created;
-    });
+    const invoice = await prisma.$transaction((tx) => writeBlockInvoice(tx, {
+      familyId, studentId, priced: plan.priced, subtotal: plan.subtotal, label, due: dueParsed.due,
+    }));
 
     console.log(
       `[Billing] ${req.user.email} raised block invoice ${invoice.invoiceNumber} for ${student.fullName} `
-      + `($${subtotal.toFixed(2)}, ${priced.length} meetings, ${already.size} already billed)`
+      + `($${plan.subtotal.toFixed(2)}, ${plan.priced.length} meetings, ${already.size} already billed)`
     );
 
     res.status(201).json({
-      invoice: {
-        id: invoice.invoiceNumber,
-        dbId: invoice.id,
-        familyId: invoice.familyId,
-        studentId: invoice.studentId,
-        date: invoice.date.toISOString().split('T')[0],
-        dateRange: invoice.dateRange,
-        amount: Number(invoice.totalAmount),
-        amountPaid: Number(invoice.amountPaid),
-        status: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).toLowerCase(),
-      },
-      billed: priced.length,
+      invoice: shapeBlockInvoice(invoice),
+      billed: plan.priced.length,
       skipped: [...already.entries()].map(([sessionId, invoiceNumber]) => ({ sessionId, invoiceNumber })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/billing/block-roster?classIds=a,b&from=&to=
+ *
+ * The same block, seen across a whole roster: every actively enrolled student
+ * in the chosen classes, the meetings in the window, and what each of them has
+ * already been billed for.
+ *
+ * This is the shape a term is actually sold in — a cove runs for eight weeks
+ * and thirty families are on it, and billing them one ledger at a time is
+ * thirty passes over the same decision. Splitting the preview from the run is
+ * the same rule the rest of this file follows: money that reaches real families
+ * is looked at as a sheet first.
+ *
+ * Students with no family come back listed and flagged rather than filtered
+ * out — there is nothing to bill, and an admin who cannot see them has no way
+ * to know why the count is short.
+ */
+export const listBlockRoster = async (req, res, next) => {
+  try {
+    const { classIds, from, to } = req.query;
+    const ids = String(classIds || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Send the classes to bill in classIds.' });
+    }
+
+    const range = parseChargeRange(from, to);
+    if (range.error) return res.status(400).json({ error: 'Validation Error', message: range.error });
+    const start = range.from ?? new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+    const end = range.to ?? new Date(start.getTime() + 180 * 86400000);
+
+    const [classes, sessions, enrollments] = await Promise.all([
+      prisma.class.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+      prisma.session.findMany({
+        where: { classId: { in: ids }, status: { not: 'CANCELLED' }, date: { gte: start, lte: end } },
+        orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+        select: {
+          id: true, classId: true, date: true, startTime: true,
+          chargeAmount: true, chargeNote: true,
+          class: { select: { name: true } },
+          chargeOverrides: { select: { studentId: true, amount: true } },
+        },
+      }),
+      // The roster as it stands now, not as it stood when the term was sold —
+      // the same rule the calendar sweep follows.
+      prisma.classEnrollment.findMany({
+        where: { classId: { in: ids }, status: 'active' },
+        select: {
+          classId: true,
+          student: {
+            select: {
+              id: true, fullName: true,
+              familyMembers: {
+                select: { familyId: true, family: { select: { name: true } } },
+                take: 1,
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    if (classes.length !== ids.length) {
+      return res.status(404).json({ error: 'Not Found', message: 'One of those classes does not exist.' });
+    }
+
+    const charged = await prisma.transaction.findMany({
+      where: { sessionId: { in: sessions.map((s) => s.id) } },
+      select: { studentId: true, sessionId: true, invoice: { select: { invoiceNumber: true } } },
+    });
+    const chargedBy = new Map(charged.map((t) => [`${t.studentId}:${t.sessionId}`, t.invoice?.invoiceNumber ?? null]));
+
+    // One row per student even when they are on two of the chosen classes: they
+    // get one invoice, so they are one line on the sheet.
+    const byStudent = new Map();
+    for (const e of enrollments) {
+      const s = e.student;
+      if (!byStudent.has(s.id)) {
+        byStudent.set(s.id, {
+          studentId: s.id,
+          name: s.fullName,
+          familyId: s.familyMembers[0]?.familyId ?? null,
+          familyName: s.familyMembers[0]?.family?.name ?? null,
+          classIds: [],
+        });
+      }
+      byStudent.get(s.id).classIds.push(e.classId);
+    }
+
+    const students = [...byStudent.values()]
+      .map((student) => {
+        const theirs = sessions.filter((s) => student.classIds.includes(s.classId));
+        return {
+          ...student,
+          sessions: theirs.map((s) => {
+            const key = `${student.studentId}:${s.id}`;
+            return {
+              sessionId: s.id,
+              classId: s.classId,
+              className: s.class?.name ?? 'Class',
+              date: s.date.toISOString().slice(0, 10),
+              price: meetingPrice(s, student.studentId),
+              alreadyCharged: chargedBy.has(key),
+              chargedInvoice: chargedBy.get(key) ?? null,
+            };
+          }),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({
+      classes,
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        classId: s.classId,
+        className: s.class?.name ?? 'Class',
+        date: s.date.toISOString().slice(0, 10),
+        startTime: s.startTime.toISOString().slice(11, 16),
+        note: s.chargeNote ?? null,
+        price: s.chargeAmount == null ? null : round2(Number(s.chargeAmount)),
+      })),
+      students,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/billing/block-invoices
+ * Body: { students: [{ studentId, sessionIds }], unitAmount?, blockAmount?,
+ *         description?, dueDate? }
+ *
+ * The same block billed across a roster: one invoice per student, each one
+ * built by exactly the rules of the single-student path above.
+ *
+ * The whole run is one database transaction. Half a roster billed is worse
+ * than none — the families that went through would be chasing invoices for a
+ * block the rest were never asked about, and no screen would show which half
+ * had happened. A student whose block cannot be priced is reported as a
+ * skipped row and the rest still go, because that is a decision the admin can
+ * see and act on before pressing the button; a failure mid-write is not.
+ *
+ * Note the price named applies PER STUDENT, not to the roster: `blockAmount`
+ * of $980 across eight meetings is $980 for each family, the same way a price
+ * typed on a calendar entry is what one family pays. Billing thirty families
+ * one thirtieth of a total each has never been how anything here is sold.
+ */
+export const createBlockInvoices = async (req, res, next) => {
+  try {
+    const { students, unitAmount, blockAmount, description, dueDate } = req.body;
+
+    if (!Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Send the students to bill, each with the meetings their block covers.',
+      });
+    }
+    if (students.some((s) => !s?.studentId || !Array.isArray(s.sessionIds) || s.sessionIds.length === 0)) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Every student in the run needs a studentId and at least one meeting in sessionIds.',
+      });
+    }
+
+    const pricing = readBlockPricing({ unitAmount, blockAmount });
+    if (pricing.error) return res.status(400).json({ error: 'Validation Error', message: pricing.error });
+
+    const dueParsed = blockDueDate(dueDate);
+    if (dueParsed.error) return res.status(400).json({ error: 'Validation Error', message: dueParsed.error });
+
+    const studentIds = [...new Set(students.map((s) => s.studentId))];
+    const allSessionIds = [...new Set(students.flatMap((s) => s.sessionIds))];
+
+    // Three reads for the whole run, however many students it covers — the
+    // per-student work below is pure arithmetic over what these return.
+    const [people, sessions, existing] = await Promise.all([
+      prisma.user.findMany({
+        where: { id: { in: studentIds } },
+        select: {
+          id: true, fullName: true, role: true,
+          familyMembers: { select: { familyId: true }, take: 1 },
+          enrollments: { where: { status: 'active' }, select: { classId: true } },
+        },
+      }),
+      prisma.session.findMany({
+        where: { id: { in: allSessionIds }, status: { not: 'CANCELLED' } },
+        orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+        select: {
+          id: true, classId: true, date: true, chargeAmount: true, chargeNote: true,
+          class: { select: { name: true } },
+          chargeOverrides: { where: { studentId: { in: studentIds } }, select: { studentId: true, amount: true } },
+        },
+      }),
+      prisma.transaction.findMany({
+        where: { studentId: { in: studentIds }, sessionId: { in: allSessionIds } },
+        select: { studentId: true, sessionId: true },
+      }),
+    ]);
+
+    const peopleById = new Map(people.map((p) => [p.id, p]));
+    const sessionsById = new Map(sessions.map((s) => [s.id, s]));
+    const billedAlready = new Map(); // studentId -> Set(sessionId)
+    for (const t of existing) {
+      if (!billedAlready.has(t.studentId)) billedAlready.set(t.studentId, new Set());
+      billedAlready.get(t.studentId).add(t.sessionId);
+    }
+
+    const plans = [];
+    const skipped = [];
+    for (const row of students) {
+      const student = peopleById.get(row.studentId);
+      const name = student?.fullName ?? 'That student';
+      const skip = (reason) => skipped.push({ studentId: row.studentId, name, reason });
+
+      if (!student || student.role !== 'STUDENT') { skip('No such student.'); continue; }
+      if (student.familyMembers.length === 0) {
+        skip('Not attached to a family yet, so there is no account to bill.');
+        continue;
+      }
+
+      const theirs = row.sessionIds.map((id) => sessionsById.get(id)).filter(Boolean);
+      if (theirs.length === 0) { skip('None of their meetings exist, or they are all cancelled.'); continue; }
+
+      const enrolledIn = new Set(student.enrollments.map((e) => e.classId));
+      const foreign = theirs.filter((s) => !enrolledIn.has(s.classId));
+      if (foreign.length > 0) {
+        const names = [...new Set(foreign.map((s) => s.class?.name ?? 'that class'))].join(', ');
+        skip(`No longer actively enrolled in ${names}.`);
+        continue;
+      }
+
+      const plan = planBlock({
+        sessions: theirs,
+        studentId: student.id,
+        unit: pricing.unit,
+        block: pricing.block,
+        alreadyBilled: billedAlready.get(student.id) ?? new Set(),
+      });
+      if (plan.error) { skip(plan.error); continue; }
+
+      plans.push({
+        studentId: student.id,
+        name: student.fullName,
+        familyId: student.familyMembers[0].familyId,
+        priced: plan.priced,
+        subtotal: plan.subtotal,
+        label: blockLabel(description, plan.priced.map((p) => p.session), plan.priced.length),
+      });
+    }
+
+    if (plans.length === 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'None of those students could be billed for this block.',
+        skipped,
+      });
+    }
+
+    // The default 5s interactive-transaction budget is not enough for a term's
+    // roster: each invoice is several writes and the run is deliberately
+    // sequential so the LC-#### numbers come out in order.
+    const invoices = await prisma.$transaction(
+      async (tx) => {
+        const out = [];
+        for (const plan of plans) {
+          const invoice = await writeBlockInvoice(tx, {
+            familyId: plan.familyId,
+            studentId: plan.studentId,
+            priced: plan.priced,
+            subtotal: plan.subtotal,
+            label: plan.label,
+            due: dueParsed.due,
+          });
+          out.push({ invoice, plan });
+        }
+        return out;
+      },
+      { timeout: 120000, maxWait: 20000 }
+    );
+
+    const total = round2(plans.reduce((sum, p) => sum + p.subtotal, 0));
+    console.log(
+      `[Billing] ${req.user.email} raised ${invoices.length} block invoices ($${total.toFixed(2)} across `
+      + `${new Set(plans.map((p) => p.familyId)).size} families, ${skipped.length} skipped)`
+    );
+
+    res.status(201).json({
+      invoices: invoices.map(({ invoice, plan }) => ({
+        ...shapeBlockInvoice(invoice),
+        studentName: plan.name,
+        meetings: plan.priced.length,
+      })),
+      billed: invoices.length,
+      total,
+      skipped,
     });
   } catch (error) {
     next(error);

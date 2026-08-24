@@ -10,6 +10,9 @@ const orBlank = (value) => (value && value !== 'N/A' ? value : '');
 
 const EditStudentModal = ({ student, onClose, onSaved }) => {
   const toast = useToast();
+  // Captured once: the warning below is about the change being made now, not
+  // about a student who was already retired before this modal opened.
+  const wasActive = (student.status || 'Active').toUpperCase() === 'ACTIVE';
   const [saving, setSaving] = useState(false);
   const [families, setFamilies] = useState([]);
   
@@ -54,7 +57,12 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
         accommodationNotes: form.accommodationNotes.trim(),
         familyId: form.familyId || undefined,
       });
-      toast.success('Student updated.');
+      const ended = res.data.enrollmentsEnded || 0;
+      toast.success(
+        ended > 0
+          ? `Student updated — removed from ${ended} ${ended === 1 ? 'class' : 'classes'}.`
+          : 'Student updated.'
+      );
       await onSaved?.(res.data.student);
       onClose();
     } catch (err) {
@@ -86,6 +94,14 @@ const EditStudentModal = ({ student, onClose, onSaved }) => {
                   <option value="INACTIVE">Inactive</option>
                   <option value="SUSPENDED">Suspended</option>
                 </select>
+                {/* Said before saving, because the enrollments don't come back:
+                    setting them to Active again leaves the classes empty. */}
+                {form.status !== 'ACTIVE' && wasActive && (
+                  <span className="asm-hint">
+                    Saving also drops them from their classes, so they stop appearing
+                    on the calendar. Re-activating won't put them back.
+                  </span>
+                )}
               </div>
             </div>
 

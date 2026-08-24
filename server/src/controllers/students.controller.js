@@ -2,6 +2,7 @@ import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
 import { hasRole, isOnly, isFrontDeskOnly } from '../utils/roles.js';
 import { resolvePaging } from '../utils/helpers.js';
+import { invalidate } from '../middleware/cache.js';
 
 /**
  * Prisma filter limiting a teacher to the students they actually teach.
@@ -241,7 +242,10 @@ export const listStudents = async (req, res, next) => {
         orderBy: { fullName: 'asc' },
         include: {
           familyMembers: hideParentContact
-            ? { include: { family: true } }
+            // Name and id only. The whole family row carried the household's
+            // home address to teachers, which is the same thing the guardian's
+            // phone number is and is withheld for the same reason.
+            ? { include: { family: { select: { id: true, name: true } } } }
             : familyWithMembers(contactLevel === 'full'),
           enrollments: {
             where: { status: 'active' },
@@ -424,7 +428,27 @@ export const updateStudentInfo = async (req, res, next) => {
       },
     });
 
-    res.json({ message: 'Student updated.', student });
+    // Retiring a student has to reach the calendar. Every roster — the
+    // attendance board, the class list, the teacher's day — is drawn from
+    // active enrollments and never looked at the student's own status, so a
+    // child marked inactive kept turning up on the register each week, and
+    // kept drawing charges with the class. Ending the enrollments is the same
+    // write the "unenroll" button makes, so history is preserved rather than
+    // deleted. Deliberately one-way: turning them back to Active does not
+    // re-enroll anyone, because nobody can say which classes they'd return to.
+    let enrollmentsEnded = 0;
+    if (status === 'INACTIVE' || status === 'SUSPENDED') {
+      const { count } = await prisma.classEnrollment.updateMany({
+        where: { studentId: req.params.id, status: 'active' },
+        data: { status: 'inactive' },
+      });
+      enrollmentsEnded = count;
+      if (count > 0) {
+        invalidate('classes:*', 'registration:classes:*', 'portal:student:*', 'portal:parent:*');
+      }
+    }
+
+    res.json({ message: 'Student updated.', student, enrollmentsEnded });
   } catch (error) {
     next(error);
   }

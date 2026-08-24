@@ -477,3 +477,150 @@
   .feed-header { flex-direction: column; }
   .feed-new-post-btn { width: 100%; justify-content: center; }
 }
+
+/* ── Replies ─────────────────────────────────────────────────────────────
+   Sits inside the card, under the media, separated by a rule rather than a
+   panel of its own — the thread belongs to the post, not beside it. */
+.feed-comments {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
+}
+
+.feed-comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.feed-comments-more {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.feed-comments-more:hover { text-decoration: underline; }
+
+.feed-comment {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.feed-comment-avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.feed-comment-bubble {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-main);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+
+.feed-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.feed-comment-head strong { font-size: 13px; }
+
+.feed-comment-time {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Kept out of the way until the reply is hovered — a delete button beside
+   every message reads as an invitation. */
+.feed-comment-delete {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 2px;
+  line-height: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.feed-comment:hover .feed-comment-delete { opacity: 1; }
+.feed-comment-delete:hover { color: #dc2626; }
+
+.feed-comment-bubble p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.feed-comment-composer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.feed-comment-composer input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.feed-comment-composer input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+}
+
+.feed-comment-composer button {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.feed-comment-composer button:hover:not(:disabled) {
+  background: var(--primary-hover);
+  transform: scale(1.06);
+}
+
+.feed-comment-composer button:disabled {
+  background: var(--border-light);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}

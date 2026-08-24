@@ -15,6 +15,7 @@ import api from '../../lib/api';
 import { formatTimeOfDay, timeOfDayMinutes, nowMinutes, parseDateOnly } from '../../lib/time';
 import StudentProfileModal from '../Students/StudentProfileModal';
 import ErrorBanner from '../Layout/ErrorBanner';
+import Linkified from '../../lib/linkify';
 import './TeacherPortal.css';
 
 /* ── Helpers ────────────────────────────────────────────────── */
@@ -706,7 +707,7 @@ const TeacherPortal = () => {
               <div key={ann.id} className={`ann-card ${ann.isPinned ? 'pinned' : ''}`}>
                 <div className="ann-card-body">
                   <strong>{ann.title}</strong>
-                  <span className="ann-body-text">{ann.body}</span>
+                  <span className="ann-body-text"><Linkified text={ann.body} /></span>
                   {ann.author && <span className="ann-author">— {ann.author.fullName}</span>}
                 </div>
                 {!ann.isRead && (

@@ -102,6 +102,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
             ...full,
             name: full.fullName,
             status: full.status?.charAt(0).toUpperCase() + full.status?.slice(1).toLowerCase(),
+            familyAddress: full.familyMembers?.[0]?.family?.address ?? prev.familyAddress ?? null,
             snackHistory: (full.snackPurchases || []).map(p => ({
               id: p.id,
               date: p.purchasedAt,
@@ -286,7 +287,10 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                   </div>
                   <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'No Parent Assigned'}</p>
                   <p style={{ marginBottom: '4px' }}><strong>Phone:</strong> {student.parentPhone || 'N/A'}</p>
-                  <p style={{ marginBottom: '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
+                  <p style={{ marginBottom: !isTeacher ? '4px' : '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
+                  {!isTeacher && (
+                    <p style={{ marginBottom: '0' }}><strong>Address:</strong> {student.familyAddress || 'Not on file'}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -617,7 +621,13 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                 const res = await api.get(`/students/${student.id}`);
                 const full = res.data?.student;
                 if (full) {
-                  const next = { ...student, parentName: full.parentName, parentPhone: full.parentPhone, parentEmail: full.parentEmail };
+                  const next = {
+                    ...student,
+                    parentName: full.parentName,
+                    parentPhone: full.parentPhone,
+                    parentEmail: full.parentEmail,
+                    familyAddress: full.familyMembers?.[0]?.family?.address ?? null,
+                  };
                   setStudent(next);
                   onUpdate?.(next);
                 }

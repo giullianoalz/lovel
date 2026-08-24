@@ -195,6 +195,9 @@ export const database = {
           seashells: dbStudent.seashells,
           seashellHistory: [],
           familyId: dbStudent.familyMembers?.[0]?.familyId || null,
+          // The household address, carried so the profile can show it. Absent
+          // for teachers — the server doesn't send them the family record.
+          familyAddress: dbStudent.familyMembers?.[0]?.family?.address || null,
           // Formatear estado (ej. "ACTIVE" -> "Active")
           status: dbStudent.status.charAt(0).toUpperCase() + dbStudent.status.slice(1).toLowerCase(),
           hasActiveClasses: dbStudent.enrollments && dbStudent.enrollments.length > 0,
@@ -610,6 +613,27 @@ export const database = {
   createBlockInvoice: async ({ studentId, sessionIds, unitAmount, blockAmount, description, dueDate }) => {
     const response = await api.post('/billing/block-invoice', {
       studentId, sessionIds, unitAmount, blockAmount, description, dueDate,
+    });
+    return response.data;
+  },
+
+  // The same block across a whole roster: every actively enrolled student in
+  // those classes, their meetings in the window, and what each has already been
+  // billed for. Read-only. `classIds` is a comma-separated list.
+  fetchBlockRoster: async ({ classIds, from, to } = {}) => {
+    const params = new URLSearchParams({ classIds });
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const response = await api.get(`/billing/block-roster?${params}`);
+    return response.data;
+  },
+
+  // Bills that roster in one run — one invoice per student, all inside a single
+  // database transaction so a failure part-way cannot leave half a class billed.
+  // The price named applies PER STUDENT, not to the roster.
+  createBlockInvoices: async ({ students, unitAmount, blockAmount, description, dueDate }) => {
+    const response = await api.post('/billing/block-invoices', {
+      students, unitAmount, blockAmount, description, dueDate,
     });
     return response.data;
   },

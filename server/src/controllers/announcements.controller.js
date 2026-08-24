@@ -180,6 +180,12 @@ export const listAnnouncements = async (req, res, next) => {
           where: { userId }
         },
         media: { orderBy: { position: 'asc' } },
+        // Threads are short — a handful of replies to an open house — so they
+        // ride along with the feed rather than costing a request per card.
+        comments: {
+          orderBy: { createdAt: 'asc' },
+          include: { author: { select: { id: true, fullName: true, role: true } } },
+        },
       },
       orderBy: [{ isPinned: 'desc' }, { publishedAt: 'desc' }]
     });
@@ -220,6 +226,99 @@ export const markAnnouncementRead = async (req, res, next) => {
 
     invalidate(`announcements:${req.user.id}`); // stale isRead flag for this user
     res.json({ message: 'Announcement marked as read', read });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Can this account see this announcement at all? Replies are gated on the same
+ * answer as reading, so a "staff only" post can't be commented on — or read
+ * back — by a parent who guessed the id.
+ */
+const canSeeAnnouncement = (user, announcement) =>
+  hasRole(user, 'ADMIN') ||
+  announcement.targetAudience === 'all' ||
+  allRoles(user).map(r => r.toLowerCase()).includes(announcement.targetAudience);
+
+/**
+ * POST /api/announcements/:id/comments
+ * Reply to an announcement. Open to every role that can see the post: the
+ * whole point is that a parent can answer "are siblings welcome?" where
+ * everyone else with the same question is already looking.
+ */
+export const addAnnouncementComment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const body = (req.body?.body || '').trim();
+
+    if (!body) {
+      return res.status(400).json({ error: 'Validation Error', message: 'A reply can\'t be empty.' });
+    }
+    if (body.length > 2000) {
+      return res.status(400).json({ error: 'Validation Error', message: 'A reply is limited to 2000 characters.' });
+    }
+
+    const announcement = await prisma.announcement.findUnique({ where: { id } });
+    if (!announcement) return res.status(404).json({ error: 'Not Found' });
+    // Same 404 rather than 403 for an audience mismatch: whether a staff-only
+    // post exists isn't a parent's business either.
+    if (!canSeeAnnouncement(req.user, announcement)) return res.status(404).json({ error: 'Not Found' });
+
+    const comment = await prisma.announcementComment.create({
+      data: { announcementId: id, authorId: req.user.id, body },
+      include: { author: { select: { id: true, fullName: true, role: true } } },
+    });
+
+    invalidate('announcements:*'); // the thread rides along with the feed
+
+    const io = req.app.get('io');
+    if (io) io.emit('announcement_comment', { announcementId: id, comment });
+
+    // Only the person who posted gets pushed. Notifying the whole audience
+    // would turn one open-house question into 100 phone buzzes.
+    if (announcement.authorId && announcement.authorId !== req.user.id) {
+      import('../utils/pushNotifications.js').then(({ sendPushNotification }) => {
+        sendPushNotification(
+          [announcement.authorId],
+          `💬 Reply on "${announcement.title}"`,
+          `${req.user.fullName}: ${body.slice(0, 120)}`,
+          { type: 'ACADEMY_FEED', announcementId: id, link: '/feed' }
+        );
+      }).catch(() => {});
+    }
+
+    res.status(201).json({ message: 'Reply posted.', comment });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/announcements/:id/comments/:commentId
+ * Remove a reply. Its author can take back their own words; an admin can
+ * clear anything off the board they own.
+ */
+export const deleteAnnouncementComment = async (req, res, next) => {
+  try {
+    const { id, commentId } = req.params;
+
+    const comment = await prisma.announcementComment.findFirst({
+      where: { id: commentId, announcementId: id },
+    });
+    if (!comment) return res.status(404).json({ error: 'Not Found' });
+
+    if (comment.authorId !== req.user.id && !hasRole(req.user, 'ADMIN')) {
+      return res.status(403).json({ error: 'Forbidden', message: 'You can only delete your own replies.' });
+    }
+
+    await prisma.announcementComment.delete({ where: { id: commentId } });
+    invalidate('announcements:*');
+
+    const io = req.app.get('io');
+    if (io) io.emit('announcement_comment_deleted', { announcementId: id, commentId });
+
+    res.json({ message: 'Reply removed.' });
   } catch (error) {
     next(error);
   }

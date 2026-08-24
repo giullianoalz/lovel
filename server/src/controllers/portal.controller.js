@@ -1,5 +1,7 @@
 import prisma from '../config/database.js';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import stripe from '../config/stripe.js';
 import { invalidate } from '../middleware/cache.js';
 import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
@@ -601,6 +603,53 @@ export const updateChildProfile = async (req, res, next) => {
 
     res.json({ message: 'Profile updated.', student });
   } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/portal/parent/children/:studentId/avatar
+ *
+ * Lets a parent upload a profile picture for their child.
+ */
+export const uploadChildAvatar = async (req, res, next) => {
+  try {
+    const { studentId } = req.params;
+    if (!(await childIdsOfParent(req.user.id)).includes(studentId)) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: 'Not Found', message: 'That student is not in your family.' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Bad Request', message: 'No image provided.' });
+    }
+
+    const newAvatarUrl = `/uploads/avatars/${req.file.filename}`;
+
+    const before = await prisma.user.findUnique({
+      where: { id: studentId },
+      select: { avatarUrl: true },
+    });
+
+    // Delete old avatar if it exists and is an uploaded file
+    if (before?.avatarUrl && before.avatarUrl.startsWith('/uploads/avatars/')) {
+      const oldPath = path.join(process.cwd(), before.avatarUrl);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    const student = await prisma.user.update({
+      where: { id: studentId },
+      data: { avatarUrl: newAvatarUrl },
+      select: { id: true, avatarUrl: true },
+    });
+
+    invalidate(`portal:parent:${req.user.id}`);
+    // Also invalidate student portal cache in case the student is logged in
+    invalidate(`portal:student:${student.id}`);
+
+    res.json({ message: 'Profile picture updated.', student });
+  } catch (error) {
+    if (req.file) fs.unlinkSync(req.file.path);
     next(error);
   }
 };

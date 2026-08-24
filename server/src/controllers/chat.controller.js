@@ -174,12 +174,13 @@ async function ensureAssistantThread(userId) {
 export const getThreads = async (req, res, next) => {
   try {
     const userId = req.user.id;
-
-    const { status = 'ACTIVE' } = req.query;
+    const { status = 'ACTIVE', scope } = req.query;
+    const isAdmin = hasRole(req.user, 'ADMIN');
+    const showAll = isAdmin && scope === 'all';
 
     // Only for the default (ACTIVE) inbox. The lookup ignores status, so a
     // thread the user has resolved stays resolved instead of coming back.
-    if (status.toUpperCase() === 'ACTIVE' && isAssistantEnabled()) {
+    if (!showAll && status.toUpperCase() === 'ACTIVE' && isAssistantEnabled()) {
       try {
         await ensureAssistantThread(userId);
       } catch (err) {
@@ -188,6 +189,76 @@ export const getThreads = async (req, res, next) => {
       }
     }
 
+    // ── Admin "All Chats" supervisory view ──
+    if (showAll) {
+      const allThreads = await prisma.chatThread.findMany({
+        where: { status: status.toUpperCase() },
+        include: {
+          participants: { include: { user: true } },
+          messages: { orderBy: { sentAt: 'desc' }, take: 1 },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+
+      const maskMap = await buildParentMaskMap(
+        req.user,
+        allThreads.flatMap(t => t.participants.map(p => p.userId))
+      );
+
+      // Check which threads the admin is actually a participant in, so we can
+      // compute real unread counts for those and show 0 for the rest.
+      const myParticipations = await prisma.chatParticipant.findMany({
+        where: { userId, threadId: { in: allThreads.map(t => t.id) } },
+        select: { threadId: true, lastReadAt: true, joinedAt: true },
+      });
+      const myPartMap = new Map(myParticipations.map(p => [p.threadId, p]));
+
+      const unreadCounts = await Promise.all(
+        allThreads.map(t => {
+          const part = myPartMap.get(t.id);
+          if (!part) return Promise.resolve(0);
+          return prisma.chatMessage.count({
+            where: {
+              threadId: t.id,
+              senderId: { not: userId },
+              sentAt: { gt: part.lastReadAt || part.joinedAt },
+            },
+          });
+        })
+      );
+
+      const threads = allThreads.map((thread, idx) => {
+        const otherParticipants = thread.participants.filter(p => p.userId !== userId);
+        const otherNames = otherParticipants.map(p => displayNameFor(maskMap, p.user)).join(', ');
+        const lastMsg = thread.messages[0];
+        const roles = otherParticipants.map(p => {
+          let r = p.user.role.charAt(0).toUpperCase() + p.user.role.slice(1).toLowerCase();
+          if (r === 'Admin') r = 'Admin Staff';
+          return r;
+        });
+        const allNames = thread.participants.map(p => displayNameFor(maskMap, p.user)).join(', ');
+
+        return {
+          id: thread.id,
+          name: thread.name || otherNames || allNames || 'Thread',
+          isBot: thread.isBot,
+          isGroup: thread.participants.length > 2 || !!thread.name,
+          status: thread.status,
+          isBlocked: false,
+          isSupervisor: !myPartMap.has(thread.id),
+          roles,
+          lastMsg: lastMsg ? (lastMsg.text || (lastMsg.fileName ? `📎 ${lastMsg.fileName}` : 'Attachment')) : 'No messages yet',
+          timestamp: lastMsg ? lastMsg.sentAt.getTime() : thread.createdAt.getTime(),
+          time: lastMsg ? formatAcademyClock(lastMsg.sentAt) : '',
+          unread: unreadCounts[idx],
+        };
+      });
+
+      threads.sort((a, b) => b.timestamp - a.timestamp);
+      return res.json({ threads });
+    }
+
+    // ── Normal per-user inbox ──
     // Find all threads the user is part of
     const participants = await prisma.chatParticipant.findMany({
       where: {
@@ -264,8 +335,10 @@ export const getThreads = async (req, res, next) => {
         id: thread.id,
         name: threadName,
         isBot: thread.isBot,
+        isGroup: thread.participants.length > 2 || !!thread.name,
         status: thread.status,
         isBlocked: isBlocked,
+        isSupervisor: false,
         roles: roles,
         lastMsg: lastMsg ? (lastMsg.text || (lastMsg.fileName ? `📎 ${lastMsg.fileName}` : 'Attachment')) : (thread.isBot ? 'Hello! I am your Academy Assistant.' : 'No messages yet'),
         timestamp: lastMsg ? lastMsg.sentAt.getTime() : thread.createdAt.getTime(),
@@ -540,15 +613,16 @@ export const getMessages = async (req, res, next) => {
   try {
     const { threadId } = req.params;
     const userId = req.user.id;
+    const isAdmin = hasRole(req.user, 'ADMIN');
 
-    // Verify user is in this thread
+    // Verify user is in this thread (admins can supervise any thread)
     const participant = await prisma.chatParticipant.findUnique({
       where: {
         threadId_userId: { threadId, userId }
       }
     });
 
-    if (!participant) {
+    if (!participant && !isAdmin) {
       return res.status(403).json({ error: 'Forbidden', message: 'Not a participant in this thread' });
     }
 
@@ -577,8 +651,6 @@ export const getMessages = async (req, res, next) => {
     });
 
     // Read-receipt anchor: the point up to which EVERY other participant has read.
-    // A message I sent shows "Seen" once this is >= its sentAt. Null (someone
-    // hasn't opened the thread yet) means my messages aren't seen yet.
     const others = await prisma.chatParticipant.findMany({
       where: { threadId, userId: { not: userId } },
       select: { lastReadAt: true },
@@ -587,28 +659,30 @@ export const getMessages = async (req, res, next) => {
       ? new Date(Math.min(...others.map(o => o.lastReadAt.getTime())))
       : null;
 
-    // Opening the thread marks everything up to now as read for this user.
-    await prisma.chatParticipant.update({
-      where: { id: participant.id },
-      data: { lastReadAt: new Date() },
-    });
+    // Only mark as read and emit events if the user is an actual participant.
+    // Admin supervisory access is read-only — no side effects.
+    if (participant) {
+      // Opening the thread marks everything up to now as read for this user.
+      await prisma.chatParticipant.update({
+        where: { id: participant.id },
+        data: { lastReadAt: new Date() },
+      });
 
-    // The sidebar's unread badge is a different counter — unread rows in the
-    // Notification table, not lastReadAt above — so it needs its own update or
-    // it stays stuck after the user has actually read every message.
-    const { count: notifsCleared } = await prisma.notification.updateMany({
-      where: { userId, referenceType: 'chat_thread', referenceId: threadId, isRead: false },
-      data: { isRead: true, readAt: new Date() },
-    });
+      // The sidebar's unread badge is a different counter — unread rows in the
+      // Notification table, not lastReadAt above — so it needs its own update or
+      // it stays stuck after the user has actually read every message.
+      const { count: notifsCleared } = await prisma.notification.updateMany({
+        where: { userId, referenceType: 'chat_thread', referenceId: threadId, isRead: false },
+        data: { isRead: true, readAt: new Date() },
+      });
 
-    // Tell the other participant(s) in real time so their sent messages flip to
-    // "Seen" without a refresh.
-    const io = req.app.get('io');
-    if (io) {
-      io.to(threadId).emit('messages_read', { threadId, userId, readAt: new Date() });
-      // Nudges this user's own bell (useNotifications) to refetch and drop the
-      // badge — the same "something changed" signal a new notification sends.
-      if (notifsCleared > 0) io.to(`user_${userId}`).emit('notification', { type: 'read_sync' });
+      // Tell the other participant(s) in real time so their sent messages flip to
+      // "Seen" without a refresh.
+      const io = req.app.get('io');
+      if (io) {
+        io.to(threadId).emit('messages_read', { threadId, userId, readAt: new Date() });
+        if (notifsCleared > 0) io.to(`user_${userId}`).emit('notification', { type: 'read_sync' });
+      }
     }
 
     res.json({ messages: formattedMessages, othersLastReadAt });
