@@ -40,3 +40,10 @@ server/uploads/
 
 # Stray test artifacts
 test.jpg
+
+# One-off scratch/debug scripts and generated previews — never source.
+# Kept on disk, out of the repo.
+_tmp_*
+server/scratch_*.cjs
+server/enroll-burbuja.cjs
+server/find-class.cjs

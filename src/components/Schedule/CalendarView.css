@@ -2102,11 +2102,14 @@
   .calendar-header-bottom {
     padding: 4px;
     gap: 4px;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .calendar-actions-left,
   .calendar-actions-right {
     gap: 4px;
+    justify-content: center;
   }
 
   .calendar-title-text {
@@ -2188,6 +2191,7 @@
     scroll-snap-type: x proximity;
     -webkit-overflow-scrolling: touch;
     scroll-padding-left: 52px;
+    padding-bottom: 8px;
   }
 
   .instructor-schedule-grid {
@@ -2211,8 +2215,8 @@
   }
 
   .instructor-col {
-    flex: 1;
-    min-width: 140px;
+    flex: 0 0 82vw;
+    min-width: 82vw;
     scroll-snap-align: start;
   }
 
@@ -3280,9 +3284,3 @@ select.form-control {
   font-size: 11.5px;
 }
 
-/* Responsive Grid Overrides */
-@media (max-width: 768px) {
-  .calendar-scroll-wrapper { overflow-x: auto; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
-  .calendar-header-bottom { flex-direction: column; align-items: stretch; }
-  .calendar-actions-left, .calendar-actions-right { justify-content: center; }
-}
