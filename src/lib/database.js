@@ -787,16 +787,19 @@ export const database = {
     return realSessions.sort((a, b) => new Date(b.date) - new Date(a.date));
   },
 
+  // Returns the saved note so the caller can show what families will now see
+  // without waiting on a refetch. Saving twice edits the same note rather than
+  // stacking a second one — the server keys on the session.
   saveClassNotes: async (sessionId, notes, files, visibility = 'all', recordingUrl = '') => {
     try {
-      await api.post(`/sessions/${sessionId}/notes`, {
+      const res = await api.post(`/sessions/${sessionId}/notes`, {
         notes,
         visibility,
         recordingUrl,
         files
       });
       console.log(`[Database] Saved notes for session ${sessionId} [Visibility: ${visibility}] via API`);
-      return true;
+      return res.data?.note || true;
     } catch (error) {
       console.error("Error saving real session notes, falling back to mock:", error);
       const newEntry = {

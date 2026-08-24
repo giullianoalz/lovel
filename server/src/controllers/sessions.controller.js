@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { invalidate } from '../middleware/cache.js';
 import { hasRole, isOnly, isFrontDeskOnly } from '../utils/roles.js';
 import { childIdsOfParent } from '../utils/family.js';
 import { broadcastToManagement } from '../utils/pushNotifications.js';
@@ -1502,6 +1503,17 @@ export const supervisionSessions = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/sessions/:id/notes
+ * Publish (or re-publish) the teacher's note for a session.
+ *
+ * Writes over the teacher's existing note for this session rather than adding a
+ * second one. A session shows exactly one teacher note everywhere it is read —
+ * the portal card, the family notes archive, the history list all take the
+ * first — so appending meant a teacher who came back to make their note fuller
+ * saw the original text stubbornly stay put, and saved again, and again. There
+ * are sessions in the data carrying five identical copies from exactly that.
+ */
 export const addSessionNote = async (req, res, next) => {
   try {
     const { notes, visibility = 'all', recordingUrl, files = [] } = req.body;
@@ -1509,16 +1521,35 @@ export const addSessionNote = async (req, res, next) => {
     const denied = await denyForeignSession(req.user, req.params.id);
     if (denied) return res.status(404).json(denied);
 
+    // Only ever the teacher's own note. The lesson-plan preview is a separate
+    // row with its own source, and re-approving a plan owns that one.
+    const existingNote = await prisma.sessionNote.findFirst({
+      where: { sessionId: req.params.id, source: 'teacher' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+
     // Run in a transaction so we don't save notes if materials fail
     const result = await prisma.$transaction(async (tx) => {
-      const note = await tx.sessionNote.create({
-        data: {
-          sessionId: req.params.id,
-          notes,
-          visibility,
-          recordingUrl: recordingUrl || null,
-        },
-      });
+      const note = existingNote
+        ? await tx.sessionNote.update({
+            where: { id: existingNote.id },
+            data: {
+              notes,
+              visibility,
+              // An edit that doesn't re-send the recording link must not wipe
+              // the one already attached.
+              ...(recordingUrl !== undefined ? { recordingUrl: recordingUrl || null } : {}),
+            },
+          })
+        : await tx.sessionNote.create({
+            data: {
+              sessionId: req.params.id,
+              notes,
+              visibility,
+              recordingUrl: recordingUrl || null,
+            },
+          });
 
       if (files && files.length > 0) {
         await tx.sessionMaterial.createMany({
@@ -1533,6 +1564,11 @@ export const addSessionNote = async (req, res, next) => {
 
       return note;
     });
+
+    // The portal responses that carry this note are cached for 30-60 s. Without
+    // this, a teacher who saves and refreshes is handed the pre-edit copy back
+    // and concludes the save didn't take.
+    invalidate('portal:*');
 
     res.status(201).json({ message: 'Session note added.', note: result });
   } catch (error) {
@@ -1572,6 +1608,8 @@ export const updateSessionNote = async (req, res, next) => {
         ...(visibility !== undefined ? { visibility } : {}),
       },
     });
+
+    invalidate('portal:*');
 
     res.json({ message: 'Session note updated.', note });
   } catch (error) {

@@ -287,6 +287,18 @@ const TeacherPortal = () => {
      HELPERS
   ═══════════════════════════════════════════════════════════ */
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3500); };
+  // The notes editor is a contenteditable, so its value is HTML. Every
+  // family-facing surface prints the note as plain text, so the optimistic copy
+  // shown in "What Families See" is flattened to match what the server returns.
+  const plainTextFromHtml = (html) => String(html || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  // A note kept to the teacher alone never reaches the family panel.
+  const sharedWithFamilies = noteVisibility.includes('students_parents') || noteVisibility.includes('all');
   const handleMarkRead = async (annId) => {
     try {
       await api.post(`/announcements/${annId}/read`);
@@ -308,7 +320,12 @@ const TeacherPortal = () => {
       setLpShowForm(false);
       setLpForm({ classId: '', weekOf: '', type: 'DISCOVERY_COVE', mainActivity: '', safetyNotes: '', skillConnection: '', differentiation: '', supplyItems: [] });
       showToast('Lesson plan submitted!');
-    } catch { showToast('Error submitting lesson plan'); }
+    } catch (err) {
+      // Say what actually went wrong. A blanket "Error submitting" left a
+      // teacher reporting only that submitting "doesn't work", with nothing on
+      // either side to go on.
+      showToast(err.response?.data?.message || err.userMessage || 'Error submitting lesson plan');
+    }
     setLpSubmitting(false);
   };
 
@@ -437,18 +454,26 @@ const TeacherPortal = () => {
   };
 
   /* ── Save notes ── */
+  // Saving replaces this session's note rather than adding another, so the
+  // editor keeps its text afterwards: coming back to make the note fuller is
+  // the normal case, and blanking the box made that look like the save had
+  // thrown the writing away.
   const handleSaveNotes = async () => {
     if (!classNotes && attachedFiles.length === 0) return;
     setSavingNotes(true);
-    await database.saveClassNotes(currentClass?.sessionId || 'session', classNotes, attachedFiles, noteVisibility.join(','), recordingUrl);
+    const saved = await database.saveClassNotes(currentClass?.sessionId || 'session', classNotes, attachedFiles, noteVisibility.join(','), recordingUrl);
     const updated = await database.fetchSessionHistory(currentClass?.classId || 'session');
     setSessionHistory(updated || []);
+    // Reflect it in "What Families See" immediately — that panel is the whole
+    // reason a teacher rewrites the note, so it has to move when they save.
+    if (saved?.id && sharedWithFamilies) {
+      setSchedule((prev) => prev.map((c) => c.sessionId === currentClass?.sessionId
+        ? { ...c, lessonPreview: { id: saved.id, notes: plainTextFromHtml(classNotes) } }
+        : c));
+    }
     setSavingNotes(false);
-    showToast('✅ Materials published!');
-    setClassNotes('');
-    if (editorRef.current) editorRef.current.innerHTML = '';
+    showToast('✅ Notes published!');
     setAttachedFiles([]);
-    setRecordingUrl('');
   };
 
   /* ── File handling ── */
@@ -1414,6 +1439,16 @@ const TeacherPortal = () => {
                   </button>
                 </div>
 
+                {/* A greyed-out button with no reason on it reads as "submitting
+                    is broken". Name the field that's still empty. */}
+                {(!lpForm.mainActivity || !lpForm.weekOf) && (
+                  <p className="text-muted" style={{fontSize: 12, margin: '14px 0 0'}}>
+                    Still needed before this can be submitted: {[
+                      !lpForm.weekOf && 'Week of',
+                      !lpForm.mainActivity && 'Main Activity',
+                    ].filter(Boolean).join(' and ')}.
+                  </p>
+                )}
                 <button className="tp-submit-btn" onClick={handleSubmitLessonPlan} disabled={lpSubmitting || !lpForm.mainActivity || !lpForm.weekOf} style={{marginTop: 14}}>
                   {lpSubmitting ? 'Submitting...' : 'Submit Lesson Plan'}
                 </button>

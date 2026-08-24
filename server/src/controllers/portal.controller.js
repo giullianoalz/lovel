@@ -8,6 +8,7 @@ import { isOnly } from '../utils/roles.js';
 import { childIdsOfParent, familyIdsOfUser, ensureFamilyCheckInCode } from '../utils/family.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 import { buildLessonNotesPdf, lessonNotesPdfFilename } from '../services/lessonNotesPdf.service.js';
+import { FAMILY_NOTE_WHERE, familyNotesInclude, pickFamilyNote } from '../utils/sessionNotes.js';
 
 // Shape a behavior log for the student/parent portals — exposes the reason
 // ("why") behind each positive note or warning, not just the count.
@@ -135,10 +136,11 @@ export const getTeacherPortal = async (req, res, next) => {
         },
         attendance: true,
         materials: true,
-        // The family-facing preview published when an admin approved this
-        // week's lesson plan, so the teacher can correct it from the same
-        // screen when the class doesn't go the way the plan said.
-        notes: { where: { source: 'lesson_plan_summary' }, take: 1 }
+        // Exactly what a family sees for this session — their own recap once
+        // they've written one, the approved plan's preview until then — so the
+        // teacher can correct it from the same screen when the class doesn't go
+        // the way the plan said.
+        notes: familyNotesInclude
       },
       orderBy: { startTime: 'asc' }
     });
@@ -177,9 +179,10 @@ export const getTeacherPortal = async (req, res, next) => {
       className: session.class.name,
       startTime: session.startTime,
       endTime: session.endTime,
-      lessonPreview: session.notes?.[0]
-        ? { id: session.notes[0].id, notes: session.notes[0].notes }
-        : null,
+      lessonPreview: (() => {
+        const note = pickFamilyNote(session.notes);
+        return note ? { id: note.id, notes: note.notes } : null;
+      })(),
       roster: session.class.enrollments.map(e => {
         const student = e.student;
         const mark = session.attendance.find(a => a.studentId === student.id);
@@ -259,7 +262,7 @@ export const getStudentPortal = async (req, res, next) => {
                 orderBy: { date: 'asc' },
                 take: 5,
                 include: {
-                  notes: { where: { source: 'lesson_plan_summary' }, take: 1 },
+                  notes: familyNotesInclude,
                 },
               },
             },
@@ -362,7 +365,7 @@ export const getStudentPortal = async (req, res, next) => {
           date: s.date,
           startTime: s.startTime,
           endTime: s.endTime,
-          lessonPreview: s.notes?.[0]?.notes || null,
+          lessonPreview: pickFamilyNote(s.notes)?.notes || null,
         })),
       })),
       pastEnrollments: pastEnrollments.map(e => ({
@@ -408,16 +411,10 @@ const loadClassLessonNotes = async (studentId, classId) => {
   const sessions = await prisma.session.findMany({
     where: {
       classId,
-      notes: { some: { source: 'lesson_plan_summary', notes: { not: null } } },
+      notes: { some: { ...FAMILY_NOTE_WHERE, notes: { not: null } } },
     },
     orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
-    include: {
-      notes: {
-        where: { source: 'lesson_plan_summary' },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-      },
-    },
+    include: { notes: familyNotesInclude },
   });
 
   return {
@@ -434,7 +431,7 @@ const loadClassLessonNotes = async (studentId, classId) => {
         startTime: s.startTime,
         endTime: s.endTime,
         status: s.status,
-        notes: s.notes[0]?.notes || '',
+        notes: pickFamilyNote(s.notes)?.notes || '',
       }))
       .filter((n) => n.notes.trim()),
   };
@@ -868,10 +865,11 @@ export const getParentPortal = async (req, res, next) => {
                 orderBy: { date: 'asc' },
                 take: 3,
                 include: {
-                  // The auto-generated preview of that week's approved lesson
-                  // plan — visibility is always 'all' for these, so no filter
-                  // needed to keep this family-safe.
-                  notes: { where: { source: 'lesson_plan_summary' }, take: 1 },
+                  // The teacher's own note for the session once they've written
+                  // one, otherwise the auto-generated preview of that week's
+                  // approved lesson plan. `familyNotesInclude` is what keeps a
+                  // teacher-only note out of this.
+                  notes: familyNotesInclude,
                 },
               },
             },
@@ -1037,7 +1035,7 @@ export const getParentPortal = async (req, res, next) => {
             date: s.date,
             startTime: s.startTime,
             endTime: s.endTime,
-            lessonPreview: s.notes?.[0]?.notes || null,
+            lessonPreview: pickFamilyNote(s.notes)?.notes || null,
           })),
         })),
         pastEnrollments: (pastEnrollmentsByStudent[user.id] || []).map(e => ({

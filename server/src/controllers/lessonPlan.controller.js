@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { invalidate } from '../middleware/cache.js';
 import { isOnly } from '../utils/roles.js';
 import { sendNotification } from '../jobs/notification.helper.js';
 import { generateLessonPlanSummary, fallbackLessonPlanSummary } from '../services/ai.service.js';
@@ -269,6 +270,9 @@ export const reviewLessonPlan = async (req, res, next) => {
     });
 
     await syncLessonPlanSessionSummary(lessonPlan);
+    // Approving publishes (or withdraws) what families see, so the cached
+    // portal payloads carrying it are stale the moment this returns.
+    invalidate('portal:*');
 
     res.json({ lessonPlan });
   } catch (error) {
