@@ -63,6 +63,7 @@ const BillingPanel = () => {
   const [familySearch, setFamilySearch] = useState('');
   const [onlyOwing, setOnlyOwing] = useState(false);
   const [onlyActive, setOnlyActive] = useState(false);
+  const [onlyCardPaid, setOnlyCardPaid] = useState(false);
 
   // Modal States
   const [isAddTxModalOpen, setIsAddTxModalOpen] = useState(false);
@@ -125,6 +126,12 @@ const BillingPanel = () => {
     socket.on('billing_updated', onBillingUpdated);
     return () => socket.off('billing_updated', onBillingUpdated);
   }, []);
+
+  // Whether a family has ever paid by card through the parent portal's
+  // Stripe checkout — the ledger has no separate "payment method" concept,
+  // so this reads it off the invoices' embedded payments instead.
+  const familyHasCardPayment = (familyId) => invoices.some(inv =>
+    inv.familyId === familyId && inv.payments?.some(p => p.method === 'STRIPE_CARD' && p.status !== 'REFUNDED'));
 
   const calculateFamilyBalance = (familyId) => {
     const famTxs = transactions.filter(t => t.familyId === familyId);
@@ -1009,7 +1016,10 @@ const BillingPanel = () => {
   // --- MAIN DASHBOARD VIEW (List of Families) ---
   if (!selectedFamily) {
     const totalOwing = families.reduce((acc, f) => acc + calculateFamilyBalance(f.id), 0);
-    
+    const totalCardPayments = invoices.reduce((acc, inv) => acc + (inv.payments || [])
+      .filter(p => p.method === 'STRIPE_CARD' && p.status !== 'REFUNDED')
+      .reduce((sum, p) => sum + p.amount, 0), 0);
+
     return (
       <div className="billing-container">
         <header className="billing-header">
@@ -1050,6 +1060,13 @@ const BillingPanel = () => {
               <p>{families.filter(f => students.some(s => s.familyId === f.id && s.hasActiveClasses)).length}</p>
             </div>
           </div>
+          <div className="metric-card">
+            <div className="metric-icon success"><CreditCard size={24} /></div>
+            <div className="metric-info">
+              <h3>Paid by Card (Stripe)</h3>
+              <p>${totalCardPayments.toFixed(2)}</p>
+            </div>
+          </div>
         </div>
 
         <div className="table-container">
@@ -1069,6 +1086,13 @@ const BillingPanel = () => {
                 title="Show only families with a balance owing"
               >
                 <Filter size={16} /> {onlyOwing ? 'Owing only ✓' : 'Owing only'}
+              </button>
+              <button
+                className={`btn-filter ${onlyCardPaid ? 'active' : ''}`}
+                onClick={() => setOnlyCardPaid(v => !v)}
+                title="Show only families who have paid by credit card (Stripe)"
+              >
+                <CreditCard size={16} /> {onlyCardPaid ? 'Paid by card ✓' : 'Paid by card'}
               </button>
               <div className="billing-search-box">
                 <Search size={16} />
@@ -1096,7 +1120,8 @@ const BillingPanel = () => {
                 {families.filter(f => {
                   if (onlyOwing && calculateFamilyBalance(f.id) <= 0) return false;
                   if (onlyActive && !students.some(s => s.familyId === f.id && s.hasActiveClasses)) return false;
-                  
+                  if (onlyCardPaid && !familyHasCardPayment(f.id)) return false;
+
                   const q = familySearch.trim().toLowerCase();
                   if (!q) return true;
                   return (
@@ -1109,7 +1134,12 @@ const BillingPanel = () => {
                   const primary = f.contacts.find(c => c.isInvoiceRecipient) || f.contacts[0];
                   return (
                     <tr key={f.id} onClick={() => selectFamily(f)} className="clickable-row">
-                      <td style={{fontWeight: 600, color: 'var(--primary)'}}>{f.name}</td>
+                      <td style={{fontWeight: 600, color: 'var(--primary)'}}>
+                        {f.name}
+                        {familyHasCardPayment(f.id) && (
+                          <CreditCard size={14} style={{ marginLeft: '6px', verticalAlign: 'middle', color: 'var(--text-muted)' }} title="Has paid by credit card (Stripe)" />
+                        )}
+                      </td>
                       <td>{primary ? primary.name : 'N/A'}</td>
                       <td style={{fontWeight: 700, color: bal > 0 ? '#dc2626' : 'var(--text-main)'}}>${bal.toFixed(2)}</td>
                       <td style={{ textAlign: 'center' }}>

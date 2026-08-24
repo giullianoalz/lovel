@@ -706,7 +706,14 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                               {' '}— hours worked are covered by it, nothing is paid per hour on top.
                             </span>
                           </>
-                        ) : payroll.salaryAmount === 0 && payroll.hourlyRate == null && !payroll.flatRateOnly ? (
+                        /* `arrangementOf`, not a predicate written out again
+                           here: the editor opens on that answer, and a card
+                           that says "draws no pay" over an editor showing
+                           hourly rates is worse than either alone. It caught a
+                           real case — somebody on a $0 salary with a $20
+                           online rate, which this screen called unpaid and the
+                           editor called hourly. */
+                        ) : arrangementOf(payroll) === 'unpaid' ? (
                           <>
                             <strong>Draws no pay</strong>
                             <span>Recorded as taking nothing from the academy — not a missing rate.</span>

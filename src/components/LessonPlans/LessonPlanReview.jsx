@@ -240,11 +240,26 @@ const LessonPlanReview = () => {
   }, {});
 
   const sortedWeeks = Object.keys(supplyItemsByWeek)
-    .sort((a, b) => Number(a) - Number(b))
     .map(key => {
       const week = supplyItemsByWeek[key];
-      week.sortedGroups = Object.values(week.groups).sort((a, b) => a.name.localeCompare(b.name));
+      week.keyTime = Number(key);
+      week.sortedGroups = Object.values(week.groups).sort((a, b) => {
+        const aPending = a.pending.length > 0;
+        const bPending = b.pending.length > 0;
+        if (aPending && !bPending) return -1;
+        if (!aPending && bPending) return 1;
+        return a.name.localeCompare(b.name);
+      });
       return week;
+    })
+    .sort((a, b) => {
+      const aHasPending = a.totalPending > 0;
+      const bHasPending = b.totalPending > 0;
+      if (aHasPending && !bHasPending) return -1;
+      if (!aHasPending && bHasPending) return 1;
+      
+      if (sortOrder === 'asc') return a.keyTime - b.keyTime;
+      return b.keyTime - a.keyTime;
     });
 
   return (
