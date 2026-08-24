@@ -273,10 +273,13 @@ const PayrollOverview = () => {
           {totals.unratedHours > 0 && (
             <div className="po-warning">
               <AlertTriangle size={16} />
+              {/* Worth more here than on the earned screens: an unpriced hour
+                  that has not happened yet can still be priced before anybody
+                  is underpaid for it. */}
               <span>
-                <strong>{totals.unratedHours} h</strong> were worked with no rate set, so they are
-                counted as $0. The total above is short until those rates exist — the rows
-                below are marked.
+                <strong>{totals.unratedHours} h</strong> {isUpcoming ? 'are scheduled' : 'were worked'} with
+                no rate set, so they are counted as $0. The total above is short until those
+                rates exist — the rows below are marked.
               </span>
             </div>
           )}
@@ -305,7 +308,9 @@ const PayrollOverview = () => {
 
           {rows.length === 0 ? (
             <p className="po-empty">
-              Nobody worked a paid hour {isWeek ? `in the week of ${weekLabel(weekStart)}` : `in ${MONTH_NAMES[month - 1]}`}.
+              {isUpcoming
+                ? `Nothing is booked in the next ${weeksAhead === 1 ? 'week' : `${weeksAhead} weeks`}, so there is nothing to pay for yet.`
+                : `Nobody worked a paid hour ${isWeek ? `in the week of ${weekLabel(weekStart)}` : `in ${MONTH_NAMES[month - 1]}`}.`}
             </p>
           ) : (
             <div className="po-table-wrap">
@@ -324,7 +329,7 @@ const PayrollOverview = () => {
                     <th className="num">Entries</th>
                     <th className="num">Rate</th>
                     <th className="num">Base</th>
-                    <th className="num">Earned</th>
+                    <th className="num">{isUpcoming ? 'Projected' : 'Earned'}</th>
                     <th aria-label="Edit" />
                   </tr>
                 </thead>
@@ -441,7 +446,16 @@ const PayrollOverview = () => {
                                 <span className="po-sub">no salary</span>
                               </>}
                       </td>
-                      <td className="num po-earned">{money(row.totalEarnings)}</td>
+                      <td className="num po-earned">
+                        {money(row.totalEarnings)}
+                        {/* Which part of this person's figure is still only a
+                            booking. Only shown when some of it already is: on
+                            a row where every hour has passed, "0 h to come"
+                            would be noise. */}
+                        {isUpcoming && row.upcomingAmount > 0 && (
+                          <span className="po-sub">{money(row.upcomingAmount)} to come</span>
+                        )}
+                      </td>
                       <td className="num">
                         <button
                           className="po-edit-btn"
@@ -480,6 +494,10 @@ const PayrollOverview = () => {
             calendar entry — so the same person can be at the desk at 10 and teaching at 1 on
             two different rates.
             {isWeek && ' Weeks run Monday to Sunday. Salaries are not in this total — they run monthly.'}
+            {/* The forecast is only as complete as the timetable behind it, and
+                the honest failure mode is a total that looks reassuringly small
+                because nobody has scheduled September yet. */}
+            {isUpcoming && ' This is priced from the hours already on the calendar, at today’s rates: it moves when classes are added, cancelled or rescheduled, and a period nobody has scheduled yet reads as $0 rather than as nothing to pay. Salaries are left out unless the window is a whole month.'}
           </p>
         </>
       )}
@@ -512,7 +530,11 @@ const PayrollOverview = () => {
       {reviewingAbsences && (
         <AbsencesPanel
           rows={rows}
-          periodLabel={isWeek ? weekLabel(weekStart) : `${MONTH_NAMES[month - 1]} ${year}`}
+          periodLabel={
+            isUpcoming
+              ? `the next ${weeksAhead === 1 ? 'week' : `${weeksAhead} weeks`}`
+              : isWeek ? weekLabel(weekStart) : `${MONTH_NAMES[month - 1]} ${year}`
+          }
           onClose={() => setReviewingAbsences(false)}
           // Restoring an hour turns unpaid hours into paid ones, so every total
           // on the page behind is now wrong until it re-reads the period.

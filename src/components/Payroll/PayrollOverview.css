@@ -195,6 +195,48 @@
   transform: translateY(-1px);
 }
 
+/* The forecast has no month or week to step through — it starts today — so it
+   gets a depth control where the two backward-looking views keep their
+   navigator. Same height and weight as those, so switching tabs doesn't make
+   the bar jump. */
+.po-weeks-ahead {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.po-weeks-ahead label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+}
+
+.po-weeks-ahead select {
+  padding: 7px 11px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 9px;
+  background: var(--card-bg, #fff);
+  color: var(--text-main, #1e293b);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.po-weeks-ahead select:hover { border-color: var(--primary, #166534); }
+
+.po-weeks-ahead select:focus-visible {
+  outline: 2px solid var(--primary, #166534);
+  outline-offset: 1px;
+}
+
+/* The dates the chosen depth actually works out to. The dropdown says "8
+   weeks"; this says which eight, so nobody has to count forward from today. */
+.po-range-label {
+  font-size: 12.5px;
+  color: var(--text-muted, #64748b);
+}
+
 /* One dot per kind of work, in the colour it wears on the calendar, so a column
    header and a calendar block read as the same thing. */
 .po-cat-dot {

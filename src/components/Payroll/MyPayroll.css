@@ -58,6 +58,44 @@
 .breakdown-divider { height: 1px; background: #e2e8f0; margin: 4px 0; }
 .breakdown-row.total { font-weight: 700; font-size: 14px; }
 
+/* "Coming up" — money that is booked rather than owed. Deliberately quieter
+   than the earnings card above it: a forecast should not be the loudest number
+   on a screen about pay that has actually been earned. */
+.upcoming-card .payroll-big-number {
+  font-size: 28px;
+  color: var(--text-main, #1e293b);
+}
+
+.upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.upcoming-row {
+  display: grid;
+  grid-template-columns: 58px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: 12.5px;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.upcoming-when {
+  color: var(--text-muted, #64748b);
+  font-weight: 600;
+}
+
+/* A long class name shortens rather than pushing the amount off the card —
+   the money is the column that has to stay readable. */
+.upcoming-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Leave bars */
 .leave-bars { display: flex; flex-direction: column; gap: 16px; }
 .leave-item { display: flex; flex-direction: column; gap: 4px; }
