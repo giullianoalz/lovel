@@ -1,34 +1,24 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { DollarSign, Calendar, Clock, BookOpen, Briefcase, TrendingUp, ChevronLeft, ChevronRight, MapPin, Video, Wallet } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../lib/api';
+import { database } from '../../lib/database';
+import { useAsyncData } from '../../lib/useAsyncData';
+import ErrorBanner from '../Layout/ErrorBanner';
 import './MyPayroll.css';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 const MyPayroll = () => {
   const { user } = useAuth();
-  const [payrollData, setPayrollData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
 
-  const loadPayroll = useCallback(async () => {
-    if (!user?.id) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await api.get(`/users/${user.id}/payroll?month=${currentMonth}&year=${currentYear}`);
-      setPayrollData(res.data);
-    } catch {
-      setError('Could not load payroll data.');
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id, currentMonth, currentYear]);
-
-  useEffect(() => { loadPayroll(); }, [loadPayroll]);
+  const { data: payrollData, loading, error, retry } = useAsyncData(
+    () => (user?.id
+      ? database.fetchTeacherPayroll(user.id, currentMonth, currentYear)
+      : Promise.resolve(null)),
+    [user?.id, currentMonth, currentYear]
+  );
 
   const handlePrevMonth = () => {
     if (currentMonth === 1) { setCurrentMonth(12); setCurrentYear(y => y - 1); }
@@ -61,10 +51,10 @@ const MyPayroll = () => {
         <button onClick={handleNextMonth} className="month-nav-btn"><ChevronRight size={18} /></button>
       </div>
 
-      {loading ? (
+      {loading || !user?.id ? (
         <div className="payroll-loading-page"><div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">Loading payroll…</span></div></div>
       ) : error ? (
-        <div className="payroll-error-page">{error}</div>
+        <ErrorBanner message={error} onRetry={retry} />
       ) : payroll ? (
         <div className="my-payroll-grid">
           <div className="my-payroll-col">
