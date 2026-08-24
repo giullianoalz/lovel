@@ -270,6 +270,58 @@ const PayrollOverview = () => {
             </div>
           </div>
 
+          {/* The one warning on this screen that means somebody is probably
+              being overpaid, so it goes first and it is the only red one. A
+              salary and an hourly rate are alternatives — anybody collecting
+              both is collecting for the same hour twice. */}
+          {totals.salariedHourlyAmount > 0 && (
+            <div className="po-warning po-warning-danger">
+              <AlertTriangle size={16} />
+              <span>
+                <strong>{money(totals.salariedHourlyAmount)}</strong> is being paid by the hour to{' '}
+                {totals.salariedHourlyPeople === 1 ? 'somebody who is' : `${totals.salariedHourlyPeople} people who are`}{' '}
+                on a salary that already covers those hours. Hours keep the rate they were worked
+                at, so this is what you would expect if the salary started after the work — and a
+                double payment if it did not. Check the marked rows before paying.
+              </span>
+            </div>
+          )}
+
+          {/* Different from the unpriced-hours warning below, and easy to
+              confuse with it: these hours ARE priced and the money is real. The
+              gap is that nobody set a rate for these people, so the category
+              default is answering on their behalf — every teacher without a
+              personal rate quietly bills at whatever "In-person class" charges.
+              It looks identical to a deliberate arrangement until you go
+              looking, which is why it gets its own line. */}
+          {totals.unconfirmedRates > 0 && (
+            <div className="po-warning po-warning-soft">
+              <AlertTriangle size={16} />
+              <span>
+                <strong>{totals.unconfirmedRates} {totals.unconfirmedRates === 1 ? 'person is' : 'people are'}</strong>{' '}
+                being paid the category's rate because nobody has set one for them. That pays —
+                it just isn't a number anyone agreed about them. Open <em>Rates</em> on the
+                marked rows to confirm or change it.
+              </span>
+            </div>
+          )}
+
+          {/* Hours where somebody is covering a class that already has a
+              teacher being paid for the same hour. Not a fault — it is the
+              policy — but it is the only cost here that grows without a new
+              entry appearing on the calendar, so it is worth stating rather
+              than leaving folded into a total. */}
+          {totals.coTeachingHours > 0 && (
+            <div className="po-warning po-warning-soft">
+              <Users size={16} />
+              <span>
+                <strong>{totals.coTeachingHours} h</strong> ({money(totals.coTeachingAmount)}) {isUpcoming ? 'are booked' : 'were worked'} as
+                co-teacher, paid in full on top of the teacher whose class it is. Both people are
+                paid for the same hour.
+              </span>
+            </div>
+          )}
+
           {totals.unratedHours > 0 && (
             <div className="po-warning">
               <AlertTriangle size={16} />
@@ -335,7 +387,7 @@ const PayrollOverview = () => {
                 </thead>
                 <tbody>
                   {rows.map(row => (
-                    <tr key={row.teacher.id} className={row.unratedHours > 0 || row.absenceCount > 0 ? 'po-row-flagged' : ''}>
+                    <tr key={row.teacher.id} className={row.unratedHours > 0 || row.absenceCount > 0 || row.rateSetup === 'default' ? 'po-row-flagged' : ''}>
                       <td>
                         <div className="po-teacher">
                           <span className="po-avatar">{row.teacher.fullName?.[0] || '?'}</span>
@@ -343,6 +395,41 @@ const PayrollOverview = () => {
                             <span className="po-name">{row.teacher.fullName}</span>
                             {row.teacher.status !== 'ACTIVE' && (
                               <span className="po-status-tag">{row.teacher.status?.toLowerCase()}</span>
+                            )}
+                            {/* Says which of the four arrangements this person
+                                is on, because the money alone cannot: $0 is
+                                right for a salaried manager and wrong for a
+                                teacher nobody priced, and the two rows look
+                                the same. */}
+                            {row.rateSetup === 'default' && (
+                              <span
+                                className="po-flag po-flag-soft"
+                                title="No rate has been set for this person — their hours are priced at the category's rate"
+                              >
+                                <AlertTriangle size={11} /> rate not confirmed
+                              </span>
+                            )}
+                            {row.rateSetup === 'salaried' && (
+                              row.salariedHourlyAmount > 0 ? (
+                                <span
+                                  className="po-flag po-flag-danger"
+                                  title="This person is on a salary that covers their hours, and is also being paid by the hour for them — the hours carry a rate frozen before the salary existed"
+                                >
+                                  <AlertTriangle size={11} /> salaried + {money(row.salariedHourlyAmount)} hourly
+                                </span>
+                              ) : (
+                                <span className="po-flag po-flag-quiet" title="Hours worked are covered by this person's salary">
+                                  salaried
+                                </span>
+                              )
+                            )}
+                            {row.coTeachingHours > 0 && (
+                              <span
+                                className="po-flag po-flag-quiet"
+                                title={`${row.coTeachingHours} h covering a class that is somebody else's — ${money(row.coTeachingAmount)}. The class's own teacher is paid for the same hour.`}
+                              >
+                                {row.coTeachingHours} h as co-teacher
+                              </span>
                             )}
                             {row.unratedHours > 0 && (
                               <span className="po-flag" title={`${row.unratedHours} h with no rate set`}>

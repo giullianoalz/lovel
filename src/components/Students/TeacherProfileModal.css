@@ -678,6 +678,167 @@
    obvious what the flat rate is overriding. */
 .rate-edit-row-muted { opacity: 0.45; }
 
+/* ── How somebody is paid: the choice, before any figure ─────────────────── */
+
+/* Three cards rather than a dropdown: these are not variants of one setting,
+   they are three different arrangements with different consequences, and the
+   consequence is written on each one where it can be read before choosing. */
+.rate-arrangement {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 4px 0 14px;
+}
+
+.rate-arrangement-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-subtle, rgba(148, 163, 184, 0.08));
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.rate-arrangement-opt:hover { border-color: var(--primary); transform: translateY(-1px); }
+.rate-arrangement-opt strong { font-size: 13px; color: var(--text-main); }
+.rate-arrangement-opt small { font-size: 11px; line-height: 1.4; color: var(--text-muted); }
+
+.rate-arrangement-opt.is-active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  box-shadow: 0 0 0 1px var(--primary) inset;
+}
+.rate-arrangement-opt.is-active strong { color: var(--primary); }
+
+.rate-subhead-first { margin-top: 2px; }
+
+/* The saved answer, stated in a sentence on the read-only card. */
+.rate-arrangement-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 13px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 10px;
+  background: var(--bg-subtle, rgba(148, 163, 184, 0.08));
+  animation: rate-badge-in 0.25s ease both;
+}
+
+@keyframes rate-badge-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+
+.rate-arrangement-badge strong { font-size: 13.5px; color: var(--text-main); }
+.rate-arrangement-badge span { font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+
+.rate-arrangement-badge.is-hourly,
+.rate-arrangement-badge.is-salaried { border-left-color: var(--primary); }
+/* Amber, not red: these people are being paid, and paid a plausible amount —
+   what is missing is anybody having decided it. A red card would send an admin
+   hunting for a broken total that doesn't exist. */
+.rate-arrangement-badge.is-default { border-left-color: var(--warning, #f59e0b); }
+.rate-arrangement-badge.is-unset { border-left-color: var(--danger, #ef4444); }
+
+/* ── The effective rate, next to the box that may well be empty ──────────── */
+.rate-edit-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.rate-effective {
+  width: 148px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  text-align: right;
+}
+.rate-effective em { font-style: italic; color: var(--danger, #ef4444); }
+/* A rate typed for this person specifically, as opposed to one inherited. */
+.rate-effective.is-own { color: var(--primary); font-weight: 600; }
+
+/* ── What the rates cost against hours already booked ────────────────────── */
+.rate-commitment {
+  margin-top: 16px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-subtle, rgba(148, 163, 184, 0.08));
+  backdrop-filter: blur(6px);
+  animation: rate-badge-in 0.3s ease both;
+}
+
+.rate-commitment-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.rate-commitment-head strong {
+  font-size: 19px;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  /* The figure moves as the admin types, so it gets a transition rather than
+     snapping — a number that jumps is a number people stop trusting. */
+  transition: color 0.2s ease;
+}
+
+.rate-commitment-sub {
+  margin: 2px 0 10px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.rate-commitment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rate-commitment-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-commitment-list li strong { color: var(--text-main); }
+
+.rate-commitment-co {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-style: normal;
+  background: color-mix(in srgb, var(--warning, #f59e0b) 16%, transparent);
+  color: var(--warning, #b45309);
+}
+
+@media (max-width: 520px) {
+  .rate-arrangement { grid-template-columns: 1fr; }
+  .rate-edit-row { flex-wrap: wrap; }
+  .rate-edit-side { width: 100%; justify-content: space-between; }
+  .rate-effective { width: auto; text-align: left; }
+}
+
 /* ── The statement: every paid hour, and what it paid ────────────────────── */
 .statement-section {
   background: var(--card-bg, #fff);

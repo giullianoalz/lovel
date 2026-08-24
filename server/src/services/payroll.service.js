@@ -566,11 +566,23 @@ const wasLateCancelled = (session) =>
  * matter here — when, how long, at what rate, for how much — so they are
  * flattened into one shape and the screen renders a single list.
  */
-const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled, role }, context, categories) => {
+export const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categoryKey, override, paidRate, paidRateSource, lateCancelled, role }, context, categories) => {
   const hours = sessionHours({ startTime, endTime });
   // A frozen rate wins outright: this hour was confirmed under a contract that
   // may since have changed, and re-resolving it would rewrite history.
-  const frozen = paidRate != null;
+  //
+  // For the teacher whose class it is, and only them. `paidRate` lives on the
+  // session, but a rate is a fact about a person: the freezers resolve it from
+  // the primary teacher's contract alone, so it is that teacher's number and
+  // nobody else's. Applied to a co-teacher it pays them a rate that was never
+  // theirs — in production it paid a salaried co-teacher $50/hr because the
+  // teacher she was covering for had an hourly stamp on the same session, on
+  // top of the salary that already covered the hour.
+  //
+  // The cost is that a co-teacher's hours price live rather than being frozen,
+  // so a later rate change moves them. That is the lesser wrong of the two, and
+  // the real fix is a rate frozen per person rather than per session.
+  const frozen = paidRate != null && role !== 'co-teacher';
   const { rate, source } = frozen
     ? { rate: paidRate, source: paidRateSource || 'frozen' }
     : resolveRate(categoryKey, context, override);
@@ -1222,6 +1234,21 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
             : 'unset',
       coTeachingHours: round2(coTaught.reduce((n, l) => n + l.hours, 0)),
       coTeachingAmount: round2(coTaught.reduce((n, l) => n + l.amount, 0)),
+      // Money paid by the hour to somebody whose salary is supposed to cover
+      // their hours — the two arrangements are exclusive, so any figure here is
+      // a contradiction and almost certainly an overpayment.
+      //
+      // It happens without anyone doing anything wrong today: an hour worked
+      // while somebody was hourly is stamped with the rate it was worked at,
+      // and a salary agreed afterwards does not un-stamp it. That is correct if
+      // the salary starts later and wrong if it was backdated, and only a human
+      // knows which — so this is surfaced rather than silently resolved either
+      // way. It has been the shape of every payroll overpayment this system has
+      // had, and none of them were visible on a screen until somebody went
+      // looking in the database.
+      salariedHourlyAmount: context.salaried
+        ? round2(lines.reduce((n, l) => n + l.amount, 0))
+        : 0,
       categoryRates: categoryList.map((c) => ({
         category: c.key,
         label: c.label,
@@ -1311,6 +1338,11 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
       // so this is not the unpriced-hours warning — it is the list of prices
       // nobody has actually agreed to.
       unconfirmedRates: rows.filter((r) => r.rateSetup === 'default').length,
+      // See `salariedHourlyAmount` on the row. Totalled here so the screen can
+      // raise it once, at the top, instead of relying on somebody scanning the
+      // roster for a salaried person with money in the hourly column.
+      salariedHourlyAmount: sum((r) => r.salariedHourlyAmount),
+      salariedHourlyPeople: rows.filter((r) => r.salariedHourlyAmount > 0).length,
       // Summed across rows, unlike the session count above: a co-taught class
       // marked absent costs two people an hour each, and the screen is showing
       // what the absences cost, not how many calendar entries they were.

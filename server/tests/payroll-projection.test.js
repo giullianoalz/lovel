@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 process.env.DATABASE_URL = 'postgresql://tests:tests@127.0.0.1:1/unused';
 
 const {
+  lineItem,
   hasElapsed,
   payableSessionWhere,
   scheduledSessionsWhere,
@@ -95,4 +96,54 @@ test('a cancelled shift is not forecast, and neither is an absent one', () => {
   // Shifts have no late-cancellation bargain — nobody holds a front desk slot
   // open for a student — so the forecast must not invent one.
   assert.equal('OR' in where, false);
+});
+
+/**
+ * A frozen rate belongs to the person it was resolved for.
+ *
+ * `paidRate` is stamped on the session, but the freezers resolve it from the
+ * primary teacher's contract alone — so on a co-taught session it is one
+ * person's number sitting on a row two people read. Production paid a salaried
+ * co-teacher $1,400 of somebody else's $50/hr stamp on top of the salary that
+ * already covered those hours.
+ */
+const salariedContext = {
+  hourlyRate: null,
+  flatRateOnly: false,
+  salaried: true,
+  overrides: new Map(),
+  categories: new Map([['IN_PERSON', { defaultRate: 50 }]]),
+};
+
+const coTaughtHour = (role) => lineItem({
+  id: 's1',
+  kind: 'session',
+  date: day('2026-08-17'),
+  startTime: at(9),
+  endTime: at(10),
+  title: '8th Grade Program',
+  categoryKey: 'IN_PERSON',
+  // The stamp the primary teacher's contract produced.
+  paidRate: 50,
+  paidRateSource: 'category',
+  role,
+}, salariedContext, salariedContext.categories);
+
+test('a co-teacher is not paid the rate frozen for the class teacher', () => {
+  const line = coTaughtHour('co-teacher');
+
+  assert.equal(line.rate, 0, 'this person is salaried — the hour is covered');
+  assert.equal(line.rateSource, 'salaried');
+  assert.equal(line.amount, 0);
+  assert.equal(line.locked, false, 'the stamp was never theirs to be locked to');
+});
+
+test('the teacher whose class it is still keeps their frozen rate', () => {
+  // The control: freezing exists so a rate change cannot rewrite a month that
+  // was already worked, and that must survive the fix above.
+  const line = coTaughtHour('primary');
+
+  assert.equal(line.rate, 50);
+  assert.equal(line.locked, true);
+  assert.equal(line.amount, 50);
 });

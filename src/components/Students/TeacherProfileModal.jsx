@@ -25,6 +25,8 @@ const RATE_SOURCE_TEXT = {
   category: 'category rate',
   base: 'base rate',
   unset: 'no rate set',
+  salaried: 'covered by salary',
+  unpaid: 'draws no pay',
   // Stamped before the sources were recorded, or by a path that didn't name
   // one. Still a real frozen rate — just without the "why".
   frozen: 'rate at the time',
@@ -181,22 +183,39 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
     // swallowed rather than shown as an error over a card that works.
     setCommitted(null);
     database.fetchMyProjectedPayroll(teacher.id, { weeks: 12 })
-      .then((res) => setCommitted(res?.row || null))
+      .then((res) => setCommitted(res?.row ? res : null))
       .catch(() => setCommitted(null));
   };
 
   const handleSaveRates = async () => {
+    // A salary of zero is the state that used to pay people nothing while
+    // telling them a salary covered it. It is now unreachable rather than
+    // merely discouraged: to say somebody takes nothing you pick "Draws no
+    // pay", which is a different arrangement with different consequences.
+    if (rateForm.arrangement === 'salaried' && !(num(rateForm.baseSalary) > 0)) {
+      toast.error('A salary has to be more than zero. If this person takes nothing, choose "Draws no pay".');
+      return;
+    }
     setSavingRates(true);
     try {
       const categoryRates = {};
       Object.entries(rateForm.categoryRates).forEach(([k, v]) => { categoryRates[k] = v.trim(); });
+      // The arrangement decides what gets sent, so the saved record can never
+      // disagree with the choice on screen — an hourly person cannot keep a
+      // stale salary, and somebody drawing no pay cannot keep an old rate that
+      // would quietly start paying them again when a shift is scheduled.
+      const arrangement = rateForm.arrangement;
+      const blankRates = Object.fromEntries(Object.keys(categoryRates).map((k) => [k, '']));
       await database.updateTeacherPayroll(teacher.id, {
-        // '' clears the rate server-side rather than sending NaN.
-        baseSalary: rateForm.baseSalary.trim(),
+        // '' clears the field server-side rather than sending NaN. Zero is only
+        // ever written for "draws no pay", where it is the record of a decision.
+        baseSalary: arrangement === 'salaried' ? rateForm.baseSalary.trim()
+          : arrangement === 'unpaid' ? '0'
+            : '',
         salaryPeriod: rateForm.salaryPeriod,
-        hourlyRate: rateForm.hourlyRate.trim(),
-        flatRateOnly: rateForm.flatRateOnly,
-        categoryRates,
+        hourlyRate: arrangement === 'hourly' ? rateForm.hourlyRate.trim() : '',
+        flatRateOnly: arrangement === 'hourly' && rateForm.flatRateOnly,
+        categoryRates: arrangement === 'hourly' ? categoryRates : blankRates,
       });
       setIsEditingRates(false);
       // Reload rather than patch locally: the month's total is derived from
@@ -230,6 +249,59 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
 
   const payroll = payrollData?.payroll;
   const classes = payrollData?.classes || [];
+
+  /**
+   * The hours already booked for this person over the next twelve weeks,
+   * repriced against whatever is currently typed into the form.
+   *
+   * This is the whole point of the editor being more than four boxes. A rate is
+   * abstract — $50 an hour is neither large nor small until you know it is
+   * attached to 238 hours somebody already put on the calendar. Grouped by the
+   * kind of work, because that is the unit the rates are set in, so raising the
+   * in-person rate visibly moves the in-person line and nothing else.
+   */
+  const commitment = (() => {
+    if (!committed?.row || !payroll) return null;
+    const lines = committed.row.upcomingLines || [];
+    if (lines.length === 0) return null;
+
+    const byCategory = new Map();
+    for (const line of lines) {
+      const key = line.category || null;
+      const bucket = byCategory.get(key) || { key, label: line.categoryLabel || 'Uncategorised', color: line.categoryColor, hours: 0, coTaughtHours: 0 };
+      bucket.hours += line.hours;
+      if (line.role === 'co-teacher') bucket.coTaughtHours += line.hours;
+      byCategory.set(key, bucket);
+    }
+
+    const groups = [...byCategory.values()]
+      .map((b) => {
+        const { rate, source } = previewRate(b.key, rateForm, payroll.categoryRates || []);
+        return {
+          ...b,
+          hours: Math.round(b.hours * 100) / 100,
+          // Rounded here as well as in the total: summing float hours leaves
+          // "67.91999999999997 h as co-teacher" on screen otherwise.
+          coTaughtHours: Math.round(b.coTaughtHours * 100) / 100,
+          rate,
+          source,
+          amount: b.hours * rate,
+        };
+      })
+      .sort((a, b) => b.amount - a.amount || b.hours - a.hours);
+
+    return {
+      groups,
+      hours: Math.round(groups.reduce((n, g) => n + g.hours, 0) * 100) / 100,
+      total: groups.reduce((n, g) => n + g.amount, 0),
+      // Hours in this window spent covering somebody else's class. Shown
+      // separately because it is bought on top of a teacher who is already
+      // being paid for the same hour, and nothing else on the screen says so.
+      coTaughtHours: Math.round(groups.reduce((n, g) => n + g.coTaughtHours, 0) * 100) / 100,
+      from: committed.startDate,
+      to: committed.endDate,
+    };
+  })();
 
   // Only an admin can open somebody else's portal, and only for someone who
   // actually teaches — a salaried front-desk account has no roster to show.
@@ -381,110 +453,232 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
 
                   {isEditingRates ? (
                     <>
-                      <label className="rate-edit-row">
-                        <span>Base Salary</span>
-                        <div className="rate-input-wrap rate-input-wrap-split">
-                          <span className="rate-currency">$</span>
-                          <input
-                            type="number" min="0" step="0.01" inputMode="decimal"
-                            className="form-control"
-                            value={rateForm.baseSalary}
-                            onChange={e => setRateForm(f => ({ ...f, baseSalary: e.target.value }))}
-                            placeholder="0.00"
-                            autoFocus
-                          />
-                          {/* Enter the figure the person was hired on. Payroll
-                              runs monthly and divides a yearly salary by 12 —
-                              typing the yearly number into a monthly field is
-                              how $63,000 a year became $63,000 a month. */}
-                          <select
-                            className="form-control rate-period-select"
-                            value={rateForm.salaryPeriod}
-                            onChange={e => setRateForm(f => ({ ...f, salaryPeriod: e.target.value }))}
-                            aria-label="Salary period"
+                      {/* The first decision, and the one everything else hangs
+                          off. It used to be implied by whatever was in the
+                          salary box, which is how "0" came to mean two opposite
+                          things at once. */}
+                      <h5 className="rate-subhead rate-subhead-first">How is this person paid?</h5>
+                      <div className="rate-arrangement" role="radiogroup" aria-label="Pay arrangement">
+                        {ARRANGEMENTS.map(a => (
+                          <button
+                            key={a.key}
+                            type="button"
+                            role="radio"
+                            aria-checked={rateForm.arrangement === a.key}
+                            className={`rate-arrangement-opt${rateForm.arrangement === a.key ? ' is-active' : ''}`}
+                            onClick={() => setRateForm(f => ({ ...f, arrangement: a.key }))}
                           >
-                            <option value="MONTHLY">per month</option>
-                            <option value="ANNUAL">per year</option>
-                          </select>
-                        </div>
-                      </label>
-                      {rateForm.salaryPeriod === 'ANNUAL' && parseFloat(rateForm.baseSalary) > 0 && (
+                            <strong>{a.label}</strong>
+                            <small>{a.hint}</small>
+                          </button>
+                        ))}
+                      </div>
+
+                      {rateForm.arrangement === 'salaried' && (
+                        <>
+                          <label className="rate-edit-row">
+                            <span>Salary</span>
+                            <div className="rate-input-wrap rate-input-wrap-split">
+                              <span className="rate-currency">$</span>
+                              <input
+                                type="number" min="0" step="0.01" inputMode="decimal"
+                                className="form-control"
+                                value={rateForm.baseSalary}
+                                onChange={e => setRateForm(f => ({ ...f, baseSalary: e.target.value }))}
+                                placeholder="0.00"
+                                autoFocus
+                              />
+                              {/* Enter the figure the person was hired on.
+                                  Payroll runs monthly and divides a yearly
+                                  salary by 12 — typing the yearly number into a
+                                  monthly field is how $63,000 a year became
+                                  $63,000 a month. */}
+                              <select
+                                className="form-control rate-period-select"
+                                value={rateForm.salaryPeriod}
+                                onChange={e => setRateForm(f => ({ ...f, salaryPeriod: e.target.value }))}
+                                aria-label="Salary period"
+                              >
+                                <option value="MONTHLY">per month</option>
+                                <option value="ANNUAL">per year</option>
+                              </select>
+                            </div>
+                          </label>
+                          <p className="rate-hint rate-hint-tight">
+                            {num(rateForm.baseSalary) > 0 ? (
+                              <>
+                                {rateForm.salaryPeriod === 'ANNUAL'
+                                  ? <>Paid as <strong>{money(num(rateForm.baseSalary) / 12)}</strong> a month. </>
+                                  : <>Paid as <strong>{money(num(rateForm.baseSalary) * 12)}</strong> a year. </>}
+                                Every hour they teach or cover is paid by this salary and adds
+                                nothing on top — payslip lines will read “covered by salary”.
+                              </>
+                            ) : (
+                              <>Enter the salary as agreed. If this person takes nothing, pick
+                                “Draws no pay” instead — a salary of zero is not the same thing,
+                                and saving one would stop paying them for hours they work.</>
+                            )}
+                          </p>
+                        </>
+                      )}
+
+                      {rateForm.arrangement === 'unpaid' && (
                         <p className="rate-hint rate-hint-tight">
-                          Paid as ${(parseFloat(rateForm.baseSalary) / 12).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per month.
+                          Recorded as taking no pay — no salary, no hourly rate. They stay on the
+                          payroll screen with a total of $0, so the zero reads as a decision rather
+                          than a rate somebody forgot to set.
                         </p>
                       )}
-                      <label className="rate-edit-row">
-                        <span>Hourly Rate</span>
-                        <div className="rate-input-wrap">
-                          <span className="rate-currency">$</span>
-                          <input
-                            type="number" min="0" step="0.01" inputMode="decimal"
-                            className="form-control"
-                            value={rateForm.hourlyRate}
-                            onChange={e => setRateForm(f => ({ ...f, hourlyRate: e.target.value }))}
-                            placeholder="0.00"
-                          />
-                        </div>
-                      </label>
 
-                      {/* "She gets $17.50 an hour, whatever she's doing." With
-                          this on, the category rates below stop applying — only
-                          a rate typed onto one calendar entry still wins. */}
-                      <label className="rate-flat-toggle">
-                        <input
-                          type="checkbox"
-                          checked={rateForm.flatRateOnly}
-                          onChange={e => setRateForm(f => ({ ...f, flatRateOnly: e.target.checked }))}
-                        />
-                        <span>
-                          <strong>Same rate for everything</strong>
-                          <small>Pay the hourly rate above for every kind of work, ignoring the rates below.</small>
-                        </span>
-                      </label>
-
-                      <h5 className="rate-subhead">Rate by kind of work</h5>
-                      {(payroll.categoryRates || []).filter(c => c.active !== false).map(c => (
-                        <label className={`rate-edit-row${rateForm.flatRateOnly ? ' rate-edit-row-muted' : ''}`} key={c.category}>
-                          <span>
-                            <span className="cat-dot" style={c.color ? { background: c.color } : undefined} />
-                            {c.label}
-                          </span>
-                          <div className="rate-input-wrap">
-                            <span className="rate-currency">$</span>
+                      {rateForm.arrangement === 'hourly' && (
+                        <>
+                          {/* "She gets $17.50 an hour, whatever she's doing."
+                              With this on, the category rates below stop
+                              applying — only a rate typed onto one calendar
+                              entry still wins. */}
+                          <label className="rate-flat-toggle">
                             <input
-                              type="number" min="0" step="0.01" inputMode="decimal"
-                              className="form-control"
-                              value={rateForm.categoryRates[c.category] ?? ''}
-                              disabled={rateForm.flatRateOnly}
-                              onChange={e => setRateForm(f => ({
-                                ...f,
-                                categoryRates: { ...f.categoryRates, [c.category]: e.target.value },
-                              }))}
-                              // What this hour would pay if the box is left
-                              // empty — the category's own rate first, because
-                              // that is what the cascade actually reaches for.
-                              placeholder={
-                                c.categoryDefault != null
-                                  ? `${c.categoryDefault} (category)`
-                                  : rateForm.hourlyRate ? `${rateForm.hourlyRate} (base)` : '0.00'
-                              }
+                              type="checkbox"
+                              checked={rateForm.flatRateOnly}
+                              onChange={e => setRateForm(f => ({ ...f, flatRateOnly: e.target.checked }))}
                             />
-                          </div>
-                        </label>
-                      ))}
+                            <span>
+                              <strong>Same rate for every kind of work</strong>
+                              <small>One rate whatever they are doing — front desk, teaching, planning.</small>
+                            </span>
+                          </label>
 
-                      <p className="rate-hint">
-                        Pay is per hour worked, at the rate for that kind of work. A box left empty
-                        falls back to the category's own rate, then to the hourly rate above — fill
-                        one in only to pay this person differently from everyone else for that work.
-                        The kind of work is chosen on the calendar entry, so the same person can be
-                        at the front desk at 10 and teaching at 1 on two different rates.
-                      </p>
-                      <p className="rate-hint">
-                        Changing a rate here only affects work that hasn't been confirmed yet. Hours
-                        already marked complete keep the rate they were worked at, so a new contract
-                        never rewrites a month that was already signed off.
-                      </p>
+                          <label className="rate-edit-row">
+                            <span>{rateForm.flatRateOnly ? 'Their rate' : 'Fallback hourly rate'}</span>
+                            <div className="rate-input-wrap">
+                              <span className="rate-currency">$</span>
+                              <input
+                                type="number" min="0" step="0.01" inputMode="decimal"
+                                className="form-control"
+                                value={rateForm.hourlyRate}
+                                onChange={e => setRateForm(f => ({ ...f, hourlyRate: e.target.value }))}
+                                placeholder="0.00"
+                                autoFocus
+                              />
+                            </div>
+                          </label>
+
+                          {!rateForm.flatRateOnly && (
+                            <>
+                              <h5 className="rate-subhead">What each kind of work pays them</h5>
+                              {(payroll.categoryRates || []).filter(c => c.active !== false).map(c => {
+                                const { rate, source } = previewRate(c.category, rateForm, payroll.categoryRates || []);
+                                const own = num(rateForm.categoryRates[c.category]) != null;
+                                return (
+                                  <label className="rate-edit-row" key={c.category}>
+                                    <span>
+                                      <span className="cat-dot" style={c.color ? { background: c.color } : undefined} />
+                                      {c.label}
+                                    </span>
+                                    <div className="rate-edit-side">
+                                      <div className="rate-input-wrap">
+                                        <span className="rate-currency">$</span>
+                                        <input
+                                          type="number" min="0" step="0.01" inputMode="decimal"
+                                          className="form-control"
+                                          value={rateForm.categoryRates[c.category] ?? ''}
+                                          onChange={e => setRateForm(f => ({
+                                            ...f,
+                                            categoryRates: { ...f.categoryRates, [c.category]: e.target.value },
+                                          }))}
+                                          placeholder={c.categoryDefault != null ? String(c.categoryDefault) : '—'}
+                                        />
+                                      </div>
+                                      {/* The number that will actually be paid,
+                                          not the box that may be empty. An
+                                          empty box is the commonest state on
+                                          this screen and it still costs money —
+                                          leaving it blank and silent is how
+                                          everybody ended up on the category
+                                          default without anyone deciding it. */}
+                                      <span className={`rate-effective${own ? ' is-own' : ''}`}>
+                                        {source === 'unset'
+                                          ? <em>no rate — pays $0</em>
+                                          : <>pays {money(rate)}/hr · {RATE_SOURCE_TEXT[source] || source}</>}
+                                      </span>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                              <p className="rate-hint">
+                                Leave a box empty to use the category's own rate — fill one in only to
+                                pay this person differently from everyone else for that work. The kind
+                                of work is picked on the calendar entry, so the same person can be at
+                                the desk at 10 and teaching at 1 on two different rates.
+                              </p>
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {/* What the decision above actually costs, against hours
+                          that are already booked. A rate on its own is a number
+                          nobody can size; the same rate multiplied by the
+                          timetable somebody already built is the thing being
+                          decided. */}
+                      {commitment && (
+                        <div className="rate-commitment">
+                          <div className="rate-commitment-head">
+                            {/* First name only: the modal header already says
+                                who this is, and "Already booked for Georges"
+                                fits where the full name would wrap. */}
+                            <span>Already booked for {teacher.name?.split(' ')[0] || 'them'}</span>
+                            {/* On an hourly arrangement the headline is the
+                                money, because that is the decision. On the
+                                others it is the hours: a bold "$0.00" over a
+                                calendar full of work reads as a fault, not as
+                                "the salary covers this". */}
+                            <strong>
+                              {rateForm.arrangement === 'hourly' ? money(commitment.total) : `${commitment.hours} h`}
+                            </strong>
+                          </div>
+                          <p className="rate-commitment-sub">
+                            {commitment.hours} h booked between{' '}
+                            {new Date(commitment.from).toLocaleDateString('en-US', { timeZone: 'UTC', day: 'numeric', month: 'short' })} and{' '}
+                            {new Date(commitment.to).toLocaleDateString('en-US', { timeZone: 'UTC', day: 'numeric', month: 'short' })}
+                            {rateForm.arrangement === 'hourly'
+                              ? ', priced at the rates above.'
+                              : rateForm.arrangement === 'salaried'
+                                ? ' — all covered by the salary, nothing paid per hour on top.'
+                                : ' — none of it paid, on this arrangement.'}
+                          </p>
+                          <ul className="rate-commitment-list">
+                            {commitment.groups.map(g => (
+                              <li key={g.key || '__none__'}>
+                                <span>
+                                  <span className="cat-dot" style={g.color ? { background: g.color } : undefined} />
+                                  {g.label}
+                                  {g.coTaughtHours > 0 && (
+                                    <em className="rate-commitment-co" title="Hours covering a class that is somebody else's — the other teacher is paid for the same hour too">
+                                      {g.coTaughtHours} h as co-teacher
+                                    </em>
+                                  )}
+                                </span>
+                                <span>
+                                  {/* "79.92 h × $0.00 = $0.00" is arithmetic
+                                      nobody needs: on a salary the hours are
+                                      not being multiplied by anything, they are
+                                      being covered. */}
+                                  {rateForm.arrangement === 'hourly'
+                                    ? <>{g.hours} h × {money(g.rate)} = <strong>{money(g.amount)}</strong></>
+                                    : <>{g.hours} h</>}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="rate-hint rate-hint-tight">
+                            A forecast, not a bill: it moves when classes are added, cancelled or
+                            rescheduled. Hours already worked keep the rate they were worked at —
+                            changing a rate here never rewrites a month already paid.
+                          </p>
+                        </div>
+                      )}
+
                       <div className="rate-edit-actions">
                         <button className="cancel-btn" onClick={() => setIsEditingRates(false)} disabled={savingRates}>
                           Cancel
@@ -496,32 +690,62 @@ const TeacherProfileModal = ({ teacher, onClose }) => {
                     </>
                   ) : (
                     <>
-                      <div className="rate-row">
-                        <span>Base Salary</span>
-                        <strong>
-                          {/* Nothing agreed, an agreed zero, or a real figure —
-                              three different answers. The owners draw no
-                              salary, so "no salary" has to be sayable. */}
-                          {payroll.salaryAmount == null
-                            ? <span className="rate-unset">not set</span>
-                            : payroll.salaryAmount === 0
-                              ? <>{money(0)} <span className="rate-inherited">(no salary)</span></>
-                              : payroll.salaryPeriod === 'ANNUAL'
-                                ? <>
-                                    {money(payroll.salaryAmount)}/yr
-                                    {' '}<span className="rate-inherited">({money(payroll.baseSalary)}/mo)</span>
-                                  </>
-                                : <>{money(payroll.baseSalary)}/mo</>}
-                        </strong>
+                      {/* One sentence saying how this person is paid, before
+                          any figure. Reading two rows — a salary and an hourly
+                          rate, either of which might be blank — and working out
+                          which one governs was the step where an admin could
+                          walk away with the wrong idea. */}
+                      <div className={`rate-arrangement-badge is-${payroll.rateSetup || 'unset'}`}>
+                        {payroll.rateSetup === 'salaried' ? (
+                          <>
+                            <strong>On a salary</strong>
+                            <span>
+                              {payroll.salaryPeriod === 'ANNUAL'
+                                ? <>{money(payroll.salaryAmount)}/yr · {money(payroll.baseSalary)} a month</>
+                                : <>{money(payroll.baseSalary)} a month</>}
+                              {' '}— hours worked are covered by it, nothing is paid per hour on top.
+                            </span>
+                          </>
+                        ) : payroll.salaryAmount === 0 && payroll.hourlyRate == null && !payroll.flatRateOnly ? (
+                          <>
+                            <strong>Draws no pay</strong>
+                            <span>Recorded as taking nothing from the academy — not a missing rate.</span>
+                          </>
+                        ) : payroll.rateSetup === 'default' ? (
+                          <>
+                            <strong>Paid by the hour, at the category rates</strong>
+                            {/* The state that pays real money nobody agreed to.
+                                Everyone without a personal rate lands here and
+                                the screen used to look identical to a deliberate
+                                arrangement. */}
+                            <span>
+                              Nobody has set a rate for this person, so their hours are priced at
+                              whatever the category charges. It pays — it just isn't a decision
+                              anyone has made about them.
+                            </span>
+                          </>
+                        ) : payroll.rateSetup === 'unset' ? (
+                          <>
+                            <strong>No rate set</strong>
+                            <span>Hours worked will be priced at $0 until a rate exists.</span>
+                          </>
+                        ) : (
+                          <>
+                            <strong>Paid by the hour</strong>
+                            <span>
+                              {payroll.flatRateOnly
+                                ? <>{money(payroll.hourlyRate)}/hr for every kind of work.</>
+                                : <>Priced by the kind of work, set on the calendar entry.</>}
+                            </span>
+                          </>
+                        )}
                       </div>
-                      <div className="rate-row">
-                        <span>Hourly Rate</span>
-                        <strong>
-                          {payroll.hourlyRate != null
-                            ? `$${payroll.hourlyRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}/hr`
-                            : <span className="rate-unset">not set</span>}
-                        </strong>
-                      </div>
+                      {payroll.rateSetup !== 'salaried' && payroll.hourlyRate != null && !payroll.flatRateOnly && (
+                        <div className="rate-row">
+                          <span>Fallback hourly rate</span>
+                          <strong>{money(payroll.hourlyRate)}/hr</strong>
+                        </div>
+                      )}
                       {payroll.flatRateOnly ? (
                         <p className="rate-hint rate-hint-tight">
                           Paid this rate for every kind of work. Category rates don't apply — only a

@@ -47,6 +47,26 @@
 }
 .po-warning svg { flex-shrink: 0; margin-top: 1px; }
 
+/* Amber says "money is going out under a number nobody checked"; this quieter
+   slate says "here is how the total is built". Neither is an error, and giving
+   them the same shout would train an admin to skip both. */
+.po-warning-soft {
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #475569;
+}
+.po-warning-soft strong { color: #1e293b; }
+.po-warning-soft em { font-style: normal; font-weight: 700; }
+
+/* Reserved for the one thing on this screen that means money is probably
+   leaving wrongly. Nothing else gets to be red, or this stops being read. */
+.po-warning-danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+.po-warning-danger strong { color: #7f1d1d; }
+
 /* Roster table */
 .po-table-wrap {
   background: rgba(255,255,255,0.8); backdrop-filter: blur(12px);
@@ -87,6 +107,14 @@
   font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px;
   background: #fef3c7; color: #92400e;
 }
+/* A rate nobody confirmed: real money, no error. Amber outline rather than
+   amber fill, so it reads as "look at this" and not as "this is broken". */
+.po-flag-soft { background: #fffbeb; color: #b45309; box-shadow: inset 0 0 0 1px #fde68a; }
+/* Facts about how somebody is paid — salaried, co-teaching. Nothing to act on,
+   so they must not compete with the flags that do need acting on. */
+.po-flag-quiet { background: #f1f5f9; color: #64748b; font-weight: 600; }
+.po-flag-danger { background: #fee2e2; color: #991b1b; }
+
 .po-unset { color: var(--text-muted, #94a3b8); font-weight: 400; }
 .po-sub { display: block; font-size: 11px; color: var(--text-muted, #94a3b8); }
 .po-earned { font-weight: 700; color: #166534; }
