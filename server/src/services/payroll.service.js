@@ -469,6 +469,22 @@ export const paidShiftsWhere = (startDate, endDate, now = new Date()) => ({
 });
 
 /**
+ * The same question `elapsed` asks the database, asked in memory about one
+ * entry that has already been fetched.
+ *
+ * Two callers need it and they need the same answer: the payable/absent split
+ * for shifts, and the earned/upcoming split on the projection. Written once
+ * here, in the two halves the columns are stored in, so it cannot drift from
+ * the `where` clause above.
+ */
+export const hasElapsed = (entry, now = new Date()) => {
+  const { date, time } = academyNowParts(now);
+  const entryDate = new Date(entry.date);
+  if (entryDate < date) return true;
+  return entryDate.getTime() === date.getTime() && new Date(entry.endTime) <= time;
+};
+
+/**
  * The same rule as paidShiftsWhere, decided in memory.
  *
  * Both payroll screens fetch every shift in the range — they have to show the
@@ -478,11 +494,39 @@ export const paidShiftsWhere = (startDate, endDate, now = new Date()) => ({
  */
 export const isShiftPayable = (shift, now = new Date()) => {
   if (shift.status === 'CANCELLED' || shift.absentAt) return false;
-  const { date, time } = academyNowParts(now);
-  const shiftDate = new Date(shift.date);
-  if (shiftDate < date) return true;
-  return shiftDate.getTime() === date.getTime() && new Date(shift.endTime) <= time;
+  return hasElapsed(shift, now);
 };
+
+/**
+ * What the academy is committed to, as opposed to what it already owes.
+ *
+ * The same three tests as `payableSessionWhere` minus the one about the clock:
+ * booking somebody for an hour is the act that decides they will be paid for
+ * it, so the cost of next month's timetable is knowable today — that is the
+ * whole point of pricing from the calendar rather than from a timesheet.
+ *
+ * A range that straddles today deliberately returns both halves. "What does
+ * this month cost" is one question, not two, and answering it as earned-so-far
+ * plus still-to-come is what makes the number worth looking at; each line says
+ * which half it is in (see `earned` on the line item).
+ *
+ * A cancelled session drops out exactly as it does today, including the late
+ * cancellation that is still owed — a slot nobody can refill is a slot the
+ * teacher is still holding, whether it was cancelled yesterday or will be
+ * cancelled next week.
+ */
+export const scheduledSessionsWhere = (startDate, endDate) => ({
+  date: { gte: startDate, lte: endDate },
+  absentAt: null,
+  ...stillWorked,
+});
+
+/** The shift half of scheduledSessionsWhere. Same rule, no late-cancellation bargain. */
+export const scheduledShiftsWhere = (startDate, endDate) => ({
+  date: { gte: startDate, lte: endDate },
+  status: { not: 'CANCELLED' },
+  absentAt: null,
+});
 
 /**
  * The session fields payroll prices an hour from.
@@ -524,6 +568,11 @@ const lineItem = ({ id, kind, date, startTime, endTime, title, subtitle, categor
     : resolveRate(categoryKey, context, override);
   return {
     locked: frozen,
+    // Already worked, or still only booked. Always answered, because the
+    // earned-only screens are simply the case where every line is true — and a
+    // projection that cannot tell the two apart is a projection nobody can
+    // check against the money that actually went out.
+    earned: hasElapsed({ date, endTime }),
     id,
     kind,
     date,
@@ -887,8 +936,18 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
  * Monday-Sunday week for the other — so the range itself is computed once and
  * both wrap this.
  */
-const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = true } = {}) => {
-  const paidSessions = paidSessionsWhere(startDate, endDate);
+const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = true, mode = 'earned' } = {}) => {
+  // The only difference between "what is owed" and "what this timetable will
+  // cost" is whether the clock is one of the tests. Everything below — the
+  // roster, the rate cascade, the per-category rollup — is the same work, so
+  // the mode swaps the filter and nothing else.
+  const scheduled = mode === 'scheduled';
+  const paidSessions = scheduled
+    ? scheduledSessionsWhere(startDate, endDate)
+    : paidSessionsWhere(startDate, endDate);
+  const countsAsWorked = scheduled
+    ? (shift) => shift.status !== 'CANCELLED' && !shift.absentAt
+    : (shift) => isShiftPayable(shift);
   const absentSessions = absentSessionsWhere(startDate, endDate);
 
   const [categoryList, staff, absences] = await Promise.all([
@@ -1042,7 +1101,7 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     }
     // A shift is paid once its hour has passed, exactly like a class — see
     // isShiftPayable, which this uses rather than repeating.
-    const paidShifts = person.workShifts.filter((s) => isShiftPayable(s));
+    const paidShifts = person.workShifts.filter(countsAsWorked);
     for (const shift of person.workShifts) {
       if (!shift.absentAt) continue;
       personAbsences.push({
@@ -1080,6 +1139,13 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     // quietly folding a number that doesn't fit the range into the total.
     const baseSalary = includeSalary ? monthlySalary(person.baseSalary, person.salaryPeriod) : 0;
     const hourlyEarnings = lines.reduce((n, l) => n + l.amount, 0);
+    // A projected total that straddles today is part fact and part forecast,
+    // and those two are not equally trustworthy: the earned half is money the
+    // academy already owes, the upcoming half is a timetable that can still be
+    // cancelled or rescheduled. Split so the screen can show both rather than
+    // presenting a forecast with the confidence of a payslip.
+    const upcoming = lines.filter((l) => !l.earned);
+    const earned = lines.filter((l) => l.earned);
 
     return {
       teacher: {
@@ -1112,6 +1178,17 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
       baseSalary,
       hourlyEarnings: round2(hourlyEarnings),
       totalEarnings: round2(baseSalary + hourlyEarnings),
+      earnedHours: round2(earned.reduce((n, l) => n + l.hours, 0)),
+      earnedAmount: round2(earned.reduce((n, l) => n + l.amount, 0)),
+      upcomingHours: round2(upcoming.reduce((n, l) => n + l.hours, 0)),
+      upcomingAmount: round2(upcoming.reduce((n, l) => n + l.amount, 0)),
+      upcomingCount: upcoming.length,
+      // The scheduled hours behind the forecast, so an admin can see which
+      // classes make up the number instead of trusting a total. Only on the
+      // projection: the earned screens already list every line they priced.
+      upcomingLines: scheduled
+        ? upcoming.slice().sort((a, b) => new Date(a.date) - new Date(b.date))
+        : [],
       // Hours worked at no rate. Carried per row so the screen can point at the
       // person to fix, not just warn that something somewhere is unpriced.
       unratedHours: round2(lines.filter((l) => l.rateSource === 'unset').reduce((n, l) => n + l.hours, 0)),
@@ -1141,6 +1218,9 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     // "hourly only" rather than leaving an admin to wonder why a salaried
     // person shows $0.
     includesSalary: includeSalary,
+    // 'earned' — hours already worked, the payslip. 'scheduled' — the same
+    // hours plus everything still on the calendar, the forecast.
+    mode,
     categories: categoryList,
     rows,
     totals: {
@@ -1155,6 +1235,11 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
       baseSalary: sum((r) => r.baseSalary),
       hourlyEarnings: sum((r) => r.hourlyEarnings),
       totalEarnings: sum((r) => r.totalEarnings),
+      earnedHours: sum((r) => r.earnedHours),
+      earnedAmount: sum((r) => r.earnedAmount),
+      upcomingHours: sum((r) => r.upcomingHours),
+      upcomingAmount: sum((r) => r.upcomingAmount),
+      upcomingCount: rows.reduce((n, r) => n + r.upcomingCount, 0),
       unratedHours: sum((r) => r.unratedHours),
       // Summed across rows, unlike the session count above: a co-taught class
       // marked absent costs two people an hour each, and the screen is showing
@@ -1185,6 +1270,35 @@ export const computePayrollSummary = async (targetMonth, targetYear) => {
  * omitted for the current week); it's snapped to that week's Monday so
  * passing any day of the week gives the same result.
  */
+/**
+ * What the timetable already on the calendar will cost, per person.
+ *
+ * The question this answers is the one an hourly, calendar-priced payroll makes
+ * askable and nothing else in the system answered: not "what did we pay last
+ * month" but "what have we committed to". Every hour on the calendar is a
+ * promise to pay somebody, so the promise is countable before the hour arrives
+ * — which is the difference between noticing in September that the autumn
+ * timetable outruns the fee income and noticing it in June while classes can
+ * still be moved.
+ *
+ * Salary is included only for a range that is exactly one calendar month, for
+ * the same reason the weekly screen leaves it out: a monthly figure dropped
+ * into a three-week window is not a smaller number, it is a wrong one. The
+ * response says which it did, and the screen captions it.
+ */
+export const computeProjectedPayroll = async (startDate, endDate) => {
+  const wholeMonth =
+    startDate.getUTCDate() === 1 &&
+    startDate.getUTCMonth() === endDate.getUTCMonth() &&
+    startDate.getUTCFullYear() === endDate.getUTCFullYear() &&
+    endDate.getUTCDate() === new Date(Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, 0)).getUTCDate();
+
+  return computePayrollSummaryRange(startDate, endDate, {
+    includeSalary: wholeMonth,
+    mode: 'scheduled',
+  });
+};
+
 export const computeWeeklyPayrollSummary = async (weekStart) => {
   const startDate = mondayOf(weekStart);
   const endDate = new Date(startDate);

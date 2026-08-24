@@ -1619,3 +1619,97 @@ select.form-control {
 }
 
 .br-group-head strong { font-variant-numeric: tabular-nums; }
+
+/* --- "Bill a block in advance" modal --- */
+/* Wider than the other billing modals: a block is a list of dated rows, and at
+   500px the class name and its price fight for the same line. */
+.blk-modal { max-width: 620px; }
+
+.blk-price-modes {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.blk-mode {
+  flex: 1 1 0;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-2, #f8fafc);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.blk-mode:hover { border-color: var(--primary); color: var(--primary); }
+
+.blk-mode.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* A term of a class is dozens of rows — scroll the list, not the modal's
+   buttons off the screen. Same reasoning as .br-lines. */
+.blk-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+
+.blk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.blk-row:last-child { border-bottom: none; }
+.blk-row:hover { background: var(--surface-2, #f8fafc); }
+.blk-row.picked { background: #eef2ff; }
+
+/* Already billed: still listed, dimmed and unclickable. A row that vanished
+   would look exactly like one this screen had quietly decided to skip. */
+.blk-row.billed {
+  opacity: 0.55;
+  cursor: default;
+  background: transparent;
+}
+
+.blk-date {
+  flex: 0 0 74px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.blk-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.blk-row strong { font-variant-numeric: tabular-nums; }
+
+.blk-tag {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-2, #f1f5f9);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+@media (max-width: 520px) {
+  .blk-price-modes { flex-direction: column; }
+}

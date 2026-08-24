@@ -70,18 +70,27 @@ const PayrollOverview = () => {
   // the other.
   const [view, setView] = useState('month');
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  // How far ahead the forecast looks. Weeks rather than months because the
+  // question it answers — what has the academy committed to — starts today,
+  // not on the 1st.
+  const [weeksAhead, setWeeksAhead] = useState(4);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [showCategories, setShowCategories] = useState(false);
   const [reviewingAbsences, setReviewingAbsences] = useState(false);
 
   const isWeek = view === 'week';
+  // The forward-looking view: the same roster, the same rates, priced off the
+  // hours that are booked but have not happened yet.
+  const isUpcoming = view === 'upcoming';
   const weekStartIso = isoDate(weekStart);
 
   const { data, loading, error, retry } = useAsyncData(
-    () => (isWeek
-      ? database.fetchWeeklyPayrollSummary(weekStartIso)
-      : database.fetchPayrollSummary(month, year)),
-    [view, weekStartIso, month, year]
+    () => (isUpcoming
+      ? database.fetchProjectedPayroll({ weeks: weeksAhead })
+      : isWeek
+        ? database.fetchWeeklyPayrollSummary(weekStartIso)
+        : database.fetchPayrollSummary(month, year)),
+    [view, weekStartIso, month, year, weeksAhead]
   );
 
   const prevMonth = () => {
@@ -126,9 +135,11 @@ const PayrollOverview = () => {
         <div>
           <h1>Payroll</h1>
           <p>
-            {isWeek
-              ? 'What everyone earned this week, and what goes out on payday.'
-              : 'What everyone earned this month, and what the academy owes.'}
+            {isUpcoming
+              ? 'What the calendar already commits the academy to paying, per person.'
+              : isWeek
+                ? 'What everyone earned this week, and what goes out on payday.'
+                : 'What everyone earned this month, and what the academy owes.'}
           </p>
         </div>
         {/* The rates live behind this: set "front desk = $20" once, and every
@@ -156,9 +167,39 @@ const PayrollOverview = () => {
           >
             Weekly
           </button>
+          <button
+            role="tab"
+            aria-selected={isUpcoming}
+            className={isUpcoming ? 'is-active' : ''}
+            onClick={() => setView('upcoming')}
+          >
+            Upcoming
+          </button>
         </div>
 
-        {isWeek ? (
+        {isUpcoming ? (
+          <div className="po-weeks-ahead">
+            <label htmlFor="po-weeks">Looking ahead</label>
+            <select
+              id="po-weeks"
+              value={weeksAhead}
+              onChange={(e) => setWeeksAhead(Number(e.target.value))}
+            >
+              {[1, 2, 4, 8, 12, 26, 52].map((w) => (
+                <option key={w} value={w}>
+                  {w === 1 ? '1 week' : w === 52 ? '52 weeks (a year)' : `${w} weeks`}
+                </option>
+              ))}
+            </select>
+            {data && (
+              <span className="po-range-label">
+                {new Date(data.startDate).toLocaleDateString('en-US', { timeZone: 'UTC', day: 'numeric', month: 'short' })}
+                {' – '}
+                {new Date(data.endDate).toLocaleDateString('en-US', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' })}
+              </span>
+            )}
+          </div>
+        ) : isWeek ? (
           <div className="month-navigator">
             <button onClick={() => shiftWeek(-1)} className="month-nav-btn" aria-label="Previous week"><ChevronLeft size={18} /></button>
             <h3 className="month-label">{weekLabel(weekStart)}</h3>
@@ -181,7 +222,7 @@ const PayrollOverview = () => {
 
       {loading ? (
         <div className="payroll-overview-state">
-          <div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">Adding up the {isWeek ? 'week' : 'month'}…</span></div>
+          <div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">{isUpcoming ? 'Pricing the calendar ahead…' : `Adding up the ${isWeek ? 'week' : 'month'}…`}</span></div>
         </div>
       ) : error ? (
         <ErrorBanner message={error} onRetry={retry} />
@@ -189,7 +230,9 @@ const PayrollOverview = () => {
         <>
           <div className="po-stat-row">
             <div className="po-stat po-stat-primary">
-              <span className="po-stat-label"><DollarSign size={14} /> Total payroll</span>
+              <span className="po-stat-label">
+                <DollarSign size={14} /> {isUpcoming ? 'Committed payroll' : 'Total payroll'}
+              </span>
               <strong className="po-stat-value">{money(totals.totalEarnings)}</strong>
               <span className="po-stat-sub">
                 {money(totals.hourlyEarnings)} hourly
@@ -199,13 +242,26 @@ const PayrollOverview = () => {
                 {data?.includesSalary === false && <> · hourly only, salaries run monthly</>}
               </span>
             </div>
+            {/* A window that starts today is part payslip and part forecast.
+                Showing one total would dress a timetable that can still change
+                up as money already owed, so the two halves stay apart. */}
+            {isUpcoming && (
+              <div className="po-stat">
+                <span className="po-stat-label"><Clock size={14} /> Still to come</span>
+                <strong className="po-stat-value">{money(totals.upcomingAmount)}</strong>
+                <span className="po-stat-sub">
+                  {totals.upcomingHours} h booked
+                  {totals.earnedAmount > 0 && <> · {money(totals.earnedAmount)} already earned</>}
+                </span>
+              </div>
+            )}
             <div className="po-stat">
-              <span className="po-stat-label"><Users size={14} /> Staff paid</span>
+              <span className="po-stat-label"><Users size={14} /> {isUpcoming ? 'Staff booked' : 'Staff paid'}</span>
               <strong className="po-stat-value">{totals.paidTeachers}</strong>
               <span className="po-stat-sub">of {totals.teachers} on the roster</span>
             </div>
             <div className="po-stat">
-              <span className="po-stat-label"><Clock size={14} /> Hours worked</span>
+              <span className="po-stat-label"><Clock size={14} /> {isUpcoming ? 'Hours scheduled' : 'Hours worked'}</span>
               <strong className="po-stat-value">{totals.totalHours}</strong>
               <span className="po-stat-sub">
                 {totals.sessionCount} session{totals.sessionCount === 1 ? '' : 's'}

@@ -23,6 +23,8 @@ import {
   previewSessionCharges,
   generateSessionCharges,
   setSessionChargeOverride,
+  listBlockSessions,
+  createBlockInvoice,
 } from '../controllers/billing.controller.js';
 import {
   listRecurringCharges,
@@ -111,5 +113,14 @@ router.post('/session-charges', authenticate, requireRole('ADMIN'), generateSess
 // PUT /api/billing/session-charges/override — what one student pays for one
 // meeting, when the meeting's own price doesn't apply to them (Admin only).
 router.put('/session-charges/override', authenticate, requireRole('ADMIN'), setSessionChargeOverride);
+
+// GET /api/billing/block-sessions — a student's scheduled meetings, priced or
+// not, so a block can be billed before it is taught (Admin). Read-only.
+router.get('/block-sessions', authenticate, requireRole('ADMIN'), listBlockSessions);
+
+// POST /api/billing/block-invoice — one invoice for a block of meetings, raised
+// up front (Admin). Each meeting carries its sessionId, so the calendar sweep
+// skips it later instead of billing it twice.
+router.post('/block-invoice', authenticate, requireRole('ADMIN'), createBlockInvoice);
 
 export default router;

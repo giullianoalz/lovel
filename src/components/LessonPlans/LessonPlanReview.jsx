@@ -22,6 +22,8 @@ const LessonPlanReview = () => {
   const [filterDay, setFilterDay] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [showPurchased, setShowPurchased] = useState(false);
+  const [filterSupplyTeacher, setFilterSupplyTeacher] = useState('');
+  const [filterSupplyClass, setFilterSupplyClass] = useState('');
   const [reviewPlan, setReviewPlan] = useState(null);
   const [feedback, setFeedback] = useState('');
   const [notesSummary, setNotesSummary] = useState('');
@@ -170,7 +172,17 @@ const LessonPlanReview = () => {
   }, {});
   const sortedPlanWeeks = Object.keys(plansByWeek).sort((a, b) => new Date(b) - new Date(a));
 
-  const supplyItemsByWeek = supplyItems.reduce((acc, item) => {
+  const uniqueSupplyTeachers = Array.from(new Set(supplyItems.map(i => i.teacher?.fullName).filter(Boolean))).sort();
+  const uniqueSupplyClasses = Array.from(new Set(supplyItems.map(i => i.lessonPlan?.class?.name || 'General'))).sort();
+
+  const filteredSupplyItems = supplyItems.filter(item => {
+    if (filterSupplyTeacher && item.teacher?.fullName !== filterSupplyTeacher) return false;
+    const className = item.lessonPlan?.class?.name || 'General';
+    if (filterSupplyClass && className !== filterSupplyClass) return false;
+    return true;
+  });
+
+  const supplyItemsByWeek = filteredSupplyItems.reduce((acc, item) => {
     let weekLabel = 'General / Unscheduled';
     let weekKey = 0;
 
@@ -344,8 +356,16 @@ const LessonPlanReview = () => {
         </>
       ) : (
         <>
-          <div className="lpr-filter" style={{ justifyContent: 'flex-end' }}>
-            <label className="lpr-archived-toggle">
+          <div className="lpr-filter">
+            <select value={filterSupplyClass} onChange={e => setFilterSupplyClass(e.target.value)}>
+              <option value="">All Classes</option>
+              {uniqueSupplyClasses.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={filterSupplyTeacher} onChange={e => setFilterSupplyTeacher(e.target.value)}>
+              <option value="">All Teachers</option>
+              {uniqueSupplyTeachers.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <label className="lpr-archived-toggle" style={{ marginLeft: 'auto' }}>
               <input type="checkbox" checked={showPurchased} onChange={e => setShowPurchased(e.target.checked)} />
               Show purchased items
             </label>

@@ -284,6 +284,32 @@ export const database = {
     return response.data;
   },
 
+  // What the calendar already commits the academy to paying, rather than what
+  // it has already paid. Ask either by month (`{ month, year }`, which folds in
+  // salaries) or by a number of weeks from today (`{ weeks }`, hourly only).
+  // Same no-mock rule as the rest of payroll.
+  fetchProjectedPayroll: async ({ month, year, weeks } = {}) => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month);
+    if (year) params.set('year', year);
+    if (weeks) params.set('weeks', weeks);
+    const qs = params.toString() ? `?${params}` : '';
+    const response = await api.get(`/users/payroll/projected${qs}`);
+    return response.data;
+  },
+
+  // One person's own slice of the projection above — what a teacher is booked
+  // to earn. Same arguments.
+  fetchMyProjectedPayroll: async (teacherId, { month, year, weeks } = {}) => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month);
+    if (year) params.set('year', year);
+    if (weeks) params.set('weeks', weeks);
+    const qs = params.toString() ? `?${params}` : '';
+    const response = await api.get(`/users/${teacherId}/payroll/projected${qs}`);
+    return response.data;
+  },
+
   updateTeacherPayroll: async (teacherId, { baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates }) => {
     const response = await api.put(`/users/${teacherId}/payroll`, {
       baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates,
@@ -563,6 +589,29 @@ export const database = {
   createStudentInvoice: async (studentId, lines) => {
     const response = await api.post('/billing/invoices', { studentId, lines });
     return response.data.invoice;
+  },
+
+  // --- Billing a block of meetings before they are taught ---
+  // Every scheduled meeting this student could be billed for in the window,
+  // priced or not, with the ones already charged flagged. Read-only.
+  fetchBlockSessions: async ({ studentId, classId, from, to } = {}) => {
+    const params = new URLSearchParams({ studentId });
+    if (classId) params.set('classId', classId);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const response = await api.get(`/billing/block-sessions?${params}`);
+    return response.data;
+  },
+
+  // One invoice for the whole block, with a charge per meeting carrying its
+  // sessionId — which is what stops the calendar sweep billing those weeks
+  // again when they finally arrive. Price it per meeting (`unitAmount`) or as
+  // one total (`blockAmount`); omit both to use each meeting's own price.
+  createBlockInvoice: async ({ studentId, sessionIds, unitAmount, blockAmount, description, dueDate }) => {
+    const response = await api.post('/billing/block-invoice', {
+      studentId, sessionIds, unitAmount, blockAmount, description, dueDate,
+    });
+    return response.data;
   },
 
   generateInvoiceId: async () => {

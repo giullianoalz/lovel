@@ -2106,3 +2106,343 @@ export const setSessionChargeOverride = async (req, res, next) => {
     next(error);
   }
 };
+
+/* ────────────────── BILLING A BLOCK OF MEETINGS UP FRONT ────────────────── */
+
+/**
+ * Every meeting a student could be billed for in a window, including ones that
+ * have not happened yet.
+ *
+ * The calendar sweep (previewSessionCharges) only surfaces meetings that
+ * already carry a price, which is the right shape for "release what the term
+ * has run so far". It cannot answer the other question an admin has: *this
+ * family wants to pay for the next eight weeks now*. Those meetings exist on
+ * the calendar but are deliberately priceless — see sessionCharges.service.js
+ * on why nothing auto-prices October — so they are invisible to that screen.
+ *
+ * So this lists the student's scheduled meetings whatever their price, says
+ * what each would cost today (their own override first, then the meeting's
+ * price, then nothing), and flags the ones already charged. The price for the
+ * block is named by the admin at invoice time; nothing here writes.
+ *
+ * GET /api/billing/block-sessions?studentId=&classId=&from=&to=
+ */
+export const listBlockSessions = async (req, res, next) => {
+  try {
+    const { studentId, classId, from, to } = req.query;
+    if (!studentId) {
+      return res.status(400).json({ error: 'Validation Error', message: 'Send the studentId whose block you are pricing.' });
+    }
+
+    const range = parseChargeRange(from, to);
+    if (range.error) return res.status(400).json({ error: 'Validation Error', message: range.error });
+    // Defaults to "from today forward" rather than the sweep's last-30-days:
+    // this screen exists for the meetings that have not happened yet.
+    const start = range.from ?? new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+    const end = range.to ?? new Date(start.getTime() + 180 * 86400000);
+
+    const student = await prisma.user.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true, fullName: true, role: true,
+        familyMembers: { select: { familyId: true }, take: 1 },
+        enrollments: {
+          where: { status: 'active' },
+          select: { class: { select: { id: true, name: true } } },
+        },
+      },
+    });
+    if (!student || student.role !== 'STUDENT') {
+      return res.status(404).json({ error: 'Not Found', message: 'That student does not exist.' });
+    }
+
+    const classes = student.enrollments.map((e) => e.class);
+    const classIds = classId
+      ? classes.filter((c) => c.id === classId).map((c) => c.id)
+      : classes.map((c) => c.id);
+    if (classIds.length === 0) {
+      return res.json({
+        student: { id: student.id, name: student.fullName, familyId: student.familyMembers[0]?.familyId ?? null },
+        classes,
+        sessions: [],
+      });
+    }
+
+    const sessions = await prisma.session.findMany({
+      where: {
+        classId: { in: classIds },
+        status: { not: 'CANCELLED' },
+        date: { gte: start, lte: end },
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+      select: {
+        id: true, classId: true, date: true, startTime: true,
+        chargeAmount: true, chargeNote: true,
+        class: { select: { name: true } },
+        chargeOverrides: { where: { studentId }, select: { amount: true, reason: true } },
+      },
+    });
+
+    // What this student has already been billed for these meetings. The unique
+    // index on (studentId, sessionId) is what will refuse a second charge, but
+    // an admin should see it here rather than meet it as an error.
+    const charged = await prisma.transaction.findMany({
+      where: { studentId, sessionId: { in: sessions.map((s) => s.id) } },
+      select: { sessionId: true, amount: true, invoice: { select: { invoiceNumber: true } } },
+    });
+    const chargedBy = new Map(charged.map((t) => [t.sessionId, t]));
+
+    res.json({
+      student: { id: student.id, name: student.fullName, familyId: student.familyMembers[0]?.familyId ?? null },
+      classes,
+      sessions: sessions.map((s) => {
+        const override = s.chargeOverrides[0];
+        const done = chargedBy.get(s.id);
+        return {
+          id: s.id,
+          classId: s.classId,
+          className: s.class?.name ?? 'Class',
+          date: s.date.toISOString().slice(0, 10),
+          startTime: s.startTime.toISOString().slice(11, 16),
+          note: s.chargeNote ?? null,
+          // The number this meeting would charge today. Null means nobody has
+          // priced it — the ordinary case for a term's later weeks, and exactly
+          // what the admin is here to put a number on.
+          price: override
+            ? round2(Number(override.amount))
+            : (s.chargeAmount == null ? null : round2(Number(s.chargeAmount))),
+          priceSource: override ? 'override' : (s.chargeAmount == null ? null : 'session'),
+          alreadyCharged: Boolean(done),
+          chargedAmount: done ? round2(Number(done.amount)) : null,
+          chargedInvoice: done?.invoice?.invoiceNumber ?? null,
+        };
+      }),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/billing/block-invoice
+ * Body: { studentId, sessionIds: string[], unitAmount?, blockAmount?, description?, dueDate? }
+ *
+ * One invoice for a block of meetings, raised before they are taught.
+ *
+ * Families on a block arrangement pay for the whole run up front — that is how
+ * Anchored is sold, and how a parent asking to "settle the next eight weeks"
+ * expects to be billed. Until now the only way to bill anything was after the
+ * fact: price the calendar entry, wait for the meeting, sweep it. An admin
+ * writing the block by hand (New Invoice, typed lines) got the money but no
+ * link to the meetings, so the sweep would later bill every one of them again.
+ *
+ * So each meeting in the block gets its own CHARGE carrying its `sessionId`.
+ * That is the whole point of doing it here rather than as typed lines: the
+ * unique index on (studentId, sessionId) means the calendar sweep, when those
+ * weeks finally arrive, finds them already billed and skips them. Prepaying
+ * cannot double-charge.
+ *
+ * The price is named by the admin — `unitAmount` per meeting, or `blockAmount`
+ * for the run — and falls back to whatever each meeting is already priced at.
+ * Nothing is inferred from the published rates: this bills what somebody
+ * decided, the same rule the rest of this file follows.
+ */
+export const createBlockInvoice = async (req, res, next) => {
+  try {
+    const { studentId, sessionIds, unitAmount, blockAmount, description, dueDate } = req.body;
+
+    if (!studentId || !Array.isArray(sessionIds) || sessionIds.length === 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Send the studentId and the meetings the block covers in sessionIds.',
+      });
+    }
+
+    const readMoney = (value, label) => {
+      if (value === undefined || value === null || value === '') return { value: null };
+      const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/[$,\s]/g, ''));
+      if (!Number.isFinite(n)) return { error: `${label} must be a number.` };
+      if (n <= 0) return { error: `${label} must be greater than zero.` };
+      if (n > 99999999.99) return { error: `${label} is implausibly large.` };
+      return { value: round2(n) };
+    };
+
+    const unit = readMoney(unitAmount, 'The amount per meeting');
+    if (unit.error) return res.status(400).json({ error: 'Validation Error', message: unit.error });
+    const block = readMoney(blockAmount, 'The block total');
+    if (block.error) return res.status(400).json({ error: 'Validation Error', message: block.error });
+    if (unit.value != null && block.value != null) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Price the block either per meeting or as one total, not both.',
+      });
+    }
+
+    const student = await prisma.user.findUnique({
+      where: { id: studentId },
+      select: {
+        id: true, fullName: true, role: true,
+        familyMembers: { select: { familyId: true }, take: 1 },
+        enrollments: { where: { status: 'active' }, select: { classId: true } },
+      },
+    });
+    if (!student || student.role !== 'STUDENT') {
+      return res.status(404).json({ error: 'Not Found', message: 'That student does not exist.' });
+    }
+    if (student.familyMembers.length === 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: `${student.fullName} is not attached to a family yet, so there is no account to bill. Add them to a family first.`,
+      });
+    }
+    const familyId = student.familyMembers[0].familyId;
+
+    const sessions = await prisma.session.findMany({
+      where: { id: { in: sessionIds }, status: { not: 'CANCELLED' } },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+      select: {
+        id: true, classId: true, date: true, chargeAmount: true, chargeNote: true,
+        class: { select: { name: true } },
+        chargeOverrides: { where: { studentId }, select: { amount: true } },
+      },
+    });
+    if (sessions.length === 0) {
+      return res.status(400).json({ error: 'Validation Error', message: 'None of those meetings exist, or they are all cancelled.' });
+    }
+
+    // A block bills the classes this student is actually in. Billing them for a
+    // room they are not enrolled in is never the intent, and would show up on
+    // the parent's invoice as a class they have never heard of.
+    const enrolledIn = new Set(student.enrollments.map((e) => e.classId));
+    const foreign = sessions.filter((s) => !enrolledIn.has(s.classId));
+    if (foreign.length > 0) {
+      const names = [...new Set(foreign.map((s) => s.class?.name ?? 'that class'))].join(', ');
+      return res.status(409).json({
+        error: 'Conflict',
+        message: `${student.fullName} is not actively enrolled in ${names}.`,
+      });
+    }
+
+    // Already-billed meetings are dropped rather than refused: an admin who
+    // re-submits, or who selected a week a sweep picked up in between, should
+    // still get the rest of the block invoiced — and be told which ones were
+    // left out, so nothing looks silently skipped.
+    const existing = await prisma.transaction.findMany({
+      where: { studentId, sessionId: { in: sessions.map((s) => s.id) } },
+      select: { sessionId: true, invoice: { select: { invoiceNumber: true } } },
+    });
+    const already = new Map(existing.map((t) => [t.sessionId, t.invoice?.invoiceNumber ?? null]));
+    const billable = sessions.filter((s) => !already.has(s.id));
+    if (billable.length === 0) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Every meeting in that block has already been charged to this student.',
+      });
+    }
+
+    // Per meeting: the admin's number, else the block total spread evenly, else
+    // what the meeting is already priced at. Spreading is done to the cent with
+    // the remainder on the first line, so the lines add up to the total the
+    // admin typed rather than to a rounded-off approximation of it.
+    const spread = new Map();
+    if (block.value != null) {
+      const each = Math.floor((block.value * 100) / billable.length) / 100;
+      const remainder = round2(block.value - each * billable.length);
+      billable.forEach((s, i) => spread.set(s.id, i === 0 ? round2(each + remainder) : each));
+    }
+
+    const priced = billable.map((s) => {
+      const own = s.chargeOverrides[0]
+        ? round2(Number(s.chargeOverrides[0].amount))
+        : (s.chargeAmount == null ? null : round2(Number(s.chargeAmount)));
+      return { session: s, amount: unit.value ?? spread.get(s.id) ?? own };
+    });
+
+    const unpriced = priced.filter((p) => p.amount == null || p.amount <= 0);
+    if (unpriced.length > 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: `${unpriced.length} of those meetings have no price. Name an amount for the block, or price them on the calendar first.`,
+      });
+    }
+
+    const subtotal = round2(priced.reduce((sum, p) => sum + p.amount, 0));
+    const classNames = [...new Set(billable.map((s) => s.class?.name ?? 'Class'))].join(', ');
+    const label = description?.trim() || `${classNames} — block of ${billable.length}`;
+    const due = dueDate
+      ? new Date(`${String(dueDate).slice(0, 10)}T00:00:00.000Z`)
+      : new Date(Date.now() + 30 * 86400000);
+    if (Number.isNaN(due.getTime())) {
+      return res.status(400).json({ error: 'Validation Error', message: 'dueDate must be a valid date.' });
+    }
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      const invoiceNumber = `LC-${await nextLcNumber(tx)}`;
+      const created = await tx.invoice.create({
+        data: {
+          invoiceNumber,
+          familyId,
+          studentId,
+          subtotal,
+          totalAmount: subtotal,
+          status: 'DRAFT',
+          dateRange: label.slice(0, 100),
+          dueDate: due,
+        },
+      });
+
+      for (const { session, amount } of priced) {
+        const day = session.date.toISOString().slice(0, 10);
+        const lineDescription = session.chargeNote?.trim()
+          ? `${session.class?.name ?? 'Class'} — ${session.chargeNote.trim()} (${day})`
+          : `${session.class?.name ?? 'Class'} — ${day}`;
+        const charge = await tx.transaction.create({
+          data: {
+            familyId,
+            studentId,
+            invoiceId: created.id,
+            sessionId: session.id,
+            // Dated to the meeting it pays for, not to today: a charge for a
+            // November class belongs in November on the ledger, however early
+            // it was raised.
+            date: session.date,
+            amount,
+            type: 'CHARGE',
+            description: lineDescription,
+          },
+        });
+        await tx.invoiceLine.create({
+          data: { invoiceId: created.id, description: lineDescription, amount, transactionId: charge.id },
+        });
+      }
+
+      const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
+      return applied > 0
+        ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' }
+        : created;
+    });
+
+    console.log(
+      `[Billing] ${req.user.email} raised block invoice ${invoice.invoiceNumber} for ${student.fullName} `
+      + `($${subtotal.toFixed(2)}, ${priced.length} meetings, ${already.size} already billed)`
+    );
+
+    res.status(201).json({
+      invoice: {
+        id: invoice.invoiceNumber,
+        dbId: invoice.id,
+        familyId: invoice.familyId,
+        studentId: invoice.studentId,
+        date: invoice.date.toISOString().split('T')[0],
+        dateRange: invoice.dateRange,
+        amount: Number(invoice.totalAmount),
+        amountPaid: Number(invoice.amountPaid),
+        status: invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1).toLowerCase(),
+      },
+      billed: priced.length,
+      skipped: [...already.entries()].map(([sessionId, invoiceNumber]) => ({ sessionId, invoiceNumber })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};

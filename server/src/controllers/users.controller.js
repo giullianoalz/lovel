@@ -1,7 +1,7 @@
 import prisma from '../config/database.js';
 import { isOnly, hasRole } from '../utils/roles.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
-import { computeTeacherPayroll, computePayrollSummary, computeWeeklyPayrollSummary, loadPayCategories } from '../services/payroll.service.js';
+import { computeTeacherPayroll, computePayrollSummary, computeWeeklyPayrollSummary, computeProjectedPayroll, loadPayCategories } from '../services/payroll.service.js';
 import { buildParentMaskMap, masksParentIdentity } from '../utils/parentPrivacy.js';
 import { resolvePaging } from '../utils/helpers.js';
 
@@ -651,6 +651,103 @@ export const getWeeklyPayrollSummary = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: 'weekStart must be a valid date.' });
     }
     res.json(await computeWeeklyPayrollSummary(weekStart));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * The window a projection covers, from the query string.
+ *
+ * Two ways of asking, because there are two questions. `month`/`year` asks
+ * about a period the academy budgets in and gets the salary folded in;
+ * `weeks` asks "what am I committed to from here", which starts today rather
+ * than at a month boundary — an admin looking at the cost of the timetable
+ * does not care that it is the 14th.
+ *
+ * Capped at a year: the calendar thins out past the sessions actually
+ * scheduled, so a five-year projection is not a bigger answer, it is a
+ * confident-looking zero.
+ */
+const projectionRange = ({ month, year, weeks }) => {
+  if (month || year) {
+    const targetYear = parseInt(year) || new Date().getFullYear();
+    const targetMonth = parseInt(month) || (new Date().getMonth() + 1);
+    if (targetMonth < 1 || targetMonth > 12) return { error: 'month must be 1-12.' };
+    return {
+      startDate: new Date(Date.UTC(targetYear, targetMonth - 1, 1)),
+      endDate: new Date(Date.UTC(targetYear, targetMonth, 0, 23, 59, 59, 999)),
+      month: targetMonth,
+      year: targetYear,
+    };
+  }
+
+  const ahead = weeks == null ? 4 : parseInt(weeks);
+  if (!Number.isFinite(ahead) || ahead < 1 || ahead > 52) {
+    return { error: 'weeks must be 1-52.' };
+  }
+  const now = new Date();
+  const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const endDate = new Date(startDate);
+  endDate.setUTCDate(startDate.getUTCDate() + ahead * 7 - 1);
+  endDate.setUTCHours(23, 59, 59, 999);
+  return { startDate, endDate, weeks: ahead };
+};
+
+/**
+ * GET /api/users/payroll/projected
+ * What the calendar already commits the academy to paying, per person (Admin only).
+ *
+ * The forward-looking twin of /payroll/summary, and admin-only for the same
+ * reason: it is the whole roster's pay side by side.
+ */
+export const getProjectedPayroll = async (req, res, next) => {
+  try {
+    const range = projectionRange(req.query);
+    if (range.error) {
+      return res.status(400).json({ error: 'Validation Error', message: range.error });
+    }
+
+    const result = await computeProjectedPayroll(range.startDate, range.endDate);
+    res.json({ ...result, month: range.month, year: range.year, weeks: range.weeks });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/users/:id/payroll/projected
+ * One person's own upcoming pay (Admin or self).
+ *
+ * Reads the roster projection and returns that person's row rather than
+ * running a second engine: the two would answer the same question and would
+ * eventually answer it differently, and the roster is small enough that the
+ * saving is not worth a number on a teacher's screen that disagrees with the
+ * one the admin is looking at.
+ */
+export const getMyProjectedPayroll = async (req, res, next) => {
+  try {
+    const range = projectionRange(req.query);
+    if (range.error) {
+      return res.status(400).json({ error: 'Validation Error', message: range.error });
+    }
+
+    const result = await computeProjectedPayroll(range.startDate, range.endDate);
+    const row = result.rows.find((r) => r.teacher.id === req.params.id);
+
+    // Nothing scheduled is a real answer, not a 404 — a teacher with an empty
+    // fortnight should see an empty fortnight.
+    res.json({
+      startDate: result.startDate,
+      endDate: result.endDate,
+      includesSalary: result.includesSalary,
+      mode: result.mode,
+      categories: result.categories,
+      month: range.month,
+      year: range.year,
+      weeks: range.weeks,
+      row: row || null,
+    });
   } catch (error) {
     next(error);
   }

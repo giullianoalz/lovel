@@ -12,6 +12,8 @@ import {
   getTeacherPayroll,
   getPayrollSummary,
   getWeeklyPayrollSummary,
+  getProjectedPayroll,
+  getMyProjectedPayroll,
   updateTeacherPayroll,
 } from '../controllers/users.controller.js';
 
@@ -27,6 +29,10 @@ router.get('/payroll/summary', authenticate, requireRole('ADMIN'), getPayrollSum
 // GET /api/users/payroll/weekly-summary — The whole roster's pay for one
 // Monday-Sunday week (Admin only). Also declared before /:id.
 router.get('/payroll/weekly-summary', authenticate, requireRole('ADMIN'), getWeeklyPayrollSummary);
+
+// GET /api/users/payroll/projected — What the calendar already commits the
+// academy to paying, per person (Admin only). Also declared before /:id.
+router.get('/payroll/projected', authenticate, requireRole('ADMIN'), getProjectedPayroll);
 
 // GET /api/users/:id — Get a user by ID (Admin/Teacher or self)
 router.get('/:id', authenticate, requireSelfOrRole('ADMIN', 'TEACHER'), getUser);
@@ -47,6 +53,10 @@ router.post('/:id/invite', authenticate, requireRole('ADMIN'), inviteUser);
 // POST|DELETE /api/users/:id/teaching-role — Let an account be assigned to classes (Admin only)
 router.post('/:id/teaching-role', authenticate, requireRole('ADMIN'), setTeachingRole);
 router.delete('/:id/teaching-role', authenticate, requireRole('ADMIN'), setTeachingRole);
+
+// GET /api/users/:id/payroll/projected — One person's upcoming pay (Admin or
+// self). Declared before /:id/payroll so "projected" is never read as a month.
+router.get('/:id/payroll/projected', authenticate, requireSelfOrRole('ADMIN'), getMyProjectedPayroll);
 
 // GET /api/users/:id/payroll — Get teacher payroll summary (Admin or self)
 router.get('/:id/payroll', authenticate, requireSelfOrRole('ADMIN'), getTeacherPayroll);

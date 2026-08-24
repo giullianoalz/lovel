@@ -665,6 +665,134 @@ const BillingPanel = () => {
     }
   };
 
+  /* ─────────────── Billing a block of classes before they run ─────────────
+   * "Bill a period" can only gather charges that already exist, and a charge
+   * only exists once the meeting has been priced and swept — i.e. after it was
+   * taught. A family that wants to settle the next eight weeks now had no path
+   * through this screen at all: typing the block as a manual invoice takes the
+   * money but leaves the meetings unlinked, so the sweep bills every one of
+   * them a second time when those weeks arrive.
+   *
+   * This picks the meetings off the calendar instead, future ones included, and
+   * bills them with their sessionId attached — which is exactly what the sweep
+   * looks at before charging. Prepaying and the calendar can no longer collide.
+   */
+  const [blockModal, setBlockModal] = useState(null);
+  const [blockData, setBlockData] = useState(null); // { classes, sessions } from the server
+  const [blockLoading, setBlockLoading] = useState(false);
+  const [blockError, setBlockError] = useState(null);
+
+  const isoPlusDays = (days) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const openBlockModal = () => {
+    setBlockData(null);
+    setBlockError(null);
+    setBlockModal({
+      studentId: familyStudents.length === 1 ? familyStudents[0].id : '',
+      classId: '',
+      from: isoPlusDays(0),
+      to: isoPlusDays(90),
+      picked: new Set(),
+      // How the block is priced: the same number on every meeting, one total
+      // split across them, or whatever each is already worth on the calendar.
+      priceMode: 'each',
+      amount: '',
+      description: '',
+      dueDate: '',
+    });
+  };
+
+  // Refetches whenever the block's shape changes. The picked set is cleared
+  // with it — a session id from the previous window may not even be on screen
+  // any more, and billing something the admin can no longer see is the one
+  // outcome this screen must never produce.
+  useEffect(() => {
+    if (!blockModal?.studentId) { setBlockData(null); return; }
+    let cancelled = false;
+    setBlockLoading(true);
+    setBlockError(null);
+    database.fetchBlockSessions({
+      studentId: blockModal.studentId,
+      classId: blockModal.classId || undefined,
+      from: blockModal.from,
+      to: blockModal.to,
+    })
+      .then(data => { if (!cancelled) setBlockData(data); })
+      .catch(err => { if (!cancelled) setBlockError(err.userMessage || 'Could not load this student’s scheduled classes.'); })
+      .finally(() => { if (!cancelled) setBlockLoading(false); });
+    return () => { cancelled = true; };
+  }, [blockModal?.studentId, blockModal?.classId, blockModal?.from, blockModal?.to]);
+
+  const blockSessions = blockData?.sessions ?? [];
+  const blockPicked = blockSessions.filter(s => blockModal?.picked.has(s.id) && !s.alreadyCharged);
+
+  // What each picked meeting would be billed at, under the current pricing
+  // choice. Shown before the click because "block of 8" hides how much any one
+  // week costs, and a $980 typo is only obvious next to the other lines.
+  const blockAmountNum = parseFloat(blockModal?.amount);
+  const blockLineAmount = (session, index) => {
+    if (!blockModal) return null;
+    if (Number.isFinite(blockAmountNum) && blockAmountNum > 0) {
+      if (blockModal.priceMode === 'each') return blockAmountNum;
+      // Split to the cent, remainder on the first line — the same arithmetic
+      // the server does, so the preview and the invoice agree.
+      const each = Math.floor((blockAmountNum * 100) / blockPicked.length) / 100;
+      return index === 0
+        ? Math.round((each + (blockAmountNum - each * blockPicked.length)) * 100) / 100
+        : each;
+    }
+    return session.price;
+  };
+
+  const blockUnpriced = blockPicked.filter((s, i) => {
+    const amount = blockLineAmount(s, i);
+    return amount == null || amount <= 0;
+  }).length;
+  const blockTotal = blockPicked.reduce((sum, s, i) => sum + (blockLineAmount(s, i) || 0), 0);
+
+  const toggleBlockSession = (sessionId) => {
+    setBlockModal(prev => {
+      const picked = new Set(prev.picked);
+      if (picked.has(sessionId)) picked.delete(sessionId);
+      else picked.add(sessionId);
+      return { ...prev, picked };
+    });
+  };
+
+  const handleCreateBlockInvoice = async () => {
+    if (blockPicked.length === 0) return;
+    setLoading(true);
+    try {
+      const result = await database.createBlockInvoice({
+        studentId: blockModal.studentId,
+        sessionIds: blockPicked.map(s => s.id),
+        // Only one of the two ever goes up; leaving both off tells the server
+        // to use each meeting's own price.
+        unitAmount: blockModal.priceMode === 'each' && blockModal.amount ? blockModal.amount : undefined,
+        blockAmount: blockModal.priceMode === 'total' && blockModal.amount ? blockModal.amount : undefined,
+        description: blockModal.description || undefined,
+        dueDate: blockModal.dueDate || undefined,
+      });
+      setBlockModal(null);
+      setBlockData(null);
+      setActiveTab('Invoices');
+      await loadBilling();
+      toast.success(
+        `Invoice ${result.invoice.id} created for $${result.invoice.amount.toFixed(2)} — ${result.billed} class${result.billed === 1 ? '' : 'es'} billed in advance.`
+      );
+      if (result.skipped?.length) {
+        toast.info(`${result.skipped.length} of the classes you picked were already billed and were left off.`);
+      }
+    } catch (err) {
+      setLoading(false);
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not create the block invoice.');
+    }
+  };
+
   // EMA CSV column indices (0-based) for the Step Up "DO NOT EDIT" export.
   const EMA_COL = { PO_NUM: 0, PURCHASE_DATE: 1, STUDENT_NAME: 3, STUDENT_ID: 4, PROVIDER_ID: 6, START_DATE: 7, END_DATE: 8, AMOUNT: 9, INVOICE_NUM: 10 };
   const PROVIDER_ID = '20000720';
@@ -1303,6 +1431,12 @@ const BillingPanel = () => {
                   <button className="btn-action primary" onClick={() => setIsAddTxModalOpen(true)}>
                     <Plus size={16} /> Add Transaction
                   </button>
+                  {/* Charging forward, not backward: the classes this covers
+                      have not been taught yet, which is why it cannot be a
+                      variation of "Bill a period" below. */}
+                  <button className="btn-action" onClick={openBlockModal}>
+                    <Layers size={16} /> Bill a block in advance
+                  </button>
                 </div>
               </div>
 
@@ -1655,6 +1789,195 @@ const BillingPanel = () => {
               <button className="action-btn" onClick={() => setStudentInvoice(null)}>Cancel</button>
               <button className="action-btn primary" onClick={handleCreateStudentInvoice} disabled={loading}>
                 {loading ? 'Creating…' : 'Create Invoice'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bill a block up front — the classes here may not have happened yet. */}
+      {blockModal && (
+        <div className="modal-overlay" onClick={() => setBlockModal(null)}>
+          <div className="tx-modal blk-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Bill a block in advance</h3>
+              <button onClick={() => setBlockModal(null)}><X size={20}/></button>
+            </div>
+
+            <div className="tx-form">
+              <p className="text-muted" style={{ marginTop: 0, fontSize: '13px' }}>
+                One invoice for a run of classes, charged before they are taught.
+                Each class is billed against its own calendar entry, so approving it
+                later in Calendar Charges will not bill the family a second time.
+              </p>
+
+              <div className="br-range">
+                <div className="form-group">
+                  <label htmlFor="blk-student">Student</label>
+                  <select
+                    id="blk-student"
+                    className="form-control"
+                    value={blockModal.studentId}
+                    onChange={e => setBlockModal({ ...blockModal, studentId: e.target.value, classId: '', picked: new Set() })}
+                  >
+                    <option value="">— Select a student —</option>
+                    {familyStudents.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="blk-class">Class</label>
+                  <select
+                    id="blk-class"
+                    className="form-control"
+                    value={blockModal.classId}
+                    disabled={!blockData}
+                    onChange={e => setBlockModal({ ...blockModal, classId: e.target.value, picked: new Set() })}
+                  >
+                    <option value="">All their classes</option>
+                    {(blockData?.classes ?? []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="br-range">
+                <div className="form-group">
+                  <label htmlFor="blk-from">From</label>
+                  <input
+                    id="blk-from"
+                    type="date"
+                    className="form-control"
+                    value={blockModal.from}
+                    max={blockModal.to}
+                    onChange={e => setBlockModal({ ...blockModal, from: e.target.value, picked: new Set() })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="blk-to">To</label>
+                  <input
+                    id="blk-to"
+                    type="date"
+                    className="form-control"
+                    value={blockModal.to}
+                    min={blockModal.from}
+                    onChange={e => setBlockModal({ ...blockModal, to: e.target.value, picked: new Set() })}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Price the block</label>
+                <div className="blk-price-modes">
+                  {[
+                    { key: 'each', label: 'Same amount per class' },
+                    { key: 'total', label: 'One total, split evenly' },
+                  ].map(mode => (
+                    <button
+                      key={mode.key}
+                      type="button"
+                      className={`blk-mode ${blockModal.priceMode === mode.key ? 'active' : ''}`}
+                      onClick={() => setBlockModal({ ...blockModal, priceMode: mode.key })}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  className="form-control"
+                  min="0"
+                  step="0.01"
+                  placeholder={blockModal.priceMode === 'each' ? 'Amount per class (leave empty to use each class’s own price)' : 'Total for the whole block'}
+                  value={blockModal.amount}
+                  onChange={e => setBlockModal({ ...blockModal, amount: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label>
+                  {blockPicked.length} class{blockPicked.length === 1 ? '' : 'es'} selected
+                  {blockLoading && ' — loading…'}
+                </label>
+                {blockError && <p className="text-danger" style={{ fontSize: '13px' }}>{blockError}</p>}
+                {!blockModal.studentId ? (
+                  <p className="text-muted" style={{ fontSize: '13px' }}>Pick a student to see their scheduled classes.</p>
+                ) : (!blockLoading && blockSessions.length === 0) ? (
+                  <p className="text-muted" style={{ fontSize: '13px' }}>
+                    No scheduled classes in this window. Widen the dates, or check the student’s enrolments.
+                  </p>
+                ) : (
+                  <div className="blk-list">
+                    {blockSessions.map((s) => {
+                      const picked = blockModal.picked.has(s.id) && !s.alreadyCharged;
+                      const amount = picked ? blockLineAmount(s, blockPicked.findIndex(p => p.id === s.id)) : s.price;
+                      return (
+                        <label key={s.id} className={`blk-row ${s.alreadyCharged ? 'billed' : ''} ${picked ? 'picked' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={picked}
+                            disabled={s.alreadyCharged}
+                            onChange={() => toggleBlockSession(s.id)}
+                          />
+                          <span className="blk-date">{formatDateUS(s.date)}</span>
+                          <span className="blk-name">{s.className}{s.note ? ` · ${s.note}` : ''}</span>
+                          {s.alreadyCharged ? (
+                            <span className="blk-tag">Already billed{s.chargedInvoice ? ` · ${s.chargedInvoice}` : ''}</span>
+                          ) : (
+                            <strong className={amount == null || amount <= 0 ? 'text-danger' : ''}>
+                              {amount == null || amount <= 0 ? 'No price' : `$${amount.toFixed(2)}`}
+                            </strong>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {blockUnpriced > 0 && (
+                <p className="text-danger" style={{ fontSize: '13px' }}>
+                  {blockUnpriced} of the selected classes have no price on the calendar.
+                  Name an amount above, or drop them from the block.
+                </p>
+              )}
+
+              <div className="form-group">
+                <label htmlFor="blk-desc">What this invoice is for (optional)</label>
+                <input
+                  id="blk-desc"
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Anchored — Fall block, Sep–Oct"
+                  value={blockModal.description}
+                  onChange={e => setBlockModal({ ...blockModal, description: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="blk-due">Due date (optional)</label>
+                <input
+                  id="blk-due"
+                  type="date"
+                  className="form-control"
+                  value={blockModal.dueDate}
+                  onChange={e => setBlockModal({ ...blockModal, dueDate: e.target.value })}
+                />
+                <p className="repeat-hint">Left empty, the invoice is due 30 days from today — the same as every other invoice here.</p>
+              </div>
+
+              <div className="si-total">
+                <span>Invoice total</span>
+                <strong>${blockTotal.toFixed(2)}</strong>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="action-btn" onClick={() => setBlockModal(null)}>Cancel</button>
+              <button
+                className="action-btn primary"
+                onClick={handleCreateBlockInvoice}
+                disabled={loading || blockPicked.length === 0 || blockUnpriced > 0}
+              >
+                {loading ? 'Creating…' : `Create Invoice ($${blockTotal.toFixed(2)})`}
               </button>
             </div>
           </div>
