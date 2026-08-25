@@ -12,6 +12,7 @@ import { buildInvoicePdf, invoicePdfFilename } from '../services/invoicePdf.serv
 import { sendInvoiceEmail } from '../services/email.service.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 import { buildSessionCharges, isBillable } from '../services/sessionCharges.service.js';
+import { academyToday, academyDayOffset } from '../utils/academyTime.js';
 
 const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
 
@@ -1561,19 +1562,73 @@ export const generateEmaBatch = async (req, res, next) => {
         if (match) matchedByGroup.set(g, match);
       }
 
-      // Every not-yet-invoiced charge for every matched student, in one go.
       const matchedIds = [...new Set([...matchedByGroup.values()].map((s) => s.id))];
-      const chargesByStudent = new Map();
+      const matchedFamilyIds = [...new Set(
+        [...matchedByGroup.values()].map((s) => s.familyMembers?.[0]?.familyId).filter(Boolean),
+      )];
+
+      // ── The invoice each student's rows belong to ─────────────────────
+      // Step Up is paying an invoice that already exists: the term's coves and
+      // electives were billed when the calendar charges were approved, and the
+      // scholarship covers part of that (which is why these invoices sit at
+      // PARTIAL). Minting a fresh invoice per batch would bill the family a
+      // second time for money already invoiced, so reuse the open one and only
+      // create a number when the student genuinely has none.
+      const openInvoices = matchedIds.length > 0 || matchedFamilyIds.length > 0
+        ? await tx.invoice.findMany({
+            where: {
+              status: { in: ['SENT', 'PARTIAL'] },
+              OR: [
+                { studentId: { in: matchedIds } },
+                // Invoices raised for the household rather than one child.
+                { familyId: { in: matchedFamilyIds }, studentId: null },
+              ],
+            },
+            orderBy: { date: 'asc' },
+            select: { id: true, invoiceNumber: true, studentId: true, familyId: true, poNumbers: true },
+          })
+        : [];
+      const openByStudent = new Map();
+      const openByFamily = new Map();
+      for (const inv of openInvoices) {
+        const bucket = inv.studentId ? openByStudent : openByFamily;
+        const key = inv.studentId || inv.familyId;
+        if (!key) continue;
+        if (!bucket.has(key)) bucket.set(key, []);
+        bucket.get(key).push(inv);
+      }
+
+      // ── Where the START/END DATE of each row comes from ───────────────
+      // The student's own completed meetings. Note these are deliberately NOT
+      // de-duplicated by date: a child in two coves that both met on the 10th
+      // has two sessions that day, and two of their Step Up rows should say
+      // the 10th. Dates are never invented past today — this feeds a real
+      // state scholarship filing.
+      const today = academyToday();
+      const sessionsByStudent = new Map();
       if (matchedIds.length > 0) {
-        const charges = await tx.transaction.findMany({
-          where: { studentId: { in: matchedIds }, type: 'CHARGE', invoiceId: null },
-          orderBy: { date: 'asc' }, // FIFO: oldest unconsumed charge matches first
-          select: { id: true, studentId: true, amount: true, date: true, description: true },
+        const enrollments = await tx.classEnrollment.findMany({
+          where: { studentId: { in: matchedIds } },
+          select: { classId: true, studentId: true },
         });
-        for (const c of charges) {
-          if (!chargesByStudent.has(c.studentId)) chargesByStudent.set(c.studentId, []);
-          chargesByStudent.get(c.studentId).push(c);
+        const classIds = [...new Set(enrollments.map((e) => e.classId))];
+        const sessions = classIds.length > 0
+          ? await tx.session.findMany({
+              where: { classId: { in: classIds }, status: 'COMPLETED', date: { lte: today } },
+              orderBy: { date: 'asc' },
+              select: { classId: true, date: true },
+            })
+          : [];
+        const byClass = new Map();
+        for (const s of sessions) {
+          if (!byClass.has(s.classId)) byClass.set(s.classId, []);
+          byClass.get(s.classId).push(s.date);
         }
+        for (const e of enrollments) {
+          if (!sessionsByStudent.has(e.studentId)) sessionsByStudent.set(e.studentId, []);
+          sessionsByStudent.get(e.studentId).push(...(byClass.get(e.classId) || []));
+        }
+        for (const list of sessionsByStudent.values()) list.sort((a, b) => a - b);
       }
 
       // Learn Step Up IDs for next time where we could only match by name.
@@ -1585,81 +1640,109 @@ export const generateEmaBatch = async (req, res, next) => {
         }
       }
 
-      // Batch-wide, not per-group: two groups can resolve to the same student
-      // (one keyed by Step Up ID, one by name), and a charge must never be
-      // consumed — or dated — twice in the same submission.
-      const usedChargeIds = new Set();
+      // How far into each student's session list this batch has already read.
+      // Batch-wide because two groups can resolve to the same student (one
+      // keyed by Step Up ID, one by name) and a meeting must not be reported
+      // twice in the same submission.
+      const sessionCursor = new Map();
 
       for (const g of groups) {
-        const invoiceNumber = `LC-${nextNum++}`;
         const matchedStudent = matchedByGroup.get(g) || null;
-
         const familyId = matchedStudent?.familyMembers?.[0]?.familyId || null;
         const total = Number(g.total) || 0;
+        const rows = g.rows || [];
 
-        // For each row (one Step Up PO# = one session/charge), find the actual
-        // dated charge behind that amount so we can report its real date
-        // instead of guessing. Oldest unconsumed match first (FIFO); once
-        // used, link it to this invoice so a future batch can't reuse it.
+        // ── Dates ────────────────────────────────────────────────────────
         const rowDates = {};
-        const lineDescriptions = [];
-        // Without the used-charge guard, two same-amount sessions (very
-        // common: a student's weekly rate rarely changes) would both match
-        // the first row's charge and get assigned the same date.
         if (matchedStudent) {
-          const candidates = chargesByStudent.get(matchedStudent.id) || [];
-          for (const row of g.rows || []) {
-            const amount = Number(row.amount) || 0;
-            const charge = candidates.find((c) => !usedChargeIds.has(c.id) && Number(c.amount) === amount);
-            if (charge) {
-              usedChargeIds.add(charge.id);
-              rowDates[row.poNumber] = charge.date.toISOString().split('T')[0];
-              lineDescriptions.push({ description: charge.description || 'EMA session', amount, chargeId: charge.id });
-            } else {
-              rowDates[row.poNumber] = null; // no matching charge — admin must fill this date manually, never guess
-              lineDescriptions.push({ description: 'EMA session (unmatched — verify date manually)', amount, chargeId: null });
+          const available = sessionsByStudent.get(matchedStudent.id) || [];
+          let cursor = sessionCursor.get(matchedStudent.id) || 0;
+          // Rows past the student's last completed meeting are the scholarship
+          // paying ahead of what's been taught; that surplus lands as account
+          // credit on reconcile. Step Up still wants a date, so carry on one
+          // day at a time from the last real meeting — never reaching today,
+          // and never invented out of nothing when there was no meeting to
+          // anchor to.
+          let filler = null;
+          for (const row of rows) {
+            if (cursor < available.length) {
+              const date = available[cursor++];
+              filler = date;
+              rowDates[row.poNumber] = date.toISOString().split('T')[0];
+              continue;
             }
+            if (!filler) { rowDates[row.poNumber] = null; continue; }
+            const next = academyDayOffset(filler, 1);
+            if (next >= today) { rowDates[row.poNumber] = null; continue; }
+            filler = next;
+            rowDates[row.poNumber] = next.toISOString().split('T')[0];
           }
+          sessionCursor.set(matchedStudent.id, cursor);
+        } else {
+          for (const row of rows) rowDates[row.poNumber] = null;
         }
 
-        const invoice = await tx.invoice.create({
-          data: {
-            invoiceNumber,
-            familyId,
-            studentId: matchedStudent?.id || null,
-            source: 'EMA',
-            poNumbers: g.poNumbers || [],
-            subtotal: total,
-            totalAmount: total,
-            status: 'SENT',
-            dateRange: 'EMA Step Up Batch',
-            lines: lineDescriptions.length > 0
-              ? { create: lineDescriptions.map(l => ({ description: l.description, amount: l.amount, transactionId: l.chargeId })) }
-              : undefined,
-          },
-        });
+        // ── Which invoice these PO numbers belong to ─────────────────────
+        const studentOpen = matchedStudent ? (openByStudent.get(matchedStudent.id) || []) : [];
+        const familyOpen = familyId ? (openByFamily.get(familyId) || []) : [];
+        const candidates = studentOpen.length > 0 ? studentOpen : familyOpen;
 
-        // Now that the invoice exists, link the consumed charges to it so
-        // they're excluded from future EMA batches and from the regular
-        // (non-EMA) invoicing flow.
-        const chargeIds = lineDescriptions.map(l => l.chargeId).filter(Boolean);
-        if (chargeIds.length > 0) {
-          await tx.transaction.updateMany({ where: { id: { in: chargeIds } }, data: { invoiceId: invoice.id } });
-        }
+        let invoiceNumber = null;
+        let reusedInvoice = false;
+        let ambiguousInvoice = false;
 
-        // Apply any existing family credit (e.g. from a prior EMA overpayment)
-        // to this new invoice automatically.
-        if (familyId && total > 0) {
-          await applyAvailableCredit(tx, { familyId, studentId: matchedStudent?.id || null, invoiceId: invoice.id, invoiceTotal: total });
+        if (candidates.length === 1) {
+          const target = candidates[0];
+          invoiceNumber = target.invoiceNumber;
+          reusedInvoice = true;
+          // The remittance references PO numbers, so the invoice has to carry
+          // them or reconcileEmaRemittance can't find it when the block
+          // payment arrives weeks later.
+          const merged = [...new Set([...(target.poNumbers || []), ...(g.poNumbers || [])])];
+          if (merged.length !== (target.poNumbers || []).length) {
+            await tx.invoice.update({ where: { id: target.id }, data: { poNumbers: merged } });
+            target.poNumbers = merged;
+          }
+        } else if (candidates.length > 1) {
+          // Several open invoices and nothing in the CSV says which one the
+          // scholarship is paying. Guessing would attach real money to the
+          // wrong invoice, so leave the column blank — Step Up accepts that —
+          // and tell the admin to pick.
+          ambiguousInvoice = true;
+        } else if (matchedStudent) {
+          // Nothing open to attach to: this student's work isn't billed in the
+          // app yet, so the batch is the only record of it. Raise an invoice.
+          const created = await tx.invoice.create({
+            data: {
+              invoiceNumber: `LC-${nextNum++}`,
+              familyId,
+              studentId: matchedStudent.id,
+              source: 'EMA',
+              poNumbers: g.poNumbers || [],
+              subtotal: total,
+              totalAmount: total,
+              status: 'SENT',
+              dateRange: 'EMA Step Up Batch',
+              lines: rows.length > 0
+                ? { create: rows.map((r) => ({ description: `EMA session — PO ${r.poNumber}`, amount: Number(r.amount) || 0 })) }
+                : undefined,
+            },
+          });
+          invoiceNumber = created.invoiceNumber;
+          if (familyId && total > 0) {
+            await applyAvailableCredit(tx, { familyId, studentId: matchedStudent.id, invoiceId: created.id, invoiceTotal: total });
+          }
         }
 
         out.push({
           ...g,
-          invoiceNumber: invoice.invoiceNumber,
+          invoiceNumber,
           familyId,
           matched: !!matchedStudent,
+          reusedInvoice,
+          ambiguousInvoice,
           rowDates,
-          unmatchedRowCount: Object.values(rowDates).filter(d => d === null).length,
+          unmatchedRowCount: Object.values(rowDates).filter((d) => d === null).length,
         });
       }
       return out;

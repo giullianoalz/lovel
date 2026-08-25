@@ -876,9 +876,10 @@ const BillingPanel = () => {
         const invoiceByKey = new Map(enriched.map(g => [g.key, g]));
 
         // Rebuild the CSV with the columns filled in. START/END DATE come from
-        // the actual dated charge behind that row's amount (see backend) —
-        // never from the batch's purchase date, which is not the session date.
+        // the student's own completed meetings (see backend) — never from the
+        // batch's purchase date, which is not the session date.
         let unmatchedDateCount = 0;
+        let blankInvoiceCount = 0;
         const updatedLines = [lines[0], lines[1]];
         for (const row of parsedRows) {
           if (!row) { updatedLines.push(''); continue; }
@@ -891,13 +892,18 @@ const BillingPanel = () => {
               cols[EMA_COL.START_DATE] = sessionDate;
               cols[EMA_COL.END_DATE] = sessionDate;
             } else {
-              // No matching charge found for this amount — leave blank rather
-              // than fabricate a date; the admin must verify and fill it by hand.
+              // Nothing in the system dates this row — leave it blank rather
+              // than fabricate a date; the admin must verify and fill it by
+              // hand. This goes to a real state scholarship filing.
               cols[EMA_COL.START_DATE] = '';
               cols[EMA_COL.END_DATE] = '';
               unmatchedDateCount++;
             }
-            cols[EMA_COL.INVOICE_NUM] = group.invoiceNumber;
+            // Blank when the student has several open invoices and the batch
+            // can't tell which one Step Up is paying. Step Up accepts a blank
+            // BUSINESS INVOICE #; writing the string "null" would not be.
+            cols[EMA_COL.INVOICE_NUM] = group.invoiceNumber || '';
+            if (!group.invoiceNumber) blankInvoiceCount++;
           }
           updatedLines.push(cols.join(','));
         }
@@ -906,7 +912,10 @@ const BillingPanel = () => {
         const url = URL.createObjectURL(blob);
 
         if (unmatchedDateCount > 0) {
-          toast.error(`${unmatchedDateCount} row${unmatchedDateCount !== 1 ? 's' : ''} had no matching charge in the system — their dates were left blank. Fill them in manually before submitting.`);
+          toast.error(`${unmatchedDateCount} row${unmatchedDateCount !== 1 ? 's' : ''} could not be dated from the schedule — left blank. Fill them in manually before submitting.`);
+        }
+        if (blankInvoiceCount > 0) {
+          toast.error(`${blankInvoiceCount} row${blankInvoiceCount !== 1 ? 's' : ''} have more than one open invoice — pick the right one by hand before submitting.`);
         }
 
         setEmaSyncState({
@@ -915,6 +924,8 @@ const BillingPanel = () => {
           rowCount: parsedRows.filter(r => r && !r.skip).length,
           groups: enriched,
           unmatchedDateCount,
+          blankInvoiceCount,
+          reusedCount: enriched.filter(g => g.reusedInvoice).length,
           downloadUrl: url,
         });
         await loadBilling();
@@ -1203,7 +1214,7 @@ const BillingPanel = () => {
                     </label>
                   </div>
                   <p style={{fontSize: '13px', color: 'var(--text-muted)'}}>
-                    The system will automatically match Student Names, generate sequential LC-XXXX invoices, and fill out the "BUSINESS INVOICE #" column for you.
+                    The system matches each student, dates every row from their completed meetings, and fills in "BUSINESS INVOICE #" — reusing the invoice they already have open, since the scholarship pays what was already billed. A student with nothing open gets a new LC-XXXX.
                   </p>
                 </div>
               )}
@@ -1220,9 +1231,10 @@ const BillingPanel = () => {
               <div style={{padding: '20px'}}>
                 <div style={{textAlign: 'center', marginBottom: '20px'}}>
                   <CheckCircle size={48} color="#10b981" style={{marginBottom: '12px'}} />
-                  <h2 style={{color: 'var(--text-main)', marginBottom: '4px'}}>Invoices Generated</h2>
+                  <h2 style={{color: 'var(--text-main)', marginBottom: '4px'}}>CSV Ready</h2>
                   <p style={{color: 'var(--text-muted)', fontSize: '14px'}}>
-                    <strong>{emaSyncState.matched}</strong> invoice{emaSyncState.matched !== 1 ? 's' : ''} across <strong>{emaSyncState.rowCount}</strong> session row{emaSyncState.rowCount !== 1 ? 's' : ''}.
+                    <strong>{emaSyncState.matched}</strong> student{emaSyncState.matched !== 1 ? 's' : ''} across <strong>{emaSyncState.rowCount}</strong> session row{emaSyncState.rowCount !== 1 ? 's' : ''}
+                    {emaSyncState.reusedCount > 0 && <> — <strong>{emaSyncState.reusedCount}</strong> matched to an invoice that already existed</>}.
                   </p>
                 </div>
 
@@ -1238,18 +1250,26 @@ const BillingPanel = () => {
                     </thead>
                     <tbody>
                       {(emaSyncState.groups || []).map(g => (
-                        <tr key={g.invoiceNumber}>
+                        <tr key={g.key}>
                           <td>
                             {g.studentName}
                             {!g.matched && (
-                              <span title="No matching student in system — invoice still generated" style={{marginLeft: '6px', fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>unmatched</span>
+                              <span title="No matching student in system — nothing was invoiced and the row was left blank" style={{marginLeft: '6px', fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>unmatched</span>
                             )}
                           </td>
-                          <td style={{fontWeight: 600, color: 'var(--primary)'}}>{g.invoiceNumber}</td>
+                          <td style={{fontWeight: 600, color: 'var(--primary)'}}>
+                            {g.invoiceNumber || <span style={{color: '#b45309', fontWeight: 500}}>pick by hand</span>}
+                            {g.reusedInvoice && (
+                              <span title="Existing open invoice — the scholarship is paying part of what was already billed" style={{marginLeft: '6px', fontSize: '11px', color: '#166534', background: '#dcfce7', padding: '1px 6px', borderRadius: '6px', fontWeight: 500}}>existing</span>
+                            )}
+                            {g.ambiguousInvoice && (
+                              <span title="This student has more than one open invoice — the batch can't tell which one Step Up is paying" style={{marginLeft: '6px', fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px', fontWeight: 500}}>ambiguous</span>
+                            )}
+                          </td>
                           <td style={{textAlign: 'center'}}>
                             {g.rowIndexes.length}
                             {g.unmatchedRowCount > 0 && (
-                              <span title="No matching charge found in the system for this amount — date left blank" style={{marginLeft: '6px', fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>
+                              <span title="No completed meeting in the schedule to date this row — left blank" style={{marginLeft: '6px', fontSize: '11px', color: '#b45309', background: '#fef3c7', padding: '1px 6px', borderRadius: '6px'}}>
                                 {g.unmatchedRowCount} no date
                               </span>
                             )}
@@ -1264,13 +1284,20 @@ const BillingPanel = () => {
                 {emaSyncState.unmatchedDateCount > 0 && (
                   <div style={{background: '#fef3c7', color: '#92400e', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center', textAlign: 'left'}}>
                     <AlertCircle size={16} style={{flexShrink: 0}} />
-                    <span><strong>{emaSyncState.unmatchedDateCount}</strong> row{emaSyncState.unmatchedDateCount !== 1 ? 's' : ''} had no matching charge in the system for that amount — their Start/End Date {emaSyncState.unmatchedDateCount !== 1 ? 'were' : 'was'} left blank. Fill {emaSyncState.unmatchedDateCount !== 1 ? 'them' : 'it'} in manually before submitting.</span>
+                    <span><strong>{emaSyncState.unmatchedDateCount}</strong> row{emaSyncState.unmatchedDateCount !== 1 ? 's' : ''} had no completed meeting in the schedule to date {emaSyncState.unmatchedDateCount !== 1 ? 'them' : 'it'} — Start/End Date left blank. Fill {emaSyncState.unmatchedDateCount !== 1 ? 'them' : 'it'} in manually before submitting.</span>
+                  </div>
+                )}
+
+                {emaSyncState.blankInvoiceCount > 0 && (
+                  <div style={{background: '#fef3c7', color: '#92400e', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '12px', display: 'flex', gap: '8px', alignItems: 'center', textAlign: 'left'}}>
+                    <AlertCircle size={16} style={{flexShrink: 0}} />
+                    <span><strong>{emaSyncState.blankInvoiceCount}</strong> row{emaSyncState.blankInvoiceCount !== 1 ? 's' : ''} belong to a student with more than one open invoice, so Business Invoice # was left blank rather than guessed. Pick the right one before submitting.</span>
                   </div>
                 )}
 
                 <div style={{background: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '20px', display: 'flex', gap: '8px', alignItems: 'center', textAlign: 'left'}}>
                   <Check size={16} style={{flexShrink: 0}} />
-                  <span>Filled <strong>Provider ID</strong>, <strong>Start/End dates</strong>, and a sequential <strong>Business Invoice #</strong> for each student. Upload the file to Step Up.</span>
+                  <span>Filled <strong>Provider ID</strong>, <strong>Start/End dates</strong> from the schedule, and the <strong>Business Invoice #</strong> — reusing the student's open invoice where one exists. Upload the file to Step Up.</span>
                 </div>
 
                 <div className="modal-actions" style={{justifyContent: 'center'}}>
