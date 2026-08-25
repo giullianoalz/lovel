@@ -428,6 +428,28 @@
 .pp-balance-amount { font-size: 36px; font-weight: 900; line-height: 1; display: block; }
 .pp-family-name    { font-size: 13px; opacity: 0.7; display: block; margin-top: 6px; }
 
+/* Scholarship money already approved by Step Up but not yet remitted. Sits
+   inside the balance card because it explains that number, not a separate
+   fact — the balance already has it deducted. */
+.pp-pending-scholarship {
+  display: flex; align-items: flex-start; gap: 6px;
+  margin-top: 10px; padding: 8px 10px;
+  font-size: 12.5px; line-height: 1.45;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  animation: pp-pending-fade 0.35s ease both;
+}
+.pp-pending-scholarship svg { flex-shrink: 0; margin-top: 2px; opacity: 0.85; }
+.pp-balance-card.clear .pp-pending-scholarship {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+@keyframes pp-pending-fade {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* Pay error */
 .pp-pay-error {
   display: flex; align-items: center; gap: 10px;

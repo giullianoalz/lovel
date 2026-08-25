@@ -7,6 +7,7 @@ import { invalidate } from '../middleware/cache.js';
 import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 import { getAdminUserIds } from '../services/notificationConfig.service.js';
 import { isOnly } from '../utils/roles.js';
+import { academyToday } from '../utils/academyTime.js';
 import { childIdsOfParent, familyIdsOfUser, ensureFamilyCheckInCode } from '../utils/family.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 import { buildLessonNotesPdf, lessonNotesPdfFilename } from '../services/lessonNotesPdf.service.js';
@@ -260,7 +261,13 @@ export const getStudentPortal = async (req, res, next) => {
             include: {
               teacher: { select: { id: true, fullName: true } },
               sessions: {
-                where: { date: { gte: new Date() } },
+                // academyToday(), not new Date(): Session.date is a DATE stamped at
+                // UTC midnight, so comparing it against the current instant dropped
+                // today's class from the moment the server clock passed midnight UTC
+                // — 8 PM the previous evening in Florida. A parent checking the
+                // portal in the morning was shown next week's meeting instead of
+                // the one happening that afternoon.
+                where: { date: { gte: academyToday() } },
                 orderBy: { date: 'asc' },
                 take: 5,
                 include: {
@@ -910,7 +917,13 @@ export const getParentPortal = async (req, res, next) => {
             include: {
               teacher: { select: { fullName: true } },
               sessions: {
-                where: { date: { gte: new Date() } },
+                // academyToday(), not new Date(): Session.date is a DATE stamped at
+                // UTC midnight, so comparing it against the current instant dropped
+                // today's class from the moment the server clock passed midnight UTC
+                // — 8 PM the previous evening in Florida. A parent checking the
+                // portal in the morning was shown next week's meeting instead of
+                // the one happening that afternoon.
+                where: { date: { gte: academyToday() } },
                 orderBy: { date: 'asc' },
                 take: 3,
                 include: {
@@ -1130,7 +1143,7 @@ export const getParentBilling = async (req, res, next) => {
 
     const familyId = familyMember.familyId;
 
-    const [invoices, transactions] = await Promise.all([
+    const [invoices, transactions, balanceRows, pendingScholarship] = await Promise.all([
       prisma.invoice.findMany({
         // A draft is a document the admin has not finished reading, let alone
         // sent. Showing it here put unreviewed numbers in front of the family
@@ -1146,10 +1159,25 @@ export const getParentBilling = async (req, res, next) => {
         take: 50,
         include: { student: { select: { fullName: true } } },
       }),
+      // Every row, not just the 50 shown. The balance used to be summed from
+      // the display list, so a family with more than 50 ledger rows was quoted
+      // a number computed from a truncated slice of their own history.
+      prisma.transaction.findMany({
+        where: { familyId },
+        select: { type: true, amount: true },
+      }),
+      // Scholarship money Step Up has approved but not yet remitted. It is
+      // already deducted from `balance` (the batch records it when the CSV is
+      // submitted), so the family is told what it covers rather than being
+      // left to wonder why the total dropped.
+      prisma.payment.aggregate({
+        where: { familyId, method: 'SCHOLARSHIP_EMA', status: 'PENDING' },
+        _sum: { amount: true },
+      }),
     ]);
 
     // Balance = charges + refunds (increase what's owed) - payments/discounts/credits (reduce it)
-    const balance = transactions.reduce((acc, t) => {
+    const balance = balanceRows.reduce((acc, t) => {
       const amt = Number(t.amount);
       if (t.type === 'CHARGE' || t.type === 'REFUND') return acc + amt;
       if (t.type === 'PAYMENT' || t.type === 'DISCOUNT' || t.type === 'CREDIT') return acc - amt;
@@ -1160,6 +1188,7 @@ export const getParentBilling = async (req, res, next) => {
       familyId,
       familyName: familyMember.family.name,
       balance: Math.round(balance * 100) / 100,
+      pendingScholarship: Math.round(Number(pendingScholarship._sum.amount || 0) * 100) / 100,
       invoices: invoices.map(inv => ({
         id: inv.id,
         invoiceNumber: inv.invoiceNumber,

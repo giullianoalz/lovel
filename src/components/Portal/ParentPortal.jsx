@@ -79,13 +79,30 @@ const TABS = [
 ];
 
 // mm/dd/yy — US school, dates are always numeric US format.
+//
+// Read with the UTC getters, because everything these two format is a
+// date-only column (Session.date, Invoice.date/dueDate, Transaction.date,
+// TempPickupAuth.validDate), and Postgres hands those back stamped at UTC
+// midnight. The local getters turned 2026-08-25T00:00:00Z into the evening of
+// the 24th for every family in Florida, so a Tuesday class was advertised to
+// parents as meeting on Monday. For a real timestamp use fmtInstant below.
 const fmt = (iso) => {
   const d = new Date(iso);
-  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
+  return `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCFullYear()).slice(-2)}`;
 };
 const fmtShort = (iso) => {
   const d = new Date(iso);
-  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  return `${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`;
+};
+
+/**
+ * The same mm/dd/yy for values that are a genuine point in time — a waiver
+ * signature, an announcement's publication. Those carry a real zone, so they
+ * belong on the reader's own clock and must NOT go through fmt().
+ */
+const fmtInstant = (iso) => {
+  const d = new Date(iso);
+  return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
 };
 
 /* Human-readable countdown between now and a target date. */
@@ -1005,7 +1022,7 @@ const ParentPortal = () => {
                       <ShieldCheck size={18} />
                       <div>
                         <h4>Liability waiver signed</h4>
-                        <p>Signed on {fmt(child.waiver.signedAt)}.</p>
+                        <p>Signed on {fmtInstant(child.waiver.signedAt)}.</p>
                       </div>
                     </div>
                     <button
@@ -1339,6 +1356,13 @@ const ParentPortal = () => {
                     {billing.balance < 0 && (
                       <span className="pp-family-name">Will be applied automatically to your next invoice</span>
                     )}
+                    {billing.pendingScholarship > 0 && (
+                      <span className="pp-pending-scholarship">
+                        <Clock size={13} />
+                        Includes <strong>${billing.pendingScholarship.toFixed(2)}</strong> from your Step Up scholarship,
+                        already approved and awaiting payment — nothing for you to do.
+                      </span>
+                    )}
                     {billing.familyName && <span className="pp-family-name">{billing.familyName}</span>}
                   </div>
                   {billing.balance > 0 && (
@@ -1452,7 +1476,7 @@ const ParentPortal = () => {
                         afterwards would leave half an anchor behind. */}
                     <p><Linkified text={a.body.substring(0, 200)} />{a.body.length > 200 ? '…' : ''}</p>
                     <span className="pp-ann-date">
-                      {fmt(a.publishedAt)}{a.author && ` — ${a.author.fullName}`}
+                      {fmtInstant(a.publishedAt)}{a.author && ` — ${a.author.fullName}`}
                     </span>
                   </div>
                 ))}

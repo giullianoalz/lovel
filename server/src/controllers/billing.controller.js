@@ -1585,7 +1585,10 @@ export const generateEmaBatch = async (req, res, next) => {
               ],
             },
             orderBy: { date: 'asc' },
-            select: { id: true, invoiceNumber: true, studentId: true, familyId: true, poNumbers: true },
+            select: {
+              id: true, invoiceNumber: true, studentId: true, familyId: true, poNumbers: true,
+              totalAmount: true, amountPaid: true,
+            },
           })
         : [];
       const openByStudent = new Map();
@@ -1690,10 +1693,12 @@ export const generateEmaBatch = async (req, res, next) => {
         let invoiceNumber = null;
         let reusedInvoice = false;
         let ambiguousInvoice = false;
+        let targetInvoice = null;
 
         if (candidates.length === 1) {
           const target = candidates[0];
           invoiceNumber = target.invoiceNumber;
+          targetInvoice = target;
           reusedInvoice = true;
           // The remittance references PO numbers, so the invoice has to carry
           // them or reconcileEmaRemittance can't find it when the block
@@ -1732,6 +1737,114 @@ export const generateEmaBatch = async (req, res, next) => {
           if (familyId && total > 0) {
             await applyAvailableCredit(tx, { familyId, studentId: matchedStudent.id, invoiceId: created.id, invoiceTotal: total });
           }
+          // Re-read: applyAvailableCredit may have moved amountPaid.
+          targetInvoice = await tx.invoice.findUnique({
+            where: { id: created.id },
+            select: {
+              id: true, invoiceNumber: true, studentId: true, familyId: true, poNumbers: true,
+              totalAmount: true, amountPaid: true,
+            },
+          });
+        }
+
+        // ── Record what Step Up has committed to pay ─────────────────────
+        // The CSV going back to Step Up is the claim; the block payment lands
+        // days later. Recording it now is what makes the family's balance stop
+        // showing money the scholarship has already approved — but the Payment
+        // is left PENDING, because no money has actually arrived. That status
+        // is what the portal reads to show it as a pending scholarship, and
+        // what reconcileEmaRemittance promotes to COMPLETED on receipt.
+        let recordedPayments = 0;
+        let scholarshipPending = 0;
+        if (targetInvoice && rows.length > 0) {
+          const invoiceTotal = Number(targetInvoice.totalAmount);
+          let paidSoFar = Number(targetInvoice.amountPaid);
+          const ledgerRows = [];
+          const disbursements = [];
+
+          for (const row of rows) {
+            const amount = Number(row.amount) || 0;
+            if (amount <= 0) continue;
+
+            // Skip a PO already recorded by an earlier submission of the same
+            // CSV — re-uploading must not pay the invoice twice.
+            const existing = await tx.payment.findFirst({
+              where: {
+                invoiceId: targetInvoice.id,
+                method: 'SCHOLARSHIP_EMA',
+                externalReference: row.poNumber,
+                amount,
+              },
+              select: { id: true },
+            });
+            if (existing) continue;
+
+            // Same capping rule the reconciler uses: what exceeds the invoice
+            // becomes family credit rather than inflating amountPaid.
+            const applied = Math.min(amount, Math.max(0, invoiceTotal - paidSoFar));
+            const excess = amount - applied;
+            paidSoFar += applied;
+
+            const payment = await tx.payment.create({
+              data: {
+                familyId: targetInvoice.familyId,
+                invoiceId: targetInvoice.id,
+                amount,
+                netAmount: amount,
+                method: 'SCHOLARSHIP_EMA',
+                status: 'PENDING',
+                externalReference: row.poNumber,
+                notes: `EMA Step Up submitted — PO ${row.poNumber} (awaiting remittance)`,
+              },
+              select: { id: true },
+            });
+            recordedPayments++;
+            scholarshipPending += amount;
+
+            if (targetInvoice.familyId) {
+              if (applied > 0) {
+                ledgerRows.push({
+                  studentId: targetInvoice.studentId || null,
+                  familyId: targetInvoice.familyId,
+                  amount: applied,
+                  type: 'PAYMENT',
+                  description: `EMA Step Up — PO ${row.poNumber} (pending)`,
+                  invoiceId: targetInvoice.id,
+                  paymentId: payment.id,
+                });
+              }
+              if (excess > 0) {
+                ledgerRows.push({
+                  studentId: targetInvoice.studentId || null,
+                  familyId: targetInvoice.familyId,
+                  amount: excess,
+                  type: 'CREDIT',
+                  description: `EMA Step Up overpayment — PO ${row.poNumber} (account credit)`,
+                  paymentId: payment.id,
+                });
+              }
+            }
+
+            disbursements.push({
+              familyId: targetInvoice.familyId,
+              studentId: targetInvoice.studentId || null,
+              program: 'EMA',
+              amount,
+              period: 'EMA Step Up Batch',
+              status: 'PENDING',
+              paymentId: payment.id,
+            });
+          }
+
+          if (ledgerRows.length > 0) await tx.transaction.createMany({ data: ledgerRows });
+          if (disbursements.length > 0) await tx.scholarshipDisbursement.createMany({ data: disbursements });
+
+          if (recordedPayments > 0) {
+            await tx.invoice.update({
+              where: { id: targetInvoice.id },
+              data: { amountPaid: paidSoFar, status: paidSoFar >= invoiceTotal ? 'PAID' : 'PARTIAL' },
+            });
+          }
         }
 
         out.push({
@@ -1741,6 +1854,8 @@ export const generateEmaBatch = async (req, res, next) => {
           matched: !!matchedStudent,
           reusedInvoice,
           ambiguousInvoice,
+          recordedPayments,
+          scholarshipPending,
           rowDates,
           unmatchedRowCount: Object.values(rowDates).filter((d) => d === null).length,
         });
@@ -1775,10 +1890,16 @@ const runReconciliation = async (db, lines, { dryRun }) => {
 
     if (!invoice) { r.unmatched.push(line); continue; }
 
-    // A remittance line already reconciled (e.g. the same CSV/paste
-    // re-submitted by mistake) must not be applied twice — that would
-    // double-pay the invoice and mint duplicate account credit.
-    const alreadyPaid = await db.payment.findFirst({
+    // A payment for this PO may already exist, and what to do depends on why.
+    //
+    // PENDING means the batch recorded it when the CSV went to Step Up: the
+    // amount is already on the invoice and the ledger, and the only thing the
+    // remittance adds is proof the money arrived. Promote it to COMPLETED and
+    // move on — re-applying it here would pay the invoice twice.
+    //
+    // COMPLETED means this line has genuinely been reconciled before (the same
+    // remittance pasted twice), so skip it.
+    const existingPayment = await db.payment.findFirst({
       where: {
         invoiceId: invoice.id,
         method: 'SCHOLARSHIP_EMA',
@@ -1786,7 +1907,40 @@ const runReconciliation = async (db, lines, { dryRun }) => {
         amount,
       },
     });
-    if (alreadyPaid) { r.alreadyReconciled.push({ ...line, invoiceNumber: invoice.invoiceNumber }); continue; }
+
+    if (existingPayment && existingPayment.status === 'COMPLETED') {
+      r.alreadyReconciled.push({ ...line, invoiceNumber: invoice.invoiceNumber });
+      continue;
+    }
+
+    if (existingPayment) {
+      if (!dryRun) {
+        await db.payment.update({
+          where: { id: existingPayment.id },
+          data: {
+            status: 'COMPLETED',
+            paidAt: new Date(),
+            notes: `EMA Step Up remittance — ${line.poNumber || invoice.invoiceNumber}`,
+          },
+        });
+        await db.scholarshipDisbursement.updateMany({
+          where: { paymentId: existingPayment.id },
+          data: { status: 'RECEIVED', receivedAt: new Date() },
+        });
+        // Update in place rather than delete-and-recreate: these ledger rows
+        // are what the family's balance is built from.
+        await db.transaction.updateMany({
+          where: { paymentId: existingPayment.id, type: 'PAYMENT' },
+          data: { description: `EMA Step Up — ${line.poNumber || invoice.invoiceNumber}` },
+        });
+      }
+      r.matched.push({
+        ...line, invoiceNumber: invoice.invoiceNumber, familyId: invoice.familyId,
+        creditApplied: 0, confirmedPending: true,
+      });
+      r.totalMatched += amount;
+      continue;
+    }
 
     // Cap what's applied to THIS invoice at its total — a remittance line
     // that overpays (common with EMA's block payments) shouldn't inflate
