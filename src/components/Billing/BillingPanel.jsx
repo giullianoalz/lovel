@@ -500,6 +500,7 @@ const BillingPanel = () => {
     setEditInvoiceModal({
       invoice: inv,
       lines: (inv.lines || []).map(l => ({ id: l.id, description: l.description, amount: l.amount.toFixed(2) })),
+      openedAt: Date.now(),
     });
   };
 
@@ -2535,7 +2536,18 @@ const BillingPanel = () => {
 
       {/* Edit Invoice Modal */}
       {editInvoiceModal && (
-        <div className="modal-overlay" onClick={() => setEditInvoiceModal(null)}>
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            // A double-click on the row's Edit button opens this modal on the
+            // first click; the second click then lands on this overlay (it
+            // now covers the same screen spot) and would close it right back
+            // off — so ignore an overlay click that arrives right on the
+            // heels of opening.
+            if (Date.now() - editInvoiceModal.openedAt < 400) return;
+            setEditInvoiceModal(null);
+          }}
+        >
           <div className="tx-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
               <h3>Edit {editInvoiceModal.invoice.id}</h3>
