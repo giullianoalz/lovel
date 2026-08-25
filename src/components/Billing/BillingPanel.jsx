@@ -837,12 +837,17 @@ const BillingPanel = () => {
       const parsedRows = []; // { cols, studentName, studentId, amount }
       const groupMap = new Map(); // key -> { key, studentName, studentId, total, rowIndexes }
 
+      // Step Up quotes most fields ("Deaglan Scott", "20650594", ...) — a plain
+      // split(',') leaves those quotes in the string, so names/IDs never match
+      // anything in the DB and every row comes back unmatched. Strip them.
+      const unquote = (s) => (s || '').trim().replace(/^"(.*)"$/, '$1').trim();
+
       for (let i = 2; i < lines.length; i++) {
         if (!lines[i].trim()) { parsedRows.push(null); continue; }
         const cols = lines[i].split(',');
-        const poNumber = (cols[EMA_COL.PO_NUM] || '').trim();
-        const studentName = (cols[EMA_COL.STUDENT_NAME] || '').trim();
-        const studentId = (cols[EMA_COL.STUDENT_ID] || '').trim();
+        const poNumber = unquote(cols[EMA_COL.PO_NUM]);
+        const studentName = unquote(cols[EMA_COL.STUDENT_NAME]);
+        const studentId = unquote(cols[EMA_COL.STUDENT_ID]);
         const amount = parseFloat(cols[EMA_COL.AMOUNT]) || 0;
 
         if (!studentName) { parsedRows.push({ cols, skip: true }); continue; }
