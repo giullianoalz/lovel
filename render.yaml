@@ -12,9 +12,26 @@ services:
     buildCommand: npm install
     startCommand: npm run start
     healthCheckPath: /api/health
+    # NOTE: this blueprint is not what currently runs. The live service is named
+    # "lovel" (lovel-1fyg.onrender.com), was created by hand in the dashboard and
+    # deploys straight from the repo, so nothing below configures it — the real
+    # values are whatever the dashboard holds, and the plan is free, not starter.
+    # Adopting the blueprint is what would make this file true again.
     envVars:
       - key: NODE_ENV
         value: production
+      # Node sizes its heap from the memory it believes the machine has, and in
+      # a container that is the host's, not the 512 MB this instance gets: left
+      # alone it reports a ~4 GB ceiling and will happily grow past the limit,
+      # at which point the kernel kills it (exit 137) with no V8 error to show
+      # for it. Capping the heap makes the process fail as a Node heap error we
+      # can read instead. 320 MB leaves room for the Prisma query engine, which
+      # is a separate process billed to the same container.
+      #
+      # Also set on `npm run start` so it applies whether or not this blueprint
+      # is the thing configuring the service.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=320
       # Not sync:false any more. It was left for the dashboard and the dashboard
       # held "http://localhost:5173", which every invite link inherited — they
       # pointed at the recipient's own machine. It is a public address, not a

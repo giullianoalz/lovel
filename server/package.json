@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "test": "node --test \"tests/**/*.test.js\"",
-    "start": "(prisma migrate deploy || echo '⚠ migrate deploy skipped — DB may already be in sync') && node src/index.js",
+    "start": "(prisma migrate deploy || echo '⚠ migrate deploy skipped — DB may already be in sync') && node --max-old-space-size=320 src/index.js",
     "postinstall": "prisma generate",
     "db:generate": "npx prisma generate",
     "db:migrate": "npx prisma migrate dev",

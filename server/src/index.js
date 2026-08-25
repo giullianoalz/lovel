@@ -365,4 +365,67 @@ httpServer.listen(PORT, () => {
 });
 
 
+// ===========================================
+// Graceful shutdown
+// ===========================================
+//
+// Render stops an instance by sending SIGTERM and killing it if it has not
+// exited shortly after — which on the free tier happens on every spin-down and
+// every deploy, several times a day. Nothing here listened for it, so the
+// process was torn down mid-flight: sockets dropped without a close frame,
+// in-flight requests answered by nobody, and Prisma's connections left for the
+// pooler to time out. Exit codes 137/143 look identical to a crash in Render's
+// dashboard, which is exactly what makes a real crash hard to spot.
+//
+// Ordering matters. Stop taking new work first (the listener), then hang up on
+// clients, then let the database go — releasing Prisma while a request is still
+// running would fail that request rather than finish it.
+const SHUTDOWN_GRACE_MS = 10_000;
+let shuttingDown = false;
+
+const shutdown = async (signal) => {
+  // A second signal while the first is still draining means "stop waiting".
+  if (shuttingDown) {
+    console.warn(`[shutdown] ${signal} received again — exiting now.`);
+    process.exit(0);
+  }
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received — draining.`);
+
+  // Never let a hung connection turn a tidy shutdown into a SIGKILL: past this
+  // point Render would kill us anyway, and exiting ourselves is cleaner.
+  const failsafe = setTimeout(() => {
+    console.warn('[shutdown] grace period elapsed — forcing exit.');
+    process.exit(0);
+  }, SHUTDOWN_GRACE_MS);
+  failsafe.unref();
+
+  try {
+    await new Promise((resolve) => httpServer.close(resolve));
+    console.log('[shutdown] HTTP server closed.');
+
+    await new Promise((resolve) => io.close(resolve));
+    console.log('[shutdown] Socket.IO closed.');
+
+    await prisma.$disconnect();
+    console.log('[shutdown] Database disconnected.');
+  } catch (error) {
+    console.error('[shutdown] Error while draining:', error);
+  }
+
+  clearTimeout(failsafe);
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// An unhandled rejection leaves the process in an unknown state, and Node's
+// default is to warn and carry on — so a leak or a half-applied write can keep
+// running unnoticed. Log it loudly; deliberately not fatal, because killing a
+// live API over one stray promise is worse than the alternative.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] Unhandled promise rejection:', reason);
+});
+
 export { app, io };
