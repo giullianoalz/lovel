@@ -1629,7 +1629,7 @@ export const generateEmaBatch = async (req, res, next) => {
         });
       }
       return out;
-    });
+    }, { timeout: 120000, maxWait: 20000 });
 
     res.json({ groups: results });
   } catch (error) {
