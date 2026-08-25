@@ -849,18 +849,26 @@ const BillingPanel = () => {
         const studentName = unquote(cols[EMA_COL.STUDENT_NAME]);
         const studentId = unquote(cols[EMA_COL.STUDENT_ID]);
         const amount = parseFloat(cols[EMA_COL.AMOUNT]) || 0;
+        // A file that already carries these was filled in and submitted to Step
+        // Up before — by hand, or by an earlier run. Step Up now has those
+        // numbers and dates on record, so they win over anything we'd pick:
+        // re-deriving them would leave our books disagreeing with the state's.
+        const csvInvoiceNumber = unquote(cols[EMA_COL.INVOICE_NUM]);
+        const csvStartDate = unquote(cols[EMA_COL.START_DATE]);
 
         if (!studentName) { parsedRows.push({ cols, skip: true }); continue; }
 
         const key = studentId || studentName.toLowerCase();
         if (!groupMap.has(key)) {
-          groupMap.set(key, { key, studentName, emaStudentId: studentId, total: 0, rowIndexes: [], poNumbers: [], rows: [] });
+          groupMap.set(key, { key, studentName, emaStudentId: studentId, total: 0, rowIndexes: [], poNumbers: [], rows: [], csvInvoiceNumber: '' });
         }
         const g = groupMap.get(key);
         g.total += amount;
         g.rowIndexes.push(parsedRows.length);
+        // First one wins — all of a student's rows carry the same invoice.
+        if (csvInvoiceNumber && !g.csvInvoiceNumber) g.csvInvoiceNumber = csvInvoiceNumber;
         if (poNumber) { g.poNumbers.push(poNumber); g.rows.push({ poNumber, amount }); }
-        parsedRows.push({ cols, studentName, studentId, amount, poNumber, key });
+        parsedRows.push({ cols, studentName, studentId, amount, poNumber, key, csvStartDate });
       }
 
       const groups = Array.from(groupMap.values());
@@ -886,7 +894,10 @@ const BillingPanel = () => {
           const cols = row.cols;
           if (!row.skip && row.key && invoiceByKey.has(row.key)) {
             const group = invoiceByKey.get(row.key);
-            const sessionDate = row.poNumber ? isoToUsDate(group.rowDates?.[row.poNumber]) : null;
+            // A date already in the file was submitted to Step Up as-is; keep
+            // it rather than re-deriving a different one from the schedule.
+            const sessionDate = row.csvStartDate
+              || (row.poNumber ? isoToUsDate(group.rowDates?.[row.poNumber]) : null);
             cols[EMA_COL.PROVIDER_ID] = PROVIDER_ID;
             if (sessionDate) {
               cols[EMA_COL.START_DATE] = sessionDate;

@@ -1643,6 +1643,34 @@ export const generateEmaBatch = async (req, res, next) => {
         }
       }
 
+      // ── What this batch has already been filed as ─────────────────────
+      // A Step Up PO number identifies one service order for all time, so it
+      // is the only reliable way to recognise a CSV we have already processed.
+      // Without this, re-uploading the same file finds no open invoice for a
+      // student whose invoice the first run marked PAID, raises a second one
+      // under a fresh number carrying the same POs, and pays it all over
+      // again — the exact double-count everything else here guards against.
+      const allBatchPos = [...new Set(groups.flatMap((g) => g.poNumbers || []))];
+      const invoiceByPo = new Map();
+      const alreadyPaidPos = new Set();
+      if (allBatchPos.length > 0) {
+        const carrying = await tx.invoice.findMany({
+          where: { poNumbers: { hasSome: allBatchPos } },
+          select: {
+            id: true, invoiceNumber: true, studentId: true, familyId: true, poNumbers: true,
+            totalAmount: true, amountPaid: true,
+          },
+        });
+        for (const inv of carrying) {
+          for (const po of inv.poNumbers) if (!invoiceByPo.has(po)) invoiceByPo.set(po, inv);
+        }
+        const paid = await tx.payment.findMany({
+          where: { method: 'SCHOLARSHIP_EMA', externalReference: { in: allBatchPos } },
+          select: { externalReference: true },
+        });
+        for (const p of paid) alreadyPaidPos.add(p.externalReference);
+      }
+
       // How far into each student's session list this batch has already read.
       // Batch-wide because two groups can resolve to the same student (one
       // keyed by Step Up ID, one by name) and a meeting must not be reported
@@ -1695,7 +1723,79 @@ export const generateEmaBatch = async (req, res, next) => {
         let ambiguousInvoice = false;
         let targetInvoice = null;
 
-        if (candidates.length === 1) {
+        // A number already written in the uploaded file was submitted to Step
+        // Up under that number — by hand before the app could do this, or by an
+        // earlier run. The state's records say so, so it wins outright: pick
+        // our own instead and the two sets of books stop agreeing about which
+        // invoice a scholarship paid.
+        // Already filed: some invoice carries these POs. That invoice IS this
+        // submission, whatever number the file now suggests, so go back to it
+        // rather than raising a second one for the same service orders.
+        const filedUnder = (g.poNumbers || []).map((po) => invoiceByPo.get(po)).find(Boolean);
+
+        const pinned = (g.csvInvoiceNumber || '').trim();
+        if (filedUnder) {
+          targetInvoice = filedUnder;
+          invoiceNumber = filedUnder.invoiceNumber;
+          reusedInvoice = true;
+          // The file names a different invoice than the one these POs are on.
+          // Not something to fix by writing more rows — say so and let an
+          // admin decide (the renumbering is a deliberate act).
+          if (pinned && pinned !== filedUnder.invoiceNumber) ambiguousInvoice = true;
+        } else if (pinned && matchedStudent) {
+          const existing = await tx.invoice.findUnique({
+            where: { invoiceNumber: pinned },
+            select: {
+              id: true, invoiceNumber: true, studentId: true, familyId: true, poNumbers: true,
+              totalAmount: true, amountPaid: true,
+            },
+          });
+          // A mistyped number could name a real invoice belonging to somebody
+          // else, and honouring it would move a scholarship onto another
+          // family's bill. Only accept one that is already this student's, or
+          // their household's.
+          const belongsToStudent = existing && (
+            existing.studentId === matchedStudent.id
+            || (existing.studentId === null && familyId && existing.familyId === familyId)
+          );
+
+          if (existing && !belongsToStudent) {
+            ambiguousInvoice = true;
+          } else if (existing) {
+            targetInvoice = existing;
+            const merged = [...new Set([...(existing.poNumbers || []), ...(g.poNumbers || [])])];
+            if (merged.length !== (existing.poNumbers || []).length) {
+              await tx.invoice.update({ where: { id: existing.id }, data: { poNumbers: merged } });
+            }
+          } else {
+            // Numbers filed by hand ran ahead of ours (they continued WAVE's
+            // sequence). Creating it under the submitted number both keeps the
+            // books aligned and pulls our sequence up past it.
+            const created = await tx.invoice.create({
+              data: {
+                invoiceNumber: pinned,
+                familyId,
+                studentId: matchedStudent.id,
+                source: 'EMA',
+                poNumbers: g.poNumbers || [],
+                subtotal: total,
+                totalAmount: total,
+                status: 'SENT',
+                dateRange: 'EMA Step Up Batch',
+                lines: rows.length > 0
+                  ? { create: rows.map((r) => ({ description: `EMA session — PO ${r.poNumber}`, amount: Number(r.amount) || 0 })) }
+                  : undefined,
+              },
+              select: {
+                id: true, invoiceNumber: true, studentId: true, familyId: true, poNumbers: true,
+                totalAmount: true, amountPaid: true,
+              },
+            });
+            targetInvoice = created;
+          }
+          invoiceNumber = targetInvoice ? targetInvoice.invoiceNumber : null;
+          reusedInvoice = !!targetInvoice && !!existing;
+        } else if (candidates.length === 1) {
           const target = candidates[0];
           invoiceNumber = target.invoiceNumber;
           targetInvoice = target;
@@ -1766,18 +1866,12 @@ export const generateEmaBatch = async (req, res, next) => {
             const amount = Number(row.amount) || 0;
             if (amount <= 0) continue;
 
-            // Skip a PO already recorded by an earlier submission of the same
-            // CSV — re-uploading must not pay the invoice twice.
-            const existing = await tx.payment.findFirst({
-              where: {
-                invoiceId: targetInvoice.id,
-                method: 'SCHOLARSHIP_EMA',
-                externalReference: row.poNumber,
-                amount,
-              },
-              select: { id: true },
-            });
-            if (existing) continue;
+            // Skip a PO already recorded by an earlier submission. Checked
+            // against every EMA payment, not just this invoice's: one PO is
+            // one service order and is payable exactly once, so if it has been
+            // recorded anywhere it must not be recorded again here.
+            if (alreadyPaidPos.has(row.poNumber)) continue;
+            alreadyPaidPos.add(row.poNumber);
 
             // Same capping rule the reconciler uses: what exceeds the invoice
             // becomes family credit rather than inflating amountPaid.
