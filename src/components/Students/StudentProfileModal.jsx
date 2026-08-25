@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse, Pencil } from 'lucide-react';
+import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse, Pencil, Plus, Minus } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import SnackCabinetModal from './SnackCabinetModal';
@@ -30,6 +30,11 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const [redeemItem, setRedeemItem] = useState('');
   const [redeemCost, setRedeemCost] = useState('');
   const [redeeming, setRedeeming] = useState(false);
+
+  /* ── Manual snack-punch adjustment (staff) ── */
+  const canAdjustPunches = hasRole('ADMIN', 'TEACHER');
+  const [adjustAmount, setAdjustAmount] = useState('1');
+  const [adjusting, setAdjusting] = useState(false);
 
   /* ── Staff notes (admin only) ── */
   const [editingStaffNotes, setEditingStaffNotes] = useState(false);
@@ -140,6 +145,36 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
     };
     setStudent(next);
     onUpdate?.(next);
+  };
+
+  /* Punch the card by hand: corrections, comped punches, and reloads the
+     zero-balance flow never raised (it only fires when the card lands exactly
+     on 0). This moves the punch balance and nothing else — a paid reload still
+     goes through the parent-approved queue. */
+  const handleAdjustPunches = async (direction) => {
+    const amount = parseInt(adjustAmount, 10);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      toast.error('Enter how many punches to add or remove.');
+      return;
+    }
+    setAdjusting(true);
+    try {
+      const res = await api.put(`/students/${student.id}/snack-punches`, {
+        punches: direction * amount,
+        action: 'add',
+      });
+      const balance = res.data.student.snackPunches;
+      const next = { ...student, snackPunches: balance };
+      setStudent(next);
+      onUpdate?.(next);
+      toast.success(
+        `${direction > 0 ? 'Added' : 'Removed'} ${amount} punch${amount === 1 ? '' : 'es'} — balance is now ${balance}.`
+      );
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not update the snack card.');
+    } finally {
+      setAdjusting(false);
+    }
   };
 
   const filteredMaterials = (student.materials || []).filter(m => 
@@ -370,6 +405,41 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               {(!isNegative && isLowBalance) && (
                 <div className="snack-alert warning">
                   <AlertCircle size={16} /> Low balance! Parent will be prompted to reload on the next cycle.
+                </div>
+              )}
+
+              {canAdjustPunches && (
+                <div className="punch-adjust">
+                  <span className="punch-adjust-label">Adjust punches</span>
+                  <div className="punch-adjust-row">
+                    <button
+                      className="punch-step"
+                      onClick={() => handleAdjustPunches(-1)}
+                      disabled={adjusting}
+                      title="Subtract punches"
+                      aria-label="Subtract punches"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <input
+                      type="number"
+                      min="1"
+                      inputMode="numeric"
+                      className="prize-input punch-adjust-input"
+                      value={adjustAmount}
+                      onChange={e => setAdjustAmount(e.target.value.replace(/[^0-9]/g, ''))}
+                      aria-label="Number of punches"
+                    />
+                    <button
+                      className="punch-step"
+                      onClick={() => handleAdjustPunches(1)}
+                      disabled={adjusting}
+                      title="Add punches"
+                      aria-label="Add punches"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
                 </div>
               )}
 
