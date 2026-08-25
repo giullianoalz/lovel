@@ -1529,32 +1529,70 @@ export const generateEmaBatch = async (req, res, next) => {
       let nextNum = await nextLcNumber(tx);
       const out = [];
 
+      // ── Batched prefetch ──────────────────────────────────────────────
+      // This used to run one student lookup (sometimes two) per group and one
+      // charge lookup per CSV row. A real Step Up export is ~20 students and
+      // ~90 rows, so that was ~100 sequential round trips inside a single
+      // transaction — measured at 72s against the pooled Neon connection,
+      // which blew the transaction budget every time and surfaced to the
+      // admin as a bare 500. The same work is three queries when batched.
+      const students = await tx.user.findMany({
+        where: { role: 'STUDENT' },
+        select: { id: true, fullName: true, emaStudentId: true, familyMembers: { select: { familyId: true }, take: 1 } },
+      });
+      const studentByEmaId = new Map();
+      const studentByName = new Map();
+      for (const s of students) {
+        if (s.emaStudentId) studentByEmaId.set(s.emaStudentId, s);
+        // First writer wins, so a duplicate name resolves the same way the
+        // old findFirst did rather than silently flipping between rows.
+        const nameKey = (s.fullName || '').trim().toLowerCase();
+        if (nameKey && !studentByName.has(nameKey)) studentByName.set(nameKey, s);
+      }
+
+      // Step Up's own student ID is stable across submissions — once we've
+      // seen it for a student, it's a far more reliable match than a name
+      // string (typos, "Jr."/"III" suffixes, married-name changes, etc.).
+      const matchedByGroup = new Map();
       for (const g of groups) {
-        const invoiceNumber = `LC-${nextNum++}`;
+        const match = (g.emaStudentId ? studentByEmaId.get(g.emaStudentId) : null)
+          || (g.studentName ? studentByName.get(g.studentName.trim().toLowerCase()) : null)
+          || null;
+        if (match) matchedByGroup.set(g, match);
+      }
 
-        // Step Up's own student ID is stable across submissions — once we've
-        // seen it for a student, it's a far more reliable match than a name
-        // string (typos, "Jr."/"III" suffixes, married-name changes, etc.).
-        const student = g.emaStudentId
-          ? await tx.user.findFirst({
-              where: { role: 'STUDENT', emaStudentId: g.emaStudentId },
-              select: { id: true, emaStudentId: true, familyMembers: { select: { familyId: true }, take: 1 } },
-            })
-          : null;
+      // Every not-yet-invoiced charge for every matched student, in one go.
+      const matchedIds = [...new Set([...matchedByGroup.values()].map((s) => s.id))];
+      const chargesByStudent = new Map();
+      if (matchedIds.length > 0) {
+        const charges = await tx.transaction.findMany({
+          where: { studentId: { in: matchedIds }, type: 'CHARGE', invoiceId: null },
+          orderBy: { date: 'asc' }, // FIFO: oldest unconsumed charge matches first
+          select: { id: true, studentId: true, amount: true, date: true, description: true },
+        });
+        for (const c of charges) {
+          if (!chargesByStudent.has(c.studentId)) chargesByStudent.set(c.studentId, []);
+          chargesByStudent.get(c.studentId).push(c);
+        }
+      }
 
-        const matchedStudent = student || (g.studentName
-          ? await tx.user.findFirst({
-              where: { role: 'STUDENT', fullName: { equals: g.studentName, mode: 'insensitive' } },
-              select: { id: true, emaStudentId: true, familyMembers: { select: { familyId: true }, take: 1 } },
-            })
-          : null);
-
-        // Learn the Step Up ID for next time if we only matched by name.
-        if (matchedStudent && g.emaStudentId && !matchedStudent.emaStudentId) {
-          await tx.user.update({ where: { id: matchedStudent.id }, data: { emaStudentId: g.emaStudentId } }).catch(() => {
+      // Learn Step Up IDs for next time where we could only match by name.
+      for (const [g, s] of matchedByGroup) {
+        if (g.emaStudentId && !s.emaStudentId) {
+          await tx.user.update({ where: { id: s.id }, data: { emaStudentId: g.emaStudentId } }).catch(() => {
             // A different student already claimed this emaStudentId (data mix-up) — don't crash the whole batch over it.
           });
         }
+      }
+
+      // Batch-wide, not per-group: two groups can resolve to the same student
+      // (one keyed by Step Up ID, one by name), and a charge must never be
+      // consumed — or dated — twice in the same submission.
+      const usedChargeIds = new Set();
+
+      for (const g of groups) {
+        const invoiceNumber = `LC-${nextNum++}`;
+        const matchedStudent = matchedByGroup.get(g) || null;
 
         const familyId = matchedStudent?.familyMembers?.[0]?.familyId || null;
         const total = Number(g.total) || 0;
@@ -1565,18 +1603,14 @@ export const generateEmaBatch = async (req, res, next) => {
         // used, link it to this invoice so a future batch can't reuse it.
         const rowDates = {};
         const lineDescriptions = [];
-        // Tracks charges already claimed by an earlier row in this same
-        // student's group — without this, two same-amount sessions (very
+        // Without the used-charge guard, two same-amount sessions (very
         // common: a student's weekly rate rarely changes) would both match
         // the first row's charge and get assigned the same date.
-        const usedChargeIds = new Set();
         if (matchedStudent) {
+          const candidates = chargesByStudent.get(matchedStudent.id) || [];
           for (const row of g.rows || []) {
             const amount = Number(row.amount) || 0;
-            const charge = await tx.transaction.findFirst({
-              where: { studentId: matchedStudent.id, type: 'CHARGE', amount, invoiceId: null, id: { notIn: [...usedChargeIds] } },
-              orderBy: { date: 'asc' },
-            });
+            const charge = candidates.find((c) => !usedChargeIds.has(c.id) && Number(c.amount) === amount);
             if (charge) {
               usedChargeIds.add(charge.id);
               rowDates[row.poNumber] = charge.date.toISOString().split('T')[0];
