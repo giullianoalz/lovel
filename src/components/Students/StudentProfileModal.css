@@ -374,7 +374,10 @@
 }
 
 .prize-input.punch-adjust-input {
-  width: 62px;
+  /* 72px, not less: as a flex item the input's automatic minimum size floors
+     it at its intrinsic width (number spinners included), so a smaller value
+     here is silently ignored. */
+  width: 72px;
   padding: 8px 10px;
   text-align: center;
   font-weight: 700;
@@ -389,6 +392,17 @@
 
   .punch-adjust-row {
     justify-content: center;
+  }
+
+  /* Thumb-sized targets: the front desk punches cards on a handset, where a
+     34px button sits under the 44px minimum and picks up mis-taps. */
+  .punch-step {
+    width: 44px;
+    height: 44px;
+  }
+
+  .prize-input.punch-adjust-input {
+    height: 44px;
   }
 }
 
