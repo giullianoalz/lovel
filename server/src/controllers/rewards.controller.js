@@ -1,85 +1,81 @@
 import prisma from '../config/database.js';
 import { canUseSnackPunches } from '../utils/snackEligibility.js';
-import { sendNotification } from '../jobs/notification.helper.js';
-import { invalidate } from '../middleware/cache.js';
-import {
-  getEventConfig,
-  getAdminUserIds,
-  getParentUserIdsForStudents,
-} from '../services/notificationConfig.service.js';
-
-// A student can only have one open reload request at a time.
-const OPEN_RELOAD_STATUSES = ['PENDING', 'APPROVED'];
-
-/**
- * Raised the moment a snack purchase empties a student's card. Creates a
- * pending SnackReloadRequest (unless one is already open) and notifies the
- * parents (and/or admins) so the parent can approve a paid reload. Fully
- * best-effort: any failure here must never fail the underlying purchase.
- */
-const maybeCreateReloadRequest = async (studentId, triggeredById) => {
-  try {
-    const config = await getEventConfig('SNACK_PUNCHES_DEPLETED');
-    if (!config?.enabled || config.audience.length === 0) return;
-
-    // Don't stack requests — one open request per student.
-    const existing = await prisma.snackReloadRequest.findFirst({
-      where: { studentId, status: { in: OPEN_RELOAD_STATUSES } },
-    });
-    if (existing) return;
-
-    const student = await prisma.user.findUnique({
-      where: { id: studentId },
-      select: { id: true, fullName: true },
-    });
-    if (!student) return;
-
-    const familyMember = await prisma.familyMember.findFirst({ where: { userId: studentId } });
-    const punchCount = config.params.reloadPunches;
-    const price = config.params.reloadPrice;
-
-    const request = await prisma.snackReloadRequest.create({
-      data: {
-        studentId,
-        familyId: familyMember?.familyId ?? null,
-        punchCount,
-        price,
-        triggeredById: triggeredById ?? null,
-      },
-    });
-
-    // Bust the parents' cached portal (60 s TTL) so the approval banner shows
-    // up on their next load, not up to a minute later — regardless of whether
-    // they're in the notification audience.
-    const parentIds = await getParentUserIdsForStudents([studentId]);
-    parentIds.forEach((id) => invalidate(`portal:parent:${id}`));
-
-    const priceLabel = `$${Number(price).toFixed(2)}`;
-    const recipients = new Set();
-    if (config.audience.includes('PARENTS')) {
-      parentIds.forEach((id) => recipients.add(id));
-    }
-    if (config.audience.includes('ADMINS')) {
-      (await getAdminUserIds()).forEach((id) => recipients.add(id));
-    }
-
-    for (const userId of recipients) {
-      await sendNotification({
-        userId,
-        type: 'SNACK_PUNCHES_DEPLETED',
-        title: `${student.fullName} is out of snack punches`,
-        message: `${student.fullName}'s snack card reached 0. Approve reloading ${punchCount} punch(es) for ${priceLabel}?`,
-        referenceType: 'snackReload',
-        referenceId: request.id,
-        dedupKey: `snack-reload-${request.id}-${userId}`,
-      });
-    }
-  } catch (err) {
-    console.error('[Rewards] maybeCreateReloadRequest failed:', err.message);
-  }
-};
+import { uploadBufferToDrive, downloadFileWithType, downloadThumbnail, drive } from '../config/drive.js';
+import { maybeCreateReloadRequest } from '../services/snackReload.service.js';
 
 /* ──────────────────────────── SNACK CABINET ──────────────────────────── */
+
+// Snack photos get their own Drive folder when one is configured. Until then
+// they share the Marketing Hub folder, which already exists and is already
+// wired up on both ends — a second folder id that nobody sets is how the chat
+// and waiver folders ended up pointing at nothing.
+const snackFolderId = () =>
+  process.env.DRIVE_SNACKS_FOLDER_ID || process.env.DRIVE_MARKETING_FOLDER_ID;
+
+// The API path that streams a snack's photo back.
+// The cabinet only ever draws these as tiles, so it asks for the thumbnail.
+// The full-size original stays one query string away for anything that wants it.
+const snackImagePath = (id) => `/rewards/snacks/${id}/image?size=thumb`;
+
+// A data URI exactly as the phone's FileReader produces it.
+const DATA_URI = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i;
+
+/**
+ * Turns whatever the client sent for a snack photo into something small enough
+ * to keep in Postgres.
+ *
+ * A plain http(s) URL is already just a string and passes straight through — a
+ * few seeded rows point at Unsplash. A base64 data URI is the case that cost us
+ * 62 MB: decode it, push the bytes to Drive, and keep only the file id. If
+ * Drive is not configured the upload is refused rather than quietly falling
+ * back to storing the data URI, which is how the column filled up to begin
+ * with.
+ */
+const storeSnackImage = async (image, snackName) => {
+  const value = (image || '').trim();
+  if (!value) return { driveFileId: null, imageUrl: null };
+  if (/^https?:\/\//i.test(value)) return { driveFileId: null, imageUrl: value };
+
+  const match = value.match(DATA_URI);
+  if (!match) {
+    const err = new Error('Unrecognised image format — send a data URI or an http(s) URL.');
+    err.status = 400;
+    throw err;
+  }
+  if (!drive) {
+    const err = new Error('Photo uploads need Google Drive, which is not configured on this server.');
+    err.status = 503;
+    throw err;
+  }
+
+  const [, mimeType, b64] = match;
+  const buffer = Buffer.from(b64, 'base64');
+  const ext = (mimeType.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+  const safeName = (snackName || 'snack').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  const file = await uploadBufferToDrive(
+    buffer,
+    `snack-${safeName}-${Date.now()}.${ext}`,
+    mimeType,
+    snackFolderId()
+  );
+  if (!file?.id) {
+    const err = new Error('Drive accepted the upload but returned no file id.');
+    err.status = 502;
+    throw err;
+  }
+  return { driveFileId: file.id, imageUrl: null };
+};
+
+/** The shape the cabinet UI consumes. */
+const snackView = (s) => ({
+  id: s.id,
+  name: s.name,
+  costPunches: s.costPunches,
+  // Drive-backed photos need our auth header, so the client pulls them through
+  // ProtectedImage instead of pointing an <img> straight at the path.
+  image: s.driveFileId ? '' : (s.imageUrl || ''),
+  imagePath: s.driveFileId ? snackImagePath(s.id) : null,
+});
 
 // GET /api/rewards/snacks — list active snack items
 export const listSnacks = async (req, res, next) => {
@@ -87,15 +83,44 @@ export const listSnacks = async (req, res, next) => {
     const items = await prisma.snackItem.findMany({
       where: { isActive: true },
       orderBy: { createdAt: 'asc' },
+      // Explicit select on purpose: image_url can still hold a legacy data URI
+      // on a row the backfill has not reached, and listing the cabinet is no
+      // place to drag seven megabytes of it across the wire.
+      select: { id: true, name: true, costPunches: true, driveFileId: true, imageUrl: true },
     });
-    res.json({
-      snacks: items.map(s => ({
-        id: s.id,
-        name: s.name,
-        costPunches: s.costPunches,
-        image: s.imageUrl || '',
-      })),
+    res.json({ snacks: items.map(snackView) });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/rewards/snacks/:id/image — stream a snack photo's bytes from Drive.
+export const getSnackImage = async (req, res, next) => {
+  try {
+    const snack = await prisma.snackItem.findUnique({
+      where: { id: req.params.id },
+      select: { driveFileId: true },
     });
+    if (!snack?.driveFileId) {
+      return res.status(404).json({ error: 'Not Found', message: 'This snack has no photo.' });
+    }
+
+    const file = req.query.size === 'thumb'
+      ? (await downloadThumbnail(snack.driveFileId)) || (await downloadFileWithType(snack.driveFileId))
+      : await downloadFileWithType(snack.driveFileId);
+    if (!file?.stream) {
+      return res.status(404).json({ error: 'Not Found', message: 'This photo is no longer available.' });
+    }
+    // helmet sends X-Content-Type-Options: nosniff, so a response with no
+    // Content-Type is not rendered as an image — it is offered as a download or
+    // dropped. The type has to come from Drive, not from a guess.
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    // A snack photo never changes once uploaded — a new picture means a new
+    // Drive file — so the browser can hold it instead of refetching sixteen
+    // images every time somebody opens the cabinet.
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    file.stream.on('error', (err) => next(err));
+    file.stream.pipe(res);
   } catch (error) {
     next(error);
   }
@@ -108,12 +133,11 @@ export const createSnack = async (req, res, next) => {
     if (!name || cost === undefined || isNaN(parseInt(cost))) {
       return res.status(400).json({ message: 'name and cost are required.' });
     }
+    const { driveFileId, imageUrl } = await storeSnackImage(image, name);
     const item = await prisma.snackItem.create({
-      data: { name, costPunches: parseInt(cost), imageUrl: image || null },
+      data: { name, costPunches: parseInt(cost), driveFileId, imageUrl },
     });
-    res.status(201).json({
-      snack: { id: item.id, name: item.name, costPunches: item.costPunches, image: item.imageUrl || '' },
-    });
+    res.status(201).json({ snack: snackView(item) });
   } catch (error) {
     next(error);
   }
@@ -176,9 +200,9 @@ export const purchaseSnack = async (req, res, next) => {
       });
     }
 
-    // Card just hit zero — ask the parent to approve a paid reload (best-effort,
+    // Card just ran out — ask the parent to approve a paid reload (best-effort,
     // never blocks the purchase response).
-    if (result.newBalance === 0) {
+    if (result.newBalance <= 0) {
       await maybeCreateReloadRequest(studentId, req.user?.id);
     }
 

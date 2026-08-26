@@ -87,6 +87,70 @@ export const downloadFileFromDrive = async (fileId) => {
   return response.data; // readable stream
 };
 
+// An alt=media download comes back with no Content-Type header at all — the
+// bytes arrive bare — so the type has to be read from the file's metadata.
+// A Drive file's mime type cannot change (a new picture is a new file), so the
+// answer is memoised and the extra round trip is paid once per file per boot.
+const mimeTypeCache = new Map();
+
+export const getFileMimeType = async (fileId) => {
+  if (!drive) return null;
+  if (mimeTypeCache.has(fileId)) return mimeTypeCache.get(fileId);
+  const meta = await drive.files.get({ fileId, fields: 'mimeType' });
+  const mimeType = meta.data.mimeType || null;
+  mimeTypeCache.set(fileId, mimeType);
+  return mimeType;
+};
+
+// Drive renders its own thumbnail for every image it stores, and the trailing
+// "=s220" on the link is a size the caller picks. The snack cabinet shows these
+// as tiles in a grid, so pulling the 5 MB original the phone took to paint a
+// 220px square is about a hundred times more bytes than the screen can use.
+//
+// The link is short-lived and tied to this account, so it is fetched here and
+// the bytes are streamed on — it is never handed to the browser.
+// Unlike a mime type, a thumbnail link expires, so this cache has to forget.
+// Ten minutes is well inside Drive's own expiry and still spares the metadata
+// round trip for everyone who opens the cabinet in the same sitting — that call
+// was costing more than the 38 KB of image it was there to find.
+const thumbLinkCache = new Map();
+const THUMB_LINK_TTL_MS = 10 * 60 * 1000;
+
+const thumbnailLinkFor = async (fileId) => {
+  const hit = thumbLinkCache.get(fileId);
+  if (hit && hit.expires > Date.now()) return hit.link;
+  const meta = await drive.files.get({ fileId, fields: 'thumbnailLink' });
+  const link = meta.data.thumbnailLink || null;
+  if (link) thumbLinkCache.set(fileId, { link, expires: Date.now() + THUMB_LINK_TTL_MS });
+  return link;
+};
+
+export const downloadThumbnail = async (fileId, size = 400) => {
+  if (!drive) return null;
+  const link = await thumbnailLinkFor(fileId);
+  // Drive has not generated one yet (it is asynchronous after upload), so the
+  // caller falls back to the original rather than showing a hole.
+  if (!link) return null;
+
+  const response = await fetch(link.replace(/=s\d+$/, '=s' + size));
+  if (!response.ok || !response.body) return null;
+  return {
+    stream: Readable.fromWeb(response.body),
+    mimeType: response.headers.get('content-type') || 'image/jpeg',
+  };
+};
+
+// Download plus the type needed to render it. Without a Content-Type, helmet's
+// nosniff makes the browser refuse to display a perfectly good image.
+export const downloadFileWithType = async (fileId) => {
+  if (!drive) return null;
+  const [mimeType, response] = await Promise.all([
+    getFileMimeType(fileId),
+    drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' }),
+  ]);
+  return { stream: response.data, mimeType };
+};
+
 export const uploadFileToDrive = async (filePath, originalName, mimeType, folderId) => {
   if (!drive) {
     console.warn('[Drive Config] Google Drive not configured, skipping upload.');

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, ShoppingBag, Settings, Plus, Trash2, Camera } from 'lucide-react';
 import { database } from '../../lib/database';
+import ProtectedImage from '../Layout/ProtectedImage';
 import { useToast } from '../Layout/ToastProvider';
 import './StudentProfileModal.css'; // Reusing the same CSS for now
 
@@ -39,23 +40,55 @@ const SnackCabinetModal = ({
     }
   };
 
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewSnackForm({ ...newSnackForm, image: reader.result });
+  // A photo straight off the phone camera is 5-7 MB, and every one of those
+  // went into the database verbatim until the cabinet weighed more than the
+  // rest of the school put together. The picture is a thumbnail in a grid —
+  // 1024px at JPEG 0.82 is roughly 80 KB and looks identical at that size.
+  const shrinkImage = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read that file.'));
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('That file is not an image we can read.'));
+      img.onload = () => {
+        const MAX = 1024;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Always JPEG: a phone HEIC or PNG screenshot would otherwise keep its
+        // original, much larger encoding on the way back out.
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
       };
-      reader.readAsDataURL(file);
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const image = await shrinkImage(file);
+      setNewSnackForm(prev => ({ ...prev, image }));
+    } catch (err) {
+      toast.error(err.message || 'Could not use that photo.');
     }
   };
 
   const handleSaveSnack = async () => {
     if(!newSnackForm.name || !newSnackForm.cost) return;
-    await database.addSnack(newSnackForm);
-    setNewSnackForm({ name: '', cost: '', image: '' });
-    setIsAddingSnack(false);
-    reloadCabinet();
+    try {
+      // The photo goes to Drive on the way in, so this can fail for reasons the
+      // name and cost never could. Saying so beats a form that just sits there.
+      await database.addSnack(newSnackForm);
+      setNewSnackForm({ name: '', cost: '', image: '' });
+      setIsAddingSnack(false);
+      reloadCabinet();
+    } catch (err) {
+      toast.error(err.userMessage || err.response?.data?.message || 'Could not save the snack.');
+    }
   };
 
   const handlePurchase = async (snack) => {
@@ -148,7 +181,11 @@ const SnackCabinetModal = ({
             <div className="cabinet-grid">
               {snackCabinet.map(snack => (
                 <div key={snack.id} className="snack-item" onClick={() => !isManagingCabinet && handlePurchase(snack)}>
-                  <img src={snack.image} alt={snack.name} className="snack-img" />
+                  {snack.imagePath ? (
+                    <ProtectedImage apiPath={snack.imagePath} alt={snack.name} className="snack-img" />
+                  ) : (
+                    <img src={snack.image} alt={snack.name} className="snack-img" />
+                  )}
                   <div className="snack-info">
                     <span className="snack-name">{snack.name}</span>
                     <span className="snack-cost">{snack.costPunches} Punches</span>

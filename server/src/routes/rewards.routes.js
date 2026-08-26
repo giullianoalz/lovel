@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/roles.js';
 import {
   listSnacks,
+  getSnackImage,
   createSnack,
   deleteSnack,
   purchaseSnack,
@@ -16,6 +17,9 @@ const router = Router();
 
 // --- Snack cabinet ---
 router.get('/snacks', authenticate, listSnacks);
+// Anyone who can see the cabinet can see its photos — same audience as the
+// list above, which parents reach from the portal.
+router.get('/snacks/:id/image', authenticate, getSnackImage);
 router.post('/snacks', authenticate, requireRole('ADMIN', 'TEACHER'), createSnack);
 router.delete('/snacks/:id', authenticate, requireRole('ADMIN', 'TEACHER'), deleteSnack);
 router.post('/snacks/purchase', authenticate, requireRole('ADMIN', 'TEACHER'), purchaseSnack);

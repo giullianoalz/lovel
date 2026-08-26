@@ -705,6 +705,12 @@ model SnackItem {
   id          String          @id @default(uuid()) @db.Uuid
   name        String          @db.VarChar(255)
   costPunches Int             @map("cost_punches")
+  // Where the photo lives, when it lives in Drive. Staff add a snack by taking
+  // a picture at the cabinet with their phone, and the old path stuffed that
+  // picture into imageUrl as a base64 data URI: 11 rows grew to 62 MB, four
+  // fifths of the whole database, for photos of granola bars. The bytes go to
+  // Drive now and imageUrl holds the API path that streams them back.
+  driveFileId String?         @map("drive_file_id")
   imageUrl    String?         @map("image_url")
   isActive    Boolean         @default(true) @map("is_active")
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
