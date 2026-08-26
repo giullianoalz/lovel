@@ -87,6 +87,11 @@ model User {
   // teacher as "this child has an accommodation". ADMIN only; every student
   // response strips it for anyone else (see students.controller.js).
   staffNotes             String?                   @map("staff_notes")
+  // Staff-set "no photos" flag, independent of the waiver's own photoOptOut.
+  // Covers a request that comes in after the waiver was already signed (or a
+  // family with no waiver on file yet) — front desk and marketing both need a
+  // single source of truth for "don't post this kid," not two.
+  noPhotosOverride       Boolean                   @default(false) @map("no_photos_override")
   authoredAnnouncements  Announcement[]
   attendance             Attendance[]
   doorEventsAsStudent    AttendanceEvent[]         @relation("DoorEventStudent")

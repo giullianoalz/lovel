@@ -192,6 +192,7 @@ export const listWaivers = async (req, res, next) => {
         id: true,
         fullName: true,
         status: true,
+        noPhotosOverride: true,
         liabilityWaiver: {
           select: { id: true, signedAt: true, parentName: true, documentVersion: true, photoOptOut: true },
         },
@@ -214,10 +215,43 @@ export const listWaivers = async (req, res, next) => {
         signedAt: s.liabilityWaiver?.signedAt || null,
         signedByName: s.liabilityWaiver?.parentName || null,
         documentVersion: s.liabilityWaiver?.documentVersion || null,
+        // The waiver's own opt-out and the staff override are two independent
+        // switches — either one alone is enough to keep a kid off camera, so
+        // the UI is handed both plus the OR'd result it actually needs to badge.
         photoOptOut: s.liabilityWaiver?.photoOptOut || false,
+        noPhotosOverride: s.noPhotosOverride,
+        noPhotos: Boolean(s.liabilityWaiver?.photoOptOut) || s.noPhotosOverride,
       }))
     );
   } catch (error) {
+    next(error);
+  }
+};
+
+// PUT /api/waivers/:studentId/no-photos — staff-set flag, independent of
+// whatever the waiver itself says. Covers a request that arrives after
+// signing, or a family with no waiver on file yet.
+export const setNoPhotosOverride = async (req, res, next) => {
+  try {
+    const { noPhotos } = req.body;
+    if (typeof noPhotos !== 'boolean') {
+      return res.status(400).json({
+        error: 'Bad Request',
+        message: 'noPhotos must be true or false.',
+      });
+    }
+
+    const student = await prisma.user.update({
+      where: { id: req.params.studentId, role: 'STUDENT' },
+      data: { noPhotosOverride: noPhotos },
+      select: { id: true, fullName: true, noPhotosOverride: true },
+    });
+
+    res.json({ message: 'Updated.', student });
+  } catch (error) {
+    if (error.code === 'P2025') {
+      return res.status(404).json({ error: 'Not Found', message: 'Student not found.' });
+    }
     next(error);
   }
 };

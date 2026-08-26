@@ -6,6 +6,7 @@ import {
   signWaiver,
   listWaivers,
   getWaiverPdf,
+  setNoPhotosOverride,
 } from '../controllers/waivers.controller.js';
 
 const router = Router();
@@ -21,5 +22,8 @@ router.get('/', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), listWaivers)
 
 // GET /api/waivers/:id/pdf — parents get their own, staff get any
 router.get('/:id/pdf', authenticate, getWaiverPdf);
+
+// PUT /api/waivers/:studentId/no-photos — manual staff override
+router.put('/:studentId/no-photos', authenticate, requireRole('ADMIN', 'RECEPTIONIST'), setNoPhotosOverride);
 
 export default router;

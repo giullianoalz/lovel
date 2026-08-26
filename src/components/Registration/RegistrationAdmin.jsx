@@ -133,6 +133,7 @@ const RegistrationAdmin = () => {
   const [waiversLoading, setWaiversLoading] = useState(false);
   const [waiverFilter, setWaiverFilter] = useState('UNSIGNED');
   const [waiverDownloading, setWaiverDownloading] = useState(null);
+  const [noPhotosSaving, setNoPhotosSaving] = useState(null);
 
   // ── Manual Registration state ──────────────────────────────────────────────
   const [manualTermElectives, setManualTermElectives] = useState([]);
@@ -351,6 +352,26 @@ const RegistrationAdmin = () => {
   const visibleWaivers = waivers.filter(w =>
     waiverFilter === 'ALL' ? true : waiverFilter === 'SIGNED' ? w.signed : !w.signed
   );
+
+  // Manual override, independent of whatever the waiver itself says — for a
+  // request that arrives after signing, or a family with no waiver on file.
+  const handleToggleNoPhotos = async (studentId, nextValue) => {
+    setNoPhotosSaving(studentId);
+    try {
+      await api.put(`/waivers/${studentId}/no-photos`, { noPhotos: nextValue });
+      setWaivers(prev =>
+        prev.map(w =>
+          w.studentId === studentId
+            ? { ...w, noPhotosOverride: nextValue, noPhotos: w.photoOptOut || nextValue }
+            : w
+        )
+      );
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setNoPhotosSaving(null);
+    }
+  };
 
   // The term a placement should default to: the nearest one still accepting
   // registrations. Terms arrive newest-first, so the last one that has not
@@ -1362,8 +1383,17 @@ const RegistrationAdmin = () => {
                       <span className={`badge ${w.signed ? 'active' : 'danger'}`}>
                         {w.signed ? 'Signed' : 'Not signed'}
                       </span>
-                      {w.signed && w.photoOptOut && (
-                        <span className="badge pending" title="Parent opted out of photo/video use">
+                      {w.noPhotos && (
+                        <span
+                          className="badge pending"
+                          title={
+                            w.photoOptOut && w.noPhotosOverride
+                              ? 'Parent opted out on the waiver, and staff also flagged this student'
+                              : w.photoOptOut
+                              ? 'Parent opted out of photo/video use on the waiver'
+                              : 'Staff-flagged: no photos'
+                          }
+                        >
                           No Photos
                         </span>
                       )}
@@ -1373,16 +1403,27 @@ const RegistrationAdmin = () => {
                       {w.signed && ` · signed by ${w.signedByName} on ${formatDateForDisplay(w.signedAt)}`}
                     </p>
                   </div>
-                  {w.signed && (
-                    <button
-                      className="btn-outline"
-                      disabled={waiverDownloading === w.waiverId}
-                      onClick={() => handleDownloadWaiver(w.waiverId, w.studentName)}
-                    >
-                      <Download size={14} />
-                      {waiverDownloading === w.waiverId ? 'Preparing...' : 'Download PDF'}
-                    </button>
-                  )}
+                  <div className="waiver-row-actions">
+                    <label className="checkbox-label text-sm" title="Manual override, independent of the waiver">
+                      <input
+                        type="checkbox"
+                        checked={w.noPhotosOverride}
+                        disabled={noPhotosSaving === w.studentId}
+                        onChange={(e) => handleToggleNoPhotos(w.studentId, e.target.checked)}
+                      />
+                      No photos (manual)
+                    </label>
+                    {w.signed && (
+                      <button
+                        className="btn-outline"
+                        disabled={waiverDownloading === w.waiverId}
+                        onClick={() => handleDownloadWaiver(w.waiverId, w.studentName)}
+                      >
+                        <Download size={14} />
+                        {waiverDownloading === w.waiverId ? 'Preparing...' : 'Download PDF'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
