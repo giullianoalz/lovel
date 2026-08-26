@@ -373,12 +373,21 @@ const BillingPanel = () => {
     }
   };
 
+  // Voiding removes the document only. Its charges go back to the ledger as
+  // unbilled, which is what makes "void it and raise a correct one" work —
+  // they show up again under Unbilled, ready to go onto the new invoice. An
+  // admin who wants a charge gone deletes that row from the ledger instead.
   const handleVoidInvoice = async (inv) => {
-    if (!window.confirm(`Void invoice ${inv.id} ($${inv.amount.toFixed(2)})? This removes it and its charge from the family's ledger. This cannot be undone.`)) return;
+    if (!window.confirm(
+      `Void invoice ${inv.id} ($${inv.amount.toFixed(2)})?\n\n`
+      + `The document goes away, but its charges stay on the family's ledger as `
+      + `unbilled — invoice them again from Unbilled, or delete them one by one `
+      + `if they shouldn't be there at all.`
+    )) return;
     setVoidingInvoiceId(inv.dbId);
     try {
-      await database.voidInvoice(inv.dbId);
-      toast.success('Invoice voided.');
+      const res = await database.voidInvoice(inv.dbId);
+      toast.success(res?.message || 'Invoice voided.');
       await loadBilling();
     } catch (err) {
       toast.error(err.response?.data?.message || err.userMessage || 'Could not void the invoice.');
@@ -491,8 +500,9 @@ const BillingPanel = () => {
 
   // Editing an invoice's line items — { invoice, lines: [{ id?, description, amount }] }.
   // Lines without an `id` are new; a line present when the modal opened but
-  // missing on save is treated as deleted. Deleting every line voids the
-  // whole invoice (the server does the same thing either way).
+  // missing on save is treated as deleted, and its ledger charge goes with it.
+  // Deleting every line therefore removes the invoice AND its charges — which
+  // is not the same as the Void button, that keeps them. See handleVoidInvoice.
   const [editInvoiceModal, setEditInvoiceModal] = useState(null);
   const [savingInvoiceEdit, setSavingInvoiceEdit] = useState(false);
 
@@ -525,7 +535,13 @@ const BillingPanel = () => {
       toast.error('Every line needs a description and a positive amount.');
       return;
     }
-    if (lines.length === 0 && !window.confirm('This removes every line, which voids the whole invoice. Continue?')) {
+    // Unlike the Void button, emptying the list deletes the charges too —
+    // striking off every line is "none of these should exist", not "this
+    // document is wrong". Worth spelling out, because the two look alike.
+    if (lines.length === 0 && !window.confirm(
+      'This removes every line, so the invoice AND its charges are deleted from the ledger.\n\n'
+      + 'To keep the charges and just redo the document, cancel and use Void instead.\n\nContinue?'
+    )) {
       return;
     }
     setSavingInvoiceEdit(true);
@@ -1776,7 +1792,7 @@ const BillingPanel = () => {
                         {inv.voidable && (
                           <button
                             className="tx-delete-btn"
-                            title="Void this invoice — removes it and its charge from the ledger"
+                            title="Void this invoice — removes the document; its charges go back to Unbilled"
                             onClick={() => handleVoidInvoice(inv)}
                             disabled={voidingInvoiceId === inv.dbId}
                           >
@@ -2636,7 +2652,7 @@ const BillingPanel = () => {
               <p className="text-muted" style={{fontSize: '13px'}}>
                 <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
                 New total: ${editInvoiceModal.lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0).toFixed(2)}.
-                {editInvoiceModal.lines.length === 0 && ' Saving with no lines voids this invoice.'}
+                {editInvoiceModal.lines.length === 0 && ' Saving with no lines deletes this invoice and its charges — use Void instead to keep the charges.'}
               </p>
             </div>
             <div className="modal-actions" style={{marginTop: '24px'}}>

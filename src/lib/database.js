@@ -463,6 +463,9 @@ export const database = {
     return response.data;
   },
 
+  // Deletes the document and releases its charges back to the ledger as
+  // unbilled — it does NOT delete them, so the corrected invoice can be built
+  // from the same charges. Returns { message, released }.
   // Only succeeds for an invoice no Payment row has ever touched — the
   // server refuses anything else with a 409 explaining why.
   voidInvoice: async (id) => {

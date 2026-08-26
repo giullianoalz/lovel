@@ -308,9 +308,45 @@ export const updateTransaction = async (req, res, next) => {
 };
 
 /**
+ * Releases an invoice's charges back onto the ledger and deletes the empty
+ * document — what voiding an invoice means. Named rather than inlined into
+ * voidInvoice so the contrast with editInvoice's "no lines left" branch, which
+ * deliberately does the opposite, is visible from both sides.
+ *
+ * **Voiding removes the document, never the charges.** It used to delete them
+ * too, and that was a real bug: the way an admin fixes a wrong invoice is to
+ * void it and raise a correct one, and every charge underneath vanished with
+ * the first step — the family's ledger emptied out and there was nothing left
+ * to re-invoice. Worse, a deleted charge takes its identity with it: the
+ * `(studentId, sessionId)` unique index is the only thing stopping the calendar
+ * sweep from billing the same meeting twice, and a charge that no longer exists
+ * no longer blocks anything.
+ *
+ * Detached charges land back in the unbilled list, which is exactly where
+ * createInvoice looks (`invoiceId: null`), so the correct invoice can be built
+ * from them straight away. A charge that genuinely should not exist is removed
+ * one row at a time from the ledger, by an admin who means it — see
+ * deleteTransaction.
+ *
+ * Returns how many charges were released so the caller can say so.
+ */
+const releaseChargesAndDeleteInvoice = async (tx, invoiceId) => {
+  const { count } = await tx.transaction.updateMany({
+    where: { invoiceId },
+    data: { invoiceId: null },
+  });
+  // InvoiceLine cascades on delete (see schema.prisma), and its transactionId
+  // FK is SET NULL, so the charges detached above are left untouched by it.
+  await tx.invoice.delete({ where: { id: invoiceId } });
+  return count;
+};
+
+/**
  * DELETE /api/billing/invoices/:id
  * Voids a mistaken invoice — e.g. a registration deposit raised against a
- * class whose price was wrong — along with the charge underneath it.
+ * class whose price was wrong. The charges underneath it are released back to
+ * the ledger as unbilled, ready to go onto a corrected invoice; see
+ * releaseChargesAndDeleteInvoice for why they are never deleted here.
  *
  * Refused once any Payment row references the invoice, same spirit as
  * deleteTransaction: once real money has touched it (even a PENDING Stripe
@@ -338,19 +374,16 @@ export const voidInvoice = async (req, res, next) => {
       });
     }
 
-    await prisma.$transaction(async (tx) => {
-      // Only charges this invoice itself raised, and only ones with no
-      // payment attached (paymentCount === 0 above already guarantees that
-      // for the family, but scoping the delete this way keeps the rule
-      // self-evident rather than relying on the earlier check alone).
-      await tx.transaction.deleteMany({ where: { invoiceId: invoice.id, paymentId: null } });
-      // InvoiceLine cascades on delete (see schema.prisma).
-      await tx.invoice.delete({ where: { id: invoice.id } });
+    const released = await prisma.$transaction((tx) => releaseChargesAndDeleteInvoice(tx, invoice.id));
+
+    console.log(`[Billing] ${req.user.email} voided invoice ${invoice.invoiceNumber} ($${invoice.totalAmount}, family ${invoice.familyId}) — ${released} charge(s) released back to the ledger`);
+
+    res.json({
+      message: released > 0
+        ? `Invoice voided. ${released} charge${released === 1 ? '' : 's'} released back to the ledger — invoice them again from Unbilled.`
+        : 'Invoice voided.',
+      released,
     });
-
-    console.log(`[Billing] ${req.user.email} voided invoice ${invoice.invoiceNumber} ($${invoice.totalAmount}, family ${invoice.familyId})`);
-
-    res.json({ message: 'Invoice voided.' });
   } catch (error) {
     next(error);
   }
@@ -364,8 +397,8 @@ export const voidInvoice = async (req, res, next) => {
  * that line (and the ledger Transaction underneath it, so the family's balance
  * stays correct); an existing line left out of the array is removed along with
  * its Transaction; a line with no `id` raises a brand new charge on the
- * invoice. An empty `lines` array voids the whole invoice — same rule as
- * DELETE, just reached from the edit screen instead of a separate button.
+ * invoice. An empty `lines` array removes the invoice and every charge on it —
+ * which is NOT what DELETE /invoices/:id does; see the note at that branch.
  *
  * Same money-already-moved guard as voidInvoice: refused once any Payment
  * references the invoice. Editing a paid line would silently change what a
@@ -408,15 +441,21 @@ export const editInvoice = async (req, res, next) => {
       }
     }
 
-    // No lines left after the edit is the same outcome as voiding — reuse
-    // that path exactly rather than duplicating the "delete everything" logic.
+    // Every line struck off, which leaves no document to keep.
+    //
+    // This one DOES delete the charges, unlike voidInvoice — and the two are
+    // different on purpose. Voiding says "this document is wrong"; the charges
+    // are still owed and go back on the ledger to be re-invoiced. Deleting
+    // every line one at a time says "none of these charges should exist", the
+    // same thing each individual removal says in the loop below. Emptying the
+    // list is that action repeated, not a void reached by another route.
     if (lines.length === 0) {
       await prisma.$transaction(async (tx) => {
         await tx.transaction.deleteMany({ where: { invoiceId: invoice.id, paymentId: null } });
         await tx.invoice.delete({ where: { id: invoice.id } });
       });
-      console.log(`[Billing] ${req.user.email} emptied and voided invoice ${invoice.invoiceNumber} via edit (family ${invoice.familyId})`);
-      return res.json({ message: 'Invoice had no lines left and was voided.', voided: true });
+      console.log(`[Billing] ${req.user.email} emptied invoice ${invoice.invoiceNumber} via edit, deleting its charges (family ${invoice.familyId})`);
+      return res.json({ message: 'Invoice had no lines left, so it and its charges were removed.', voided: true });
     }
 
     const submittedIds = new Set(lines.filter((l) => l.id).map((l) => l.id));
