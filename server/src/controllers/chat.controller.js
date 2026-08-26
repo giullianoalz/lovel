@@ -197,7 +197,7 @@ export const getThreads = async (req, res, next) => {
           participants: { include: { user: true } },
           messages: { orderBy: { sentAt: 'desc' }, take: 1 },
         },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
       });
 
       const maskMap = await buildParentMaskMap(
