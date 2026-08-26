@@ -31,6 +31,11 @@ dev-dist
 .env
 .env.local
 .env.production
+# ...and every hand-made copy of one. A backup taken before editing carries the
+# same live database and API credentials as the original.
+.env.bak*
+.env.backup*
+.env.*.bak
 
 # Claude Code local settings
 .claude/settings.local.json
