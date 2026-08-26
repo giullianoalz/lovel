@@ -337,6 +337,15 @@
   opacity: 0.85;
 }
 
+/* Adding punches raises a real charge against the family — say so where the
+   plus button is, not only in the confirm dialog. */
+.punch-adjust-note {
+  display: block;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+
 .punch-adjust-row {
   display: flex;
   align-items: center;

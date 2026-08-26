@@ -147,16 +147,22 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
     onUpdate?.(next);
   };
 
-  /* Punch the card by hand: corrections, comped punches, and reloads the
-     zero-balance flow never raised (it only fires when the card lands exactly
-     on 0). This moves the punch balance and nothing else — a paid reload still
-     goes through the parent-approved queue. */
+  /* Punch the card by hand: top-ups at the desk and corrections.
+     Adding punches bills the family for them at the reload rate — the server
+     raises the charge and tells us what it came to — so this asks first.
+     Removing punches never charges anything. */
   const handleAdjustPunches = async (direction) => {
     const amount = parseInt(adjustAmount, 10);
     if (!Number.isInteger(amount) || amount <= 0) {
       toast.error('Enter how many punches to add or remove.');
       return;
     }
+    if (direction > 0 && !window.confirm(
+      `Add ${amount} punch${amount === 1 ? '' : 'es'} to ${student.name}'s card?
+
+` +
+      'The family will be charged for them at the reload rate.'
+    )) return;
     setAdjusting(true);
     try {
       const res = await api.put(`/students/${student.id}/snack-punches`, {
@@ -164,11 +170,13 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
         action: 'add',
       });
       const balance = res.data.student.snackPunches;
+      const charged = res.data.charge?.amount;
       const next = { ...student, snackPunches: balance };
       setStudent(next);
       onUpdate?.(next);
       toast.success(
-        `${direction > 0 ? 'Added' : 'Removed'} ${amount} punch${amount === 1 ? '' : 'es'} — balance is now ${balance}.`
+        `${direction > 0 ? 'Added' : 'Removed'} ${amount} punch${amount === 1 ? '' : 'es'} — balance is now ${balance}.` +
+        (charged ? ` Charged ${Number(charged).toFixed(2)} to the family.` : '')
       );
     } catch (err) {
       toast.error(err.response?.data?.message || 'Could not update the snack card.');
@@ -411,6 +419,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               {canAdjustPunches && (
                 <div className="punch-adjust">
                   <span className="punch-adjust-label">Adjust punches</span>
+                  <span className="punch-adjust-note">Adding punches charges the family.</span>
                   <div className="punch-adjust-row">
                     <button
                       className="punch-step"

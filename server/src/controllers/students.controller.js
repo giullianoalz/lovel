@@ -3,6 +3,13 @@ import { canUseSnackPunches } from '../utils/snackEligibility.js';
 import { hasRole, isOnly, isFrontDeskOnly } from '../utils/roles.js';
 import { resolvePaging } from '../utils/helpers.js';
 import { invalidate } from '../middleware/cache.js';
+import {
+  maybeCreateReloadRequest,
+  getReloadPricing,
+  priceForPunches,
+  OPEN_RELOAD_STATUSES,
+} from '../services/snackReload.service.js';
+import { getParentUserIdsForStudents } from '../services/notificationConfig.service.js';
 
 /**
  * Prisma filter limiting a teacher to the students they actually teach.
@@ -492,11 +499,23 @@ export const updateStaffNotes = async (req, res, next) => {
 
 /**
  * PUT /api/students/:id/snack-punches
- * Add or set snack punches for a student
+ * Add, remove or set snack punches by hand.
+ *
+ * Punches are not free: a paid reload normally goes parent-approval → front
+ * desk, and this endpoint was the hole in that — anybody could hand a child ten
+ * punches and the family was never billed for them. So any manual increase
+ * raises a CHARGE against the family for exactly the punches added, priced off
+ * the same reload package the approval flow quotes. Pass `charge: false` to
+ * comp punches (a correction, a prize, a mis-punch being undone); removing or
+ * setting a lower balance never charges anything.
+ *
+ * And if the adjustment leaves the card empty, it raises the same reload
+ * request a purchase would — the depletion alert should not depend on *how*
+ * the card reached zero.
  */
 export const updateSnackPunches = async (req, res, next) => {
   try {
-    const { punches, action = 'add' } = req.body;
+    const { punches, action = 'add', charge = true } = req.body;
 
     if (punches === undefined || isNaN(parseInt(punches))) {
       return res.status(400).json({
@@ -527,14 +546,81 @@ export const updateSnackPunches = async (req, res, next) => {
       });
     }
 
-    const updated = await prisma.user.update({
-      where: { id: req.params.id },
-      data: { snackPunches: newPunches },
+    const added = newPunches - student.snackPunches;
+    const billable = added > 0 && charge !== false;
+
+    // Only look up pricing and the family when there is actually something to
+    // bill — a correction downward stays a single UPDATE.
+    let amount = 0;
+    let familyId = null;
+    if (billable) {
+      const { pricePerPunch } = await getReloadPricing();
+      amount = priceForPunches(pricePerPunch, added);
+      const familyMember = await prisma.familyMember.findFirst({
+        where: { userId: student.id },
+        select: { familyId: true },
+      });
+      familyId = familyMember?.familyId ?? null;
+    }
+
+    const { updated, transaction } = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: req.params.id },
+        data: { snackPunches: newPunches },
+      });
+
+      if (!billable || amount <= 0) return { updated, transaction: null };
+
+      const transaction = await tx.transaction.create({
+        data: {
+          studentId: student.id,
+          familyId,
+          amount,
+          type: 'CHARGE',
+          description: `Snack punches added by staff — ${added} punch(es)`,
+        },
+      });
+
+      // Staff topping the card up by hand is the same act the approval queue
+      // exists for, so an open request for this student is settled here rather
+      // than left waiting for a second, double-charging top-up at the desk.
+      const open = await tx.snackReloadRequest.findFirst({
+        where: { studentId: student.id, status: { in: OPEN_RELOAD_STATUSES } },
+        select: { id: true },
+      });
+      if (open) {
+        await tx.snackReloadRequest.updateMany({
+          where: { id: open.id, status: { in: OPEN_RELOAD_STATUSES } },
+          data: {
+            status: 'FULFILLED',
+            fulfilledById: req.user.id,
+            fulfilledAt: new Date(),
+            transactionId: transaction.id,
+          },
+        });
+      }
+
+      return { updated, transaction };
     });
 
+    // The parent portal caches the balance and the reload banner for 60 s —
+    // bust it so a charge raised at the desk is visible right away.
+    if (transaction) {
+      const parentIds = await getParentUserIdsForStudents([student.id]);
+      parentIds.forEach((id) => invalidate(`portal:parent:${id}`));
+    }
+
+    // Card is empty however it got there — raise the parent-approval request
+    // (best-effort; it never fails the adjustment).
+    if (updated.snackPunches <= 0) {
+      await maybeCreateReloadRequest(student.id, req.user?.id);
+    }
+
+    const chargeNote = transaction ? ` Charged $${amount.toFixed(2)} to the family.` : '';
     res.json({
-      message: `Snack punches updated. New balance: ${updated.snackPunches}`,
+      message: `Snack punches updated. New balance: ${updated.snackPunches}.${chargeNote}`,
       student: updated,
+      charge: transaction ? { id: transaction.id, amount } : null,
     });
   } catch (error) {
     next(error);
