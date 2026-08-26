@@ -474,6 +474,9 @@ export const database = {
   },
 
   // Rewrites an invoice's line items (description/amount, add/remove lines).
+  // A line dropped from the array comes off the invoice and its charge is left
+  // unbilled on the ledger, never deleted — same rule as voidInvoice, and an
+  // empty array voids the invoice outright. Returns { message, released, invoice }.
   // Same "no payment has touched it yet" restriction as voidInvoice.
   editInvoice: async (id, lines) => {
     const response = await api.patch(`/billing/invoices/${id}`, { lines });

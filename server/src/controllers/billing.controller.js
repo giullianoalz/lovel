@@ -395,10 +395,19 @@ export const voidInvoice = async (req, res, next) => {
  * Rewrites an invoice's line items — a mistaken price or description on a
  * charge that's already been billed. Each submitted line with an `id` updates
  * that line (and the ledger Transaction underneath it, so the family's balance
- * stays correct); an existing line left out of the array is removed along with
- * its Transaction; a line with no `id` raises a brand new charge on the
- * invoice. An empty `lines` array removes the invoice and every charge on it —
- * which is NOT what DELETE /invoices/:id does; see the note at that branch.
+ * stays correct); a line with no `id` raises a brand new charge on the invoice.
+ *
+ * An existing line left out of the array is taken off the invoice and its
+ * charge is **released back to the ledger as unbilled** — not deleted. Same
+ * rule as voidInvoice, and an empty array is just that rule applied to every
+ * line at once, so it takes the same path.
+ *
+ * Removing a line used to delete its charge. That made "take this off the
+ * invoice" and "this charge should never have existed" the same button, and
+ * they are not the same thing: the first is routine (the wrong line landed on
+ * the wrong document) and the second is rare. Nothing on the invoice screen
+ * deletes a charge any more. Deleting one is done deliberately, one row at a
+ * time, from the ledger — see deleteTransaction.
  *
  * Same money-already-moved guard as voidInvoice: refused once any Payment
  * references the invoice. Editing a paid line would silently change what a
@@ -441,35 +450,37 @@ export const editInvoice = async (req, res, next) => {
       }
     }
 
-    // Every line struck off, which leaves no document to keep.
-    //
-    // This one DOES delete the charges, unlike voidInvoice — and the two are
-    // different on purpose. Voiding says "this document is wrong"; the charges
-    // are still owed and go back on the ledger to be re-invoiced. Deleting
-    // every line one at a time says "none of these charges should exist", the
-    // same thing each individual removal says in the loop below. Emptying the
-    // list is that action repeated, not a void reached by another route.
+    // Every line struck off leaves no document to keep, and taking the last
+    // line off an invoice means the same thing as voiding it — so it is the
+    // same code, not a second version of it that could drift.
     if (lines.length === 0) {
-      await prisma.$transaction(async (tx) => {
-        await tx.transaction.deleteMany({ where: { invoiceId: invoice.id, paymentId: null } });
-        await tx.invoice.delete({ where: { id: invoice.id } });
+      const released = await prisma.$transaction((tx) => releaseChargesAndDeleteInvoice(tx, invoice.id));
+      console.log(`[Billing] ${req.user.email} emptied and voided invoice ${invoice.invoiceNumber} via edit (family ${invoice.familyId}) — ${released} charge(s) released back to the ledger`);
+      return res.json({
+        message: released > 0
+          ? `Invoice had no lines left and was voided. ${released} charge${released === 1 ? '' : 's'} released back to the ledger — invoice them again from Unbilled.`
+          : 'Invoice had no lines left and was voided.',
+        voided: true,
+        released,
       });
-      console.log(`[Billing] ${req.user.email} emptied invoice ${invoice.invoiceNumber} via edit, deleting its charges (family ${invoice.familyId})`);
-      return res.json({ message: 'Invoice had no lines left, so it and its charges were removed.', voided: true });
     }
 
     const submittedIds = new Set(lines.filter((l) => l.id).map((l) => l.id));
     const removedLines = invoice.lines.filter((l) => !submittedIds.has(l.id));
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Off the document, still on the ledger. Deleting the line is enough to
+      // release the charge: InvoiceLine.transactionId is the only thing tying
+      // the two together, and the charge's own invoiceId is cleared here so it
+      // shows up as unbilled and can go onto the corrected invoice.
       for (const removed of removedLines) {
-        // Transaction.invoiceLine has onDelete: SetNull, not Cascade — deleting
-        // the transaction only nulls the line's FK, it doesn't remove the line
-        // itself, so both rows need an explicit delete here.
-        if (removed.transactionId) {
-          await tx.transaction.delete({ where: { id: removed.transactionId } });
-        }
         await tx.invoiceLine.delete({ where: { id: removed.id } });
+        if (removed.transactionId) {
+          await tx.transaction.update({
+            where: { id: removed.transactionId },
+            data: { invoiceId: null },
+          });
+        }
       }
 
       for (const l of lines) {
@@ -509,10 +520,15 @@ export const editInvoice = async (req, res, next) => {
       });
     });
 
-    console.log(`[Billing] ${req.user.email} edited invoice ${invoice.invoiceNumber} (family ${invoice.familyId}) — new total $${updated.totalAmount}`);
+    const released = removedLines.filter((l) => l.transactionId).length;
+
+    console.log(`[Billing] ${req.user.email} edited invoice ${invoice.invoiceNumber} (family ${invoice.familyId}) — new total $${updated.totalAmount}, ${released} charge(s) released back to the ledger`);
 
     res.json({
-      message: 'Invoice updated.',
+      message: released > 0
+        ? `Invoice updated. ${released} charge${released === 1 ? '' : 's'} taken off it and left unbilled on the ledger.`
+        : 'Invoice updated.',
+      released,
       invoice: {
         id: updated.invoiceNumber,
         dbId: updated.id,

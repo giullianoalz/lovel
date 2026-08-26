@@ -500,9 +500,10 @@ const BillingPanel = () => {
 
   // Editing an invoice's line items — { invoice, lines: [{ id?, description, amount }] }.
   // Lines without an `id` are new; a line present when the modal opened but
-  // missing on save is treated as deleted, and its ledger charge goes with it.
-  // Deleting every line therefore removes the invoice AND its charges — which
-  // is not the same as the Void button, that keeps them. See handleVoidInvoice.
+  // missing on save is taken off the invoice, and its charge goes back to the
+  // ledger as unbilled rather than being deleted. Same rule as the Void button
+  // — nothing on this screen destroys a charge. That is only ever done on
+  // purpose, one row at a time, with Delete Transaction on the Ledger tab.
   const [editInvoiceModal, setEditInvoiceModal] = useState(null);
   const [savingInvoiceEdit, setSavingInvoiceEdit] = useState(false);
 
@@ -535,19 +536,16 @@ const BillingPanel = () => {
       toast.error('Every line needs a description and a positive amount.');
       return;
     }
-    // Unlike the Void button, emptying the list deletes the charges too —
-    // striking off every line is "none of these should exist", not "this
-    // document is wrong". Worth spelling out, because the two look alike.
     if (lines.length === 0 && !window.confirm(
-      'This removes every line, so the invoice AND its charges are deleted from the ledger.\n\n'
-      + 'To keep the charges and just redo the document, cancel and use Void instead.\n\nContinue?'
+      'This removes every line, which voids the whole invoice.\n\n'
+      + 'Its charges stay on the ledger as unbilled, so you can invoice them again.\n\nContinue?'
     )) {
       return;
     }
     setSavingInvoiceEdit(true);
     try {
-      await database.editInvoice(editInvoiceModal.invoice.dbId, lines);
-      toast.success(lines.length === 0 ? 'Invoice voided.' : 'Invoice updated.');
+      const res = await database.editInvoice(editInvoiceModal.invoice.dbId, lines);
+      toast.success(res?.message || (lines.length === 0 ? 'Invoice voided.' : 'Invoice updated.'));
       setEditInvoiceModal(null);
       await loadBilling();
     } catch (err) {
@@ -2637,7 +2635,7 @@ const BillingPanel = () => {
                   </div>
                   <button
                     className="tx-delete-btn"
-                    title="Remove this line"
+                    title="Take this line off the invoice — its charge stays on the ledger as unbilled"
                     onClick={() => removeEditLine(i)}
                   >
                     <Trash2 size={14} />
@@ -2652,7 +2650,8 @@ const BillingPanel = () => {
               <p className="text-muted" style={{fontSize: '13px'}}>
                 <AlertCircle size={14} style={{display:'inline', marginRight:'4px'}}/>
                 New total: ${editInvoiceModal.lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0).toFixed(2)}.
-                {editInvoiceModal.lines.length === 0 && ' Saving with no lines deletes this invoice and its charges — use Void instead to keep the charges.'}
+                {' '}Removing a line takes it off this invoice; its charge stays on the ledger as unbilled.
+                {editInvoiceModal.lines.length === 0 && ' Saving with no lines voids this invoice.'}
               </p>
             </div>
             <div className="modal-actions" style={{marginTop: '24px'}}>
