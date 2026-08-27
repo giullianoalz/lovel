@@ -687,6 +687,14 @@ export const database = {
     return response.data; // { success, newBalance }
   },
 
+  // Takes shells off a balance without handing over a prize — a miscount, a
+  // shell logged on the wrong student, a behaviour correction. Recorded as
+  // REMOVED in prize history rather than as a redemption.
+  removeSeashells: async (studentId, reason, points) => {
+    const response = await api.post('/rewards/seashells/remove', { studentId, reason, points: parseInt(points) });
+    return response.data; // { success, newBalance }
+  },
+
   // --- Student Specific Dashboard Data ---
   fetchStudentData: async () => {
     try {

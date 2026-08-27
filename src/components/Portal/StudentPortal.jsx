@@ -79,7 +79,10 @@ const StudentPortal = () => {
   const initials  = student.fullName?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || '?';
 
   const earned   = seashellHistory.filter(p => p.type === 'EARNED').reduce((a, p) => a + p.points, 0);
-  const redeemed = seashellHistory.filter(p => p.type !== 'EARNED').reduce((a, p) => a + p.points, 0);
+  // Redeemed and removed both come off the balance, but only one of them got
+  // the student a prize — the card counts them separately.
+  const redeemed = seashellHistory.filter(p => p.type === 'REDEEMED').reduce((a, p) => a + p.points, 0);
+  const removed  = seashellHistory.filter(p => p.type === 'REMOVED').reduce((a, p) => a + p.points, 0);
 
   return (
     <div className="sp-root">
@@ -159,6 +162,7 @@ const StudentPortal = () => {
                 <div className="sp-progress-nums">
                   <span className="sp-earned">+{earned} earned</span>
                   {redeemed > 0 && <span className="sp-redeemed">−{redeemed} redeemed</span>}
+                  {removed > 0 && <span className="sp-redeemed">−{removed} removed</span>}
                 </div>
               </div>
               <div className="sp-progress-bar-wrap">

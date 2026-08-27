@@ -31,6 +31,13 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const [redeemCost, setRedeemCost] = useState('');
   const [redeeming, setRedeeming] = useState(false);
 
+  /* Remove state — shells coming off a balance with no prize handed over:
+     a miscount, shells logged on the wrong student, a behaviour correction. */
+  const [showRemove, setShowRemove] = useState(false);
+  const [removeReason, setRemoveReason] = useState('');
+  const [removeAmount, setRemoveAmount] = useState('');
+  const [removing, setRemoving] = useState(false);
+
   /* ── Manual snack-punch adjustment (staff) ── */
   const canAdjustPunches = hasRole('ADMIN', 'TEACHER');
   const [adjustAmount, setAdjustAmount] = useState('1');
@@ -191,6 +198,7 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   );
 
   const redeemExceedsBalance = Number(redeemCost) > (student.seashells || 0);
+  const removeExceedsBalance = Number(removeAmount) > (student.seashells || 0);
 
   /* `birthday` is a pure DATE column, so it arrives as UTC midnight. Feeding
      that straight to `new Date()` renders the day before anywhere west of
@@ -225,6 +233,42 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
       toast.error('Redeem error: ' + (result?.error || 'Unknown error'));
     }
     setRedeeming(false);
+  };
+
+  /* Take shells back off the balance without redeeming them. Nothing is handed
+     over, so this asks for a reason and lands in prize history as REMOVED —
+     the log has to say what actually happened. */
+  const handleRemove = async () => {
+    const points = parseInt(removeAmount, 10);
+    if (!removeReason.trim() || !Number.isInteger(points) || points <= 0 || removing) return;
+    if (removeExceedsBalance) return;
+    if (!window.confirm(
+      `Remove ${points} seashell${points === 1 ? '' : 's'} from ${student.name}?\n\n` +
+      'No prize is handed over — this is a correction, and it is logged as one.'
+    )) return;
+
+    setRemoving(true);
+    try {
+      const result = await database.removeSeashells(student.id, removeReason.trim(), points);
+      const next = {
+        ...student,
+        seashells: result?.newBalance ?? Math.max(0, (student.seashells || 0) - points),
+        seashellHistory: [
+          { id: `ssr_${Date.now()}`, date: new Date().toISOString(), reason: removeReason.trim(), points, type: 'removed' },
+          ...(student.seashellHistory || []),
+        ],
+      };
+      setStudent(next);
+      onUpdate?.(next);
+      setShowRemove(false);
+      setRemoveReason('');
+      setRemoveAmount('');
+      toast.success(`Removed ${points} seashell${points === 1 ? '' : 's'} — balance is now ${next.seashells}.`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.userMessage || 'Could not remove the seashells.');
+    } finally {
+      setRemoving(false);
+    }
   };
 
   return (
@@ -373,16 +417,20 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                   {student.seashellHistory.map(record => {
                     const dateObj = new Date(record.date);
                     const isEarned = record.type === 'earned';
+                    // A removal is not a redemption — nothing was handed over,
+                    // so it gets its own label instead of borrowing "redeemed".
+                    const isRemoved = record.type === 'removed';
                     return (
                       <li key={record.id} className="history-item">
                         <div>
                           <strong>{record.reason}</strong>
                           <div className="text-muted" style={{fontSize: '12px'}}>
                             {dateObj.toLocaleDateString()} at {dateObj.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            {isRemoved && ' · removed'}
                           </div>
                         </div>
-                        <span className={`punch-cost ${isEarned ? 'earned' : 'redeemed'}`}>
-                          {isEarned ? '+' : ''}{record.points} pts
+                        <span className={`punch-cost ${isEarned ? 'earned' : (isRemoved ? 'removed' : 'redeemed')}`}>
+                          {isEarned ? '+' : '−'}{record.points} pts
                         </span>
                       </li>
                     );
@@ -476,15 +524,62 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                 <span className="tier-item" title="Remaining Seashells">🐚 {(student.seashells || 0) % 10} shells</span>
               </div>
               
-              {!showRedeem ? (
-                <button 
-                  className="action-btn primary shop-btn prize-btn" 
-                  onClick={() => setShowRedeem(true)}
-                  style={{marginTop: '20px', width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(0,0,0,0.1)'}}
-                >
-                  <Gift size={18} />
-                  <span>Redeem Seashells</span>
-                </button>
+              {!showRedeem && !showRemove ? (
+                <div className="prize-actions" style={{marginTop: '20px'}}>
+                  <button
+                    className="action-btn primary shop-btn prize-btn"
+                    onClick={() => setShowRedeem(true)}
+                    style={{width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(0,0,0,0.1)'}}
+                  >
+                    <Gift size={18} />
+                    <span>Redeem Seashells</span>
+                  </button>
+                  {/* Corrections: shells come off with no prize handed over. */}
+                  <button
+                    className="action-btn shop-btn prize-btn remove-shells-btn"
+                    onClick={() => setShowRemove(true)}
+                    disabled={(student.seashells || 0) <= 0}
+                    title={(student.seashells || 0) <= 0 ? 'No seashells to remove.' : 'Take seashells off without redeeming them'}
+                  >
+                    <Minus size={18} />
+                    <span>Remove Seashells</span>
+                  </button>
+                </div>
+              ) : showRemove ? (
+                <div className="redeem-form">
+                  <input
+                    type="text"
+                    placeholder="Reason (e.g. awarded by mistake)"
+                    value={removeReason}
+                    onChange={e => setRemoveReason(e.target.value)}
+                    className="prize-input"
+                  />
+                  <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="Points"
+                      value={removeAmount}
+                      onChange={e => setRemoveAmount(e.target.value)}
+                      className="prize-input points"
+                    />
+                    <button
+                      className="action-btn primary"
+                      onClick={handleRemove}
+                      disabled={removing || !removeReason.trim() || !removeAmount || removeExceedsBalance}
+                    >
+                      <Check size={16} /> Remove
+                    </button>
+                    <button className="icon-btn" onClick={() => setShowRemove(false)} style={{background: 'rgba(255,255,255,0.2)', color: 'white'}}>
+                      <X size={16} />
+                    </button>
+                  </div>
+                  {removeExceedsBalance && (
+                    <p style={{ color: '#fecaca', fontSize: 12, margin: '6px 0 0' }}>
+                      Only {student.seashells || 0} seashells available — lower the amount.
+                    </p>
+                  )}
+                </div>
               ) : (
                 <div className="redeem-form">
                   <input

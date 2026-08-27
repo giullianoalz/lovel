@@ -19,7 +19,9 @@ const buildView = (kind, { prizeHistory = [], punchHistory = [], behaviorHistory
         empty: 'No seashell activity yet.',
         rows: prizeHistory.map((p) => ({
           id: p.id,
-          title: p.reason || (p.type === 'EARNED' ? 'Seashells earned' : 'Seashells redeemed'),
+          // REMOVED is a correction — nothing was handed over for those shells,
+          // so it must not fall back to the word "redeemed".
+          title: p.reason || (p.type === 'EARNED' ? 'Seashells earned' : p.type === 'REMOVED' ? 'Seashells removed' : 'Seashells redeemed'),
           meta: fmtDate(p.createdAt),
           delta: `${p.type === 'EARNED' ? '+' : '−'}${p.points}`,
           tone: p.type === 'EARNED' ? 'pos' : 'neg',

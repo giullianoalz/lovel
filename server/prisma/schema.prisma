@@ -1442,6 +1442,8 @@ enum AttendanceStatus {
 enum PrizeType {
   EARNED   @map("earned")
   REDEEMED @map("redeemed")
+  // Taken back off a balance without a prize changing hands — a correction.
+  REMOVED  @map("removed")
 
   @@map("prize_type")
 }

@@ -489,6 +489,31 @@
 .prize-btn:hover {
   background: rgba(0, 0, 0, 0.3) !important;
 }
+
+/* Redeem sits above Remove: the everyday action first, the correction under it. */
+.prize-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.remove-shells-btn {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.08);
+  border: 1px dashed rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.95);
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.remove-shells-btn:hover:not(:disabled) {
+  background: rgba(185, 28, 28, 0.35);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+.remove-shells-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 /* Report buttons in header */
 .profile-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 .profile-header-actions { display: flex; gap: 8px; }
@@ -536,6 +561,12 @@
 .punch-cost.redeemed {
   color: #ea580c;
   background: #ffedd5;
+}
+
+/* A correction, not a prize — reads as a subtraction rather than a purchase. */
+.punch-cost.removed {
+  color: #b91c1c;
+  background: #fee2e2;
 }
 
 /* Snack Cabinet Pop-up */

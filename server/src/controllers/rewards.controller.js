@@ -375,3 +375,40 @@ export const redeemSeashells = async (req, res, next) => {
     next(error);
   }
 };
+
+// POST /api/rewards/seashells/remove — { studentId, reason, points }
+// Takes shells off a balance without a prize changing hands: a miscounted
+// award, shells given to the wrong student, a behaviour correction. Logged as
+// REMOVED so prize history never claims the student got something for them.
+export const removeSeashells = async (req, res, next) => {
+  try {
+    const { studentId, reason, points } = req.body;
+    const pts = parseInt(points);
+    if (!studentId || isNaN(pts) || pts <= 0 || !reason) {
+      return res.status(400).json({ message: 'studentId, reason and a positive points amount are required.' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const student = await tx.user.findUniqueOrThrow({ where: { id: studentId } });
+      if (pts > student.seashells) {
+        return { insufficientBalance: true, currentBalance: student.seashells };
+      }
+      const newBalance = student.seashells - pts;
+      await tx.user.update({ where: { id: studentId }, data: { seashells: newBalance } });
+      await tx.prizeHistory.create({
+        data: { studentId, reason, points: pts, type: 'REMOVED' },
+      });
+      return { newBalance };
+    });
+
+    if (result.insufficientBalance) {
+      return res.status(400).json({
+        message: `Student only has ${result.currentBalance} seashells — cannot remove ${pts}.`,
+      });
+    }
+
+    res.json({ success: true, newBalance: result.newBalance });
+  } catch (error) {
+    next(error);
+  }
+};
