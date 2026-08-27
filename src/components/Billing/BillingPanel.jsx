@@ -2290,8 +2290,17 @@ const BillingPanel = () => {
                       <option value="PAYPAL">PayPal</option>
                       <option value="CASH">Cash</option>
                       <option value="CHECK">Check</option>
+                      <option value="SCHOLARSHIP_EMA">EMA · Step Up (direct pay)</option>
+                      <option value="SCHOLARSHIP_FES">FES scholarship</option>
                       <option value="OTHER">Other</option>
                     </select>
+                    {newTxForm.paymentMethod === 'SCHOLARSHIP_EMA' && (
+                      <p className="text-muted" style={{fontSize: '12px', marginTop: '6px'}}>
+                        Only for scholarship money that arrived outside the remittance file — a
+                        direct pay with no PO number. Anything on a remittance belongs in
+                        Reconcile EMA, which matches it by PO so it cannot be paid twice.
+                      </p>
+                    )}
                   </div>
                   <div className="form-group">
                     <label>Apply to Invoice (optional)</label>

@@ -14,7 +14,19 @@ import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.servic
 import { buildSessionCharges, isBillable } from '../services/sessionCharges.service.js';
 import { academyToday, academyDayOffset } from '../utils/academyTime.js';
 
-const MANUAL_PAYMENT_METHODS = new Set(['ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'OTHER']);
+/**
+ * Methods an admin can put on a payment they are keying in by hand.
+ *
+ * SCHOLARSHIP_EMA is here because scholarship money does arrive outside the
+ * remittance CSV — a parent's EMA direct-pay lands as a deposit with no PO
+ * number attached, and until now the only honest thing to call it was "Other".
+ * STRIPE_CARD is deliberately absent: a card payment is created by the webhook
+ * that watched the money move, and typing one by hand invents a charge that
+ * Stripe knows nothing about.
+ */
+const PAYMENT_METHODS_ACCEPTED = new Set([
+  'ZELLE', 'VENMO', 'PAYPAL', 'CASH', 'CHECK', 'SCHOLARSHIP_EMA', 'SCHOLARSHIP_FES', 'OTHER',
+]);
 
 /**
  * What produced a ledger row, worked out from the links it carries.
@@ -57,6 +69,30 @@ const originOf = (t) => {
 };
 
 /**
+ * Whether money has actually reached an invoice — the one rule that locks the
+ * rows underneath it against being edited or deleted.
+ *
+ * A `Payment` row is NOT enough to answer this. One is only created when the
+ * admin picks a manual method (Zelle, cash, check…) in createTransaction; a
+ * payment recorded without one moves `amountPaid` and leaves a PAYMENT
+ * transaction behind, and nothing else. Asking `payment.count()` alone said
+ * "nobody has paid" about invoices that were paid in full — which is how, on
+ * 2026-08-26, a $130 line was deleted out of two invoices the Brooks family had
+ * already settled, leaving both at totalAmount 1590 against amountPaid 1720.
+ *
+ * So: the invoice's own `amountPaid`, plus either shape of payment record.
+ */
+const invoiceHasMoneyOn = async (invoiceId) => {
+  if (!invoiceId) return false;
+  const [invoice, payments, paymentTxs] = await Promise.all([
+    prisma.invoice.findUnique({ where: { id: invoiceId }, select: { amountPaid: true } }),
+    prisma.payment.count({ where: { invoiceId } }),
+    prisma.transaction.count({ where: { invoiceId, type: { in: ['PAYMENT', 'CREDIT'] } } }),
+  ]);
+  return Number(invoice?.amountPaid ?? 0) > 0 || payments > 0 || paymentTxs > 0;
+};
+
+/**
  * GET /api/billing/transactions
  * List all transactions, optionally filtered by familyId
  */
@@ -71,7 +107,7 @@ export const listTransactions = async (req, res, next) => {
       orderBy: { date: 'asc' },
       include: {
         student: { select: { id: true, fullName: true } },
-        invoice: { select: { id: true, invoiceNumber: true, _count: { select: { payments: true } } } },
+        invoice: { select: { id: true, invoiceNumber: true, amountPaid: true, _count: { select: { payments: true } } } },
         snackReload: { select: { id: true } },
       },
     });
@@ -81,7 +117,9 @@ export const listTransactions = async (req, res, next) => {
       // Money having actually moved is what locks a row — see
       // DELETE/PATCH /transactions/:id. Exposed as plain booleans rather than
       // making the UI infer them, so the one rule lives in one place.
-      const locked = Boolean(t.paymentId) || (t.invoice?._count.payments ?? 0) > 0;
+      const locked = Boolean(t.paymentId)
+        || (t.invoice?._count.payments ?? 0) > 0
+        || Number(t.invoice?.amountPaid ?? 0) > 0;
       return {
         id: t.id,
         studentId: t.studentId,
@@ -114,8 +152,10 @@ export const listTransactions = async (req, res, next) => {
  * A charge now gets an invoice the moment it's raised, so "is it invoiced?"
  * can no longer be the thing that blocks deletion — that would make almost
  * every charge undeletable. What blocks it is money having actually moved: a
- * Payment applied to this row, or any Payment against the invoice it sits on.
- * At that point the fix is a refund or a credit, not erasing the original.
+ * Payment applied to this row, or anything paid against the invoice it sits on
+ * — see invoiceHasMoneyOn, which counts a payment recorded without a manual
+ * method too. At that point the fix is a refund or a credit, not erasing the
+ * original.
  *
  * Otherwise the invoice comes with it: the line is removed and the invoice
  * either shrinks to what's left or, if this was its only line, goes away
@@ -139,14 +179,11 @@ export const deleteTransaction = async (req, res, next) => {
         message: 'A payment is already applied to this. Refund the payment instead of deleting the transaction underneath it.',
       });
     }
-    if (existing.invoiceId) {
-      const paymentCount = await prisma.payment.count({ where: { invoiceId: existing.invoiceId } });
-      if (paymentCount > 0) {
-        return res.status(409).json({
-          error: 'Conflict',
-          message: 'A payment has already been made against this entry\'s invoice. Refund it instead of deleting the charge underneath it.',
-        });
-      }
+    if (await invoiceHasMoneyOn(existing.invoiceId)) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'A payment has already been made against this entry\'s invoice. Refund it instead of deleting the charge underneath it.',
+      });
     }
 
     await prisma.$transaction(async (tx) => {
@@ -159,14 +196,22 @@ export const deleteTransaction = async (req, res, next) => {
         where: { invoiceId: existing.invoiceId },
         select: { amount: true },
       });
+      const invoice = await tx.invoice.findUnique({ where: { id: existing.invoiceId } });
+      const amountPaid = Number(invoice.amountPaid);
+
       if (remaining.length === 0) {
+        // An invoice for nothing is not a document anyone should keep — unless
+        // money reached it, in which case deleting it destroys the only record
+        // of what the family paid for. The guard above should already have
+        // refused, so reaching here means a payment landed mid-delete.
+        if (amountPaid > 0) {
+          throw new Error(`Refusing to delete invoice ${invoice.invoiceNumber}: $${amountPaid} has been paid against it.`);
+        }
         await tx.invoice.delete({ where: { id: existing.invoiceId } });
         return;
       }
 
       const newTotal = round2(remaining.reduce((sum, l) => sum + Number(l.amount), 0));
-      const invoice = await tx.invoice.findUnique({ where: { id: existing.invoiceId } });
-      const amountPaid = Number(invoice.amountPaid);
       await tx.invoice.update({
         where: { id: existing.invoiceId },
         data: {
@@ -230,14 +275,11 @@ export const updateTransaction = async (req, res, next) => {
       return res.status(404).json({ error: 'Not Found', message: 'That transaction does not exist.' });
     }
 
-    if (existing.invoiceId) {
-      const paymentCount = await prisma.payment.count({ where: { invoiceId: existing.invoiceId } });
-      if (paymentCount > 0) {
-        return res.status(409).json({
-          error: 'Conflict',
-          message: 'This entry is on an invoice a payment has already been made against. Refund the payment instead of editing it.',
-        });
-      }
+    if (await invoiceHasMoneyOn(existing.invoiceId)) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'This entry is on an invoice a payment has already been made against. Refund the payment instead of editing it.',
+      });
     }
 
     const newDate = date !== undefined ? new Date(`${date}T00:00:00.000Z`) : undefined;
@@ -761,20 +803,34 @@ export const createTransaction = async (req, res, next) => {
     const method = paymentMethod ? paymentMethod.toUpperCase() : null;
 
     const tx = await prisma.$transaction(async (db) => {
-      // Structured manual payment (Zelle/Venmo/PayPal/Cash/Check/Other) — mirrors
-      // the Payment + Transaction pair created by the EMA remittance reconciler,
-      // so these show up consistently in payment-method reporting.
+      // Every payment gets a Payment row, method chosen or not.
+      //
+      // It used to depend on the admin picking one from the dropdown, and
+      // leaving it on "Not specified" recorded the money in the ledger only.
+      // That is not a cosmetic difference: the Wave income sync reads the
+      // Payment table, and so does anything asking "has this invoice been
+      // paid?" — on 2026-08-26 four payments worth $6,540 were entered that
+      // way and none of them existed as far as either was concerned.
+      //
+      // OTHER when nothing was chosen: an honest "some way we didn't record",
+      // which is what happened, rather than guessing at Zelle or cash.
       let payment = null;
-      if (upperType === 'PAYMENT' && method && MANUAL_PAYMENT_METHODS.has(method)) {
+      if (upperType === 'PAYMENT') {
+        const resolvedMethod = method && PAYMENT_METHODS_ACCEPTED.has(method) ? method : 'OTHER';
         payment = await db.payment.create({
           data: {
             familyId,
             invoiceId: invoiceId || null,
             amount: parsedAmount,
             netAmount: parsedAmount,
-            method,
+            method: resolvedMethod,
             status: 'COMPLETED',
-            notes: description || `Manual ${type} (${method})`,
+            // Who keyed it in. Nothing wrote this before, so every payment in
+            // the system reads "nobody" and no question about one can be
+            // answered — see the same gap on SessionChargeOverride.createdById.
+            recordedById: req.user?.id || null,
+            paidAt: date ? new Date(date) : new Date(),
+            notes: description || `Manual ${type}${method ? ` (${method})` : ''}`,
           },
         });
       }
@@ -1943,6 +1999,7 @@ export const generateEmaBatch = async (req, res, next) => {
                 method: 'SCHOLARSHIP_EMA',
                 status: 'PENDING',
                 externalReference: row.poNumber,
+                recordedById: req.user?.id || null,
                 notes: `EMA Step Up submitted — PO ${row.poNumber} (awaiting remittance)`,
               },
               select: { id: true },
@@ -2012,6 +2069,12 @@ export const generateEmaBatch = async (req, res, next) => {
       return out;
     }, { timeout: 120000, maxWait: 20000 });
 
+    console.log(
+      `[Billing] ${req.user.email} filed an EMA batch: ${results.length} group(s), `
+      + `${results.reduce((sum, g) => sum + g.recordedPayments, 0)} payment(s) pending `
+      + `$${results.reduce((sum, g) => sum + g.scholarshipPending, 0).toFixed(2)}`
+    );
+
     res.json({ groups: results });
   } catch (error) {
     next(error);
@@ -2022,7 +2085,7 @@ export const generateEmaBatch = async (req, res, next) => {
 // plain prisma client (dryRun, read-only) or a `tx` inside a transaction
 // (real run). When dryRun, every write is skipped so the preview can show
 // exactly what WOULD happen without touching any data.
-const runReconciliation = async (db, lines, { dryRun }) => {
+const runReconciliation = async (db, lines, { dryRun, recordedById = null }) => {
   const r = { matched: [], unmatched: [], alreadyReconciled: [], totalMatched: 0, invoicesPaid: [] };
   const touched = new Map();
 
@@ -2112,6 +2175,7 @@ const runReconciliation = async (db, lines, { dryRun }) => {
           method: 'SCHOLARSHIP_EMA',
           status: 'COMPLETED',
           externalReference: line.poNumber || invoice.invoiceNumber,
+          recordedById: recordedById || null,
           notes: `EMA Step Up remittance — ${line.poNumber || invoice.invoiceNumber}`,
         },
       });
@@ -2176,7 +2240,16 @@ export const reconcileEmaRemittance = async (req, res, next) => {
 
     const report = dryRun
       ? await runReconciliation(prisma, lines, { dryRun: true })
-      : await prisma.$transaction((tx) => runReconciliation(tx, lines, { dryRun: false }));
+      : await prisma.$transaction((tx) => runReconciliation(tx, lines, { dryRun: false, recordedById: req.user?.id || null }));
+
+    // Money arriving from Step Up, same as any other money: on the record with
+    // a name against it. A dry run moves nothing, so it says nothing.
+    if (!dryRun) {
+      console.log(
+        `[Billing] ${req.user.email} reconciled ${report.matched.length} EMA remittance line(s) `
+        + `totalling $${report.totalMatched.toFixed(2)} across ${report.invoicesPaid.length} invoice(s)`
+      );
+    }
 
     res.json(report);
   } catch (error) {
@@ -2334,17 +2407,30 @@ export const previewSessionCharges = async (req, res, next) => {
  */
 export const generateSessionCharges = async (req, res, next) => {
   try {
-    const { from, to, sessionIds } = req.body;
+    const { from, to, sessionIds, includeJoinedLate } = req.body;
     const range = parseChargeRange(from, to);
     if (range.error) {
       return res.status(400).json({ error: 'Validation Error', message: range.error });
     }
 
-    const { lines } = await buildSessionCharges(range);
     const wanted = Array.isArray(sessionIds) && sessionIds.length > 0
       ? new Set(sessionIds)
       : null;
-    const billable = lines.filter((l) => isBillable(l) && (!wanted || wanted.has(l.sessionId)));
+
+    // Billing somebody for a class they joined after it happened is a decision,
+    // never a default — and only ever for named meetings. Allowing it on a
+    // whole range would put it one careless click away from the retroactive
+    // sweep this flag exists to stop.
+    if (includeJoinedLate && !wanted) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Charging students who enrolled after the meeting has to name the meetings — pick them individually.',
+      });
+    }
+
+    const { lines } = await buildSessionCharges(range);
+    const allowJoinedLate = Boolean(includeJoinedLate);
+    const billable = lines.filter((l) => isBillable(l, { allowJoinedLate }) && (!wanted || wanted.has(l.sessionId)));
 
     if (billable.length === 0) {
       return res.json({
@@ -2385,9 +2471,16 @@ export const generateSessionCharges = async (req, res, next) => {
     // Until then the family sees the money in their portal balance, which
     // counts uninvoiced charges; what they cannot do is pay it by card, since
     // the portal's checkout runs off an invoice.
+    const late = billable.filter((l) => l.joinedLate);
     console.log(
       `[Billing] ${req.user.email} raised ${created.count} session charge(s) `
       + `totalling $${billable.reduce((sum, l) => sum + l.amount, 0).toFixed(2)}`
+      // Named individually: this is the one path that bills a student for a
+      // meeting predating their enrollment, so who did it has to be on record.
+      + (late.length > 0
+        ? ` — including ${late.length} for students enrolled after the meeting: `
+          + late.map((l) => `${l.studentName} ($${l.amount})`).join(', ')
+        : '')
     );
 
     res.json({

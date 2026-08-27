@@ -871,6 +871,12 @@ model InvoiceLine {
   // Null on lines from before this link existed, or a line an admin added
   // without a backing charge.
   transactionId String?    @unique @map("transaction_id") @db.Uuid
+  // A line is what the family is actually shown, and it can be rewritten after
+  // the invoice has gone out — by an edit, by a correction to the charge
+  // underneath it. Without these an invoice that emailed the wrong amount has
+  // no history at all to look at afterwards.
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   invoice     Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
 

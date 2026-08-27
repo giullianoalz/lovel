@@ -92,6 +92,12 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
           enrollments: {
             where: { status: 'active' },
             select: {
+              // Since when this student has been on the roster. The price sits
+              // on the *first week* of a class, so a child added in late August
+              // is otherwise billed for meetings that happened before anyone
+              // had heard of them — on 2026-08-26 that raised $3,370 across
+              // four families, all of it for classes predating their arrival.
+              enrolledAt: true,
               student: {
                 select: {
                   id: true,
@@ -144,6 +150,18 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
       const override = overrides.get(student.id);
       const amount = override ? round2(Number(override.amount)) : listPrice;
 
+      // Enrolled after the meeting had already happened. Compared as plain
+      // days, not instants: joining on the morning of a class the family then
+      // attended is not late, and the hour of the enrollment row says nothing
+      // useful anyway.
+      //
+      // Flagged rather than dropped, and reversible: `enrolledAt` records when
+      // the row was written, so re-adding a student who was always there resets
+      // it and makes an honest charge look late. The admin can still raise it
+      // deliberately — see generateSessionCharges' includeJoinedLate.
+      const enrolledOn = enrollment.enrolledAt ? startOfUtcDay(enrollment.enrolledAt) : null;
+      const joinedLate = Boolean(enrolledOn && enrolledOn > startOfUtcDay(session.date));
+
       lines.push({
         sessionId: session.id,
         date: session.date,
@@ -167,6 +185,8 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
         chargedAmount: alreadyCharged.get(key) ?? null,
         missingFamily: !student.familyMembers[0]?.familyId,
         zeroAmount: amount <= 0,
+        joinedLate,
+        enrolledAt: enrolledOn,
       });
     }
   }
@@ -174,24 +194,42 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
   return { lines, summary: summarise(lines) };
 };
 
-/** Whether a preview line is one the commit step will actually raise. */
-export const isBillable = (line) =>
-  !line.alreadyCharged && !line.missingFamily && !line.zeroAmount;
+/** Midnight UTC of whatever day a date falls on. */
+const startOfUtcDay = (d) =>
+  new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+
+/**
+ * Whether a preview line is one the commit step will actually raise.
+ *
+ * `allowJoinedLate` is the deliberate exception: an admin who has looked at a
+ * late-looking line and decided it is owed anyway can raise it, one narrowed
+ * batch at a time. Nothing else is negotiable — a line with no family to bill
+ * or nothing to charge is not a decision, it is a dead end.
+ */
+export const isBillable = (line, { allowJoinedLate = false } = {}) =>
+  !line.alreadyCharged && !line.missingFamily && !line.zeroAmount
+  && (allowJoinedLate || !line.joinedLate);
 
 const emptySummary = () => ({
   sessions: 0, students: 0, billable: 0, alreadyCharged: 0, missingFamily: 0,
-  overridden: 0, waived: 0, total: 0,
+  joinedLate: 0, joinedLateTotal: 0, overridden: 0, waived: 0, total: 0,
 });
 
 const summarise = (lines) => {
-  const billable = lines.filter(isBillable);
+  const billable = lines.filter((l) => isBillable(l));
   const overridden = lines.filter((l) => l.overridden);
+  // Held back because the student joined after the meeting. Reported with its
+  // money so the screen can say what is being *not* charged and why — silence
+  // here would look like the sweep had quietly missed somebody.
+  const late = lines.filter((l) => l.joinedLate && !l.alreadyCharged && !l.missingFamily && !l.zeroAmount);
   return {
     sessions: new Set(lines.map((l) => l.sessionId)).size,
     students: new Set(lines.map((l) => l.studentId)).size,
     billable: billable.length,
     alreadyCharged: lines.filter((l) => l.alreadyCharged).length,
     missingFamily: lines.filter((l) => l.missingFamily).length,
+    joinedLate: late.length,
+    joinedLateTotal: round2(late.reduce((sum, l) => sum + l.amount, 0)),
     // Priced differently for one student, and how much of that is money given
     // up. Reported so a total that looks low has a visible reason on the same
     // screen, rather than an admin wondering where it went.

@@ -34,6 +34,10 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
   // Which meetings to commit. Empty means all of them — the ordinary case, and
   // one fewer click for the admin who just wants to release the whole window.
   const [picked, setPicked] = useState(new Set());
+  // Bill the students who joined after the meeting anyway. Off every time, and
+  // only offered once specific meetings are picked — the server refuses it over
+  // a whole range for the same reason.
+  const [includeLate, setIncludeLate] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -74,7 +78,7 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
   }, [lines]);
 
   const billableIds = useMemo(
-    () => new Set(meetings.filter((m) => m.lines.some(isBillable)).map((m) => m.sessionId)),
+    () => new Set(meetings.filter((m) => m.lines.some(isPickable)).map((m) => m.sessionId)),
     [meetings]
   );
 
@@ -83,15 +87,25 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
       const next = new Set(prev);
       if (next.has(sessionId)) next.delete(sessionId);
       else next.add(sessionId);
+      // Un-picking back to "the whole range" takes the exception with it: it is
+      // only ever a decision about meetings someone looked at.
+      if (next.size === 0) setIncludeLate(false);
       return next;
     });
   };
 
   /** What the button will actually raise, given the current selection. */
+  const allowLate = includeLate && picked.size > 0;
   const selected = picked.size > 0
-    ? lines.filter((l) => isBillable(l) && picked.has(l.sessionId))
-    : lines.filter(isBillable);
+    ? lines.filter((l) => isBillable(l, allowLate) && picked.has(l.sessionId))
+    : lines.filter((l) => isBillable(l));
   const selectedTotal = Math.round(selected.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
+
+  // Held back in what the admin is looking at right now, not school-wide — the
+  // checkbox has to say what ticking it would actually cost.
+  const heldBack = lines.filter((l) => l.joinedLate && isPickable(l)
+    && (picked.size === 0 || picked.has(l.sessionId)));
+  const heldBackTotal = Math.round(heldBack.reduce((sum, l) => sum + l.amount, 0) * 100) / 100;
 
   const raise = async () => {
     setRaising(true);
@@ -99,9 +113,11 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
       const res = await database.raiseSessionCharges({
         ...range,
         sessionIds: picked.size > 0 ? [...picked] : undefined,
+        includeJoinedLate: allowLate || undefined,
       });
       toast.success(res.message);
       setPicked(new Set());
+      setIncludeLate(false);
       await load();
       onDone?.();
     } catch (err) {
@@ -192,7 +208,9 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
                               ? 'No family on file — nobody to bill'
                               : line.zeroAmount
                                 ? 'Priced at $0 — nothing to raise'
-                                : ''}
+                                : line.joinedLate
+                                  ? `Enrolled ${new Date(line.enrolledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}, after this meeting${allowLate && picked.has(line.sessionId) ? ' — charging anyway' : ' — held back'}`
+                                  : ''}
                         </span>
                       </div>
                     ))}
@@ -210,6 +228,21 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
                   <span className="charges-warn">
                     <AlertTriangle size={13} /> {summary.missingFamily} with no family on file
                   </span>
+                )}
+                {heldBack.length > 0 && (
+                  <label className="charges-late" title={picked.size === 0
+                    ? 'Pick the meetings first — this cannot be applied to a whole range.'
+                    : 'Only for students who really did attend; the log records who did this.'}>
+                    <input
+                      type="checkbox"
+                      checked={allowLate}
+                      disabled={picked.size === 0}
+                      onChange={(e) => setIncludeLate(e.target.checked)}
+                    />
+                    <AlertTriangle size={13} />
+                    Also charge {heldBack.length} enrolled after the meeting (${heldBackTotal.toFixed(2)})
+                    {picked.size === 0 && ' — pick the meetings first'}
+                  </label>
                 )}
               </div>
               <button
@@ -229,7 +262,16 @@ const SessionChargesPanel = ({ onClose, onDone }) => {
   );
 };
 
-/** Mirrors the server's rule, so the screen and the commit agree on what counts. */
-const isBillable = (line) => !line.alreadyCharged && !line.missingFamily && !line.zeroAmount;
+/**
+ * Mirrors the server's rule, so the screen and the commit agree on what counts.
+ * `allowJoinedLate` matches the same flag on the POST: held-back lines become
+ * chargeable only once the admin has named the meetings and ticked the box.
+ */
+const isBillable = (line, allowJoinedLate = false) =>
+  !line.alreadyCharged && !line.missingFamily && !line.zeroAmount
+  && (allowJoinedLate || !line.joinedLate);
+
+/** Could be raised, if the admin decides to — the wider net the checkboxes use. */
+const isPickable = (line) => isBillable(line, true);
 
 export default SessionChargesPanel;

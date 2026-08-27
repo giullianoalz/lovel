@@ -136,6 +136,20 @@
 
 .charges-warn { display: inline-flex; align-items: center; gap: 5px; color: #b45309; }
 
+/* Backdating a charge onto someone who was not there yet. Amber and opt-in on
+   purpose — it reads as a warning being accepted, not as a filter. */
+.charges-late {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #b45309;
+  cursor: pointer;
+  transition: opacity 0.18s ease;
+}
+.charges-late input { cursor: pointer; accent-color: #b45309; }
+.charges-late:has(input:disabled) { opacity: 0.6; cursor: default; }
+.charges-late:has(input:disabled) input { cursor: default; }
+
 /* The one button in here that moves money, so it looks like it. */
 .charges-raise {
   padding: 10px 18px;
