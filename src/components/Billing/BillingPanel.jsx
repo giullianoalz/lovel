@@ -1706,6 +1706,7 @@ const BillingPanel = () => {
                     <th>Invoice Date</th>
                     <th>Date Range</th>
                     <th>Invoice Amount</th>
+                    <th>Sent</th>
                     <th>Status</th>
                     <th></th>
                   </tr>
@@ -1730,6 +1731,9 @@ const BillingPanel = () => {
                       <td style={{color: 'var(--primary)', fontWeight: 600}}>{formatDateUS(inv.date)}</td>
                       <td>{inv.dateRange}</td>
                       <td style={{fontWeight: 700}}>${inv.amount.toFixed(2)}</td>
+                      <td style={{ color: inv.sentAt ? 'inherit' : 'var(--text-muted)' }}>
+                        {inv.sentAt ? formatDateUS(inv.sentAt.split('T')[0]) : 'Not sent'}
+                      </td>
                       <td><span className={`status-badge ${inv.status.toLowerCase()}`}>{inv.status}</span></td>
                       <td style={{ display: 'flex', gap: '6px' }}>
                         <button

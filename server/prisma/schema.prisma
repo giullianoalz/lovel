@@ -849,6 +849,11 @@ model Invoice {
   dueDate             DateTime?     @map("due_date") @db.Date
   stripePaymentLink   String?       @map("stripe_payment_link")
   stripePaymentLinkId String?       @map("stripe_payment_link_id") @db.VarChar(255)
+  // When the invoice was last emailed out. Null means it has never been sent.
+  // Distinct from `status = SENT`, which stops being true the moment a payment
+  // moves the invoice to PARTIAL/PAID — after which nothing recorded that the
+  // family was ever told what they owed.
+  sentAt              DateTime?     @map("sent_at") @db.Timestamptz(6)
   createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   lines               InvoiceLine[]
   family              Family?       @relation(fields: [familyId], references: [id])

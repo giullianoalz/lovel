@@ -619,6 +619,7 @@ const serializeInvoice = (invoice, student) => ({
   student: student ? { id: student.id, fullName: student.fullName } : null,
   date: invoice.date.toISOString().split('T')[0],
   dueDate: invoice.dueDate ? invoice.dueDate.toISOString().split('T')[0] : null,
+  sentAt: invoice.sentAt ? invoice.sentAt.toISOString() : null,
   dateRange: invoice.dateRange || null,
   source: invoice.source || null,
   poNumbers: invoice.poNumbers || [],
@@ -766,9 +767,11 @@ export const sendInvoice = async (req, res, next) => {
 
     // Only a DRAFT graduates to SENT here — an invoice already PARTIAL/PAID/
     // OVERDUE keeps its accounting status even if an admin re-sends the copy.
-    if (invoice.status === 'DRAFT') {
-      await prisma.invoice.update({ where: { id: invoice.id }, data: { status: 'SENT' } });
-    }
+    // sentAt itself is always stamped with the latest send, status change or not.
+    await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { sentAt: new Date(), ...(invoice.status === 'DRAFT' ? { status: 'SENT' } : {}) },
+    });
 
     if (recipient.id) {
       sendNotification({
@@ -1359,6 +1362,7 @@ export const listInvoices = async (req, res, next) => {
       studentId: inv.studentId,
       date: inv.date.toISOString().split('T')[0],
       dateRange: inv.dateRange || 'N/A',
+      sentAt: inv.sentAt ? inv.sentAt.toISOString() : null,
       amount: Number(inv.totalAmount),
       amountPaid: Number(inv.amountPaid),
       status: inv.status.charAt(0).toUpperCase() + inv.status.slice(1),
