@@ -94,7 +94,11 @@ services:
       # Drive uploads act as the academy's Google account, not a service
       # account: a service account owns what it uploads and has a storage quota
       # of zero on a non-Workspace account, so every upload fails silently.
-      # Same value as GMAIL_REFRESH_TOKEN — one token, both scopes.
+      # NOT the same value as GMAIL_REFRESH_TOKEN. They are two different
+      # tokens that happen to be the same length; this one carries the drive
+      # scope (plus gmail.send) and the other does not. Copying the Gmail one
+      # here reports a healthy "oauth" mode while every Drive call fails.
+      # The working value lives in server/.env as DRIVE_REFRESH_TOKEN.
       - key: DRIVE_REFRESH_TOKEN
         sync: false
       # Legacy service-account path, kept only for older deployments. It cannot

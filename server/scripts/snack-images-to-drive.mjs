@@ -3,6 +3,7 @@
  *
  *   node scripts/snack-images-to-drive.mjs            # dry run, writes nothing
  *   node scripts/snack-images-to-drive.mjs --apply    # uploads and updates rows
+ *   node scripts/snack-images-to-drive.mjs --apply --limit 1   # canary: just one
  *   node scripts/snack-images-to-drive.mjs --apply --manifest <file>
  *
  * `snack_items.image_url` was holding whole photographs as base64 data URIs,
@@ -29,6 +30,13 @@ import { PrismaClient } from '@prisma/client';
 import { uploadBufferToDrive, drive, driveAuthMode } from '../src/config/drive.js';
 
 const APPLY = process.argv.includes('--apply');
+// --limit N moves only the first N photos. This exists for the canary: move a
+// single one, look at it in the real app, and only then move the rest. Whether
+// the server can actually reach Drive is not something a config screen can
+// tell you — a variable can be present and wrong, which is exactly how chat and
+// waivers sat broken for weeks.
+const limitFlag = process.argv.indexOf('--limit');
+const LIMIT = limitFlag === -1 ? Infinity : parseInt(process.argv[limitFlag + 1], 10);
 const manifestFlag = process.argv.indexOf('--manifest');
 const BACKUP_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'backups');
 const MANIFEST_OUT = path.join(BACKUP_DIR, 'snack-image-manifest.json');
@@ -69,11 +77,13 @@ const run = async () => {
        FROM snack_items ORDER BY length(image_url) DESC NULLS LAST`
   );
 
-  const pending = rows.filter(r => r.kind === 'data:' && !r.drive_file_id);
+  const allPending = rows.filter(r => r.kind === 'data:' && !r.drive_file_id);
+  const pending = Number.isFinite(LIMIT) ? allPending.slice(0, LIMIT) : allPending;
   const already = rows.filter(r => r.drive_file_id);
   const external = rows.filter(r => r.kind && r.kind !== 'data:');
 
-  console.log(`${rows.length} snack(s): ${pending.length} to move, ${already.length} already in Drive, ${external.length} on an external URL.`);
+  console.log(`${rows.length} snack(s): ${allPending.length} to move, ${already.length} already in Drive, ${external.length} on an external URL.`);
+  if (Number.isFinite(LIMIT)) console.log(`--limit ${LIMIT}: only ${pending.length} of them this run.`);
   const total = pending.reduce((sum, r) => sum + Number(r.len || 0), 0);
   console.log(`Base64 to reclaim: ${mb(total)}\n`);
 
