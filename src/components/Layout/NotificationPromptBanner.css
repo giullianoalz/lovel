@@ -1,0 +1,107 @@
+/* Sits in normal flow (not fixed/sticky), like the install banner, so it
+   reserves its own space at the top of the page instead of covering content. */
+.push-banner {
+  margin: 0 auto 20px;
+  width: calc(100% - 32px);
+  max-width: 480px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 18px;
+  box-shadow: 0 20px 40px -15px rgba(6, 78, 59, 0.18), 0 0 0 1px rgba(6, 78, 59, 0.03);
+  animation: pushBannerSlideUp 0.35s ease-out;
+}
+
+@keyframes pushBannerSlideUp {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.push-banner-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.push-banner.is-blocked .push-banner-icon {
+  background: rgba(185, 28, 28, 0.1);
+  color: #b91c1c;
+}
+
+.push-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.push-banner-text strong {
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.push-banner-text span {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.push-banner-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.push-banner-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+}
+
+.push-banner-btn:hover:not(:disabled) { background: var(--primary-hover); }
+.push-banner-btn:active:not(:disabled) { transform: scale(0.97); }
+.push-banner-btn:disabled { opacity: 0.65; cursor: default; }
+
+.push-banner-dismiss {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.push-banner-dismiss:hover { background: rgba(6, 78, 59, 0.08); }
+
+@media (max-width: 480px) {
+  .push-banner { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .push-banner { animation: none; }
+}

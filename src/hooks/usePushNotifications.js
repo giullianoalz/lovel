@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { messaging } from '../lib/firebase';
 import { requestAndSaveFcmToken } from '../lib/fcm';
+import { isIOSDevice, isStandalone, watchStandalone } from '../lib/platform';
 
 const isSupported = () =>
   typeof Notification !== 'undefined' && !!messaging && !!import.meta.env.VITE_FIREBASE_VAPID_KEY;
@@ -20,9 +21,17 @@ const readPermission = () =>
  * honest without asking anyone to reload, and re-registers the device token
  * the moment the permission comes back, since the automatic attempt on login
  * already ran and won't run again this session.
+ *
+ * `needsInstall` is the case that kept the device roster nearly empty. On iOS,
+ * web push only exists inside an app added to the Home Screen, so in a Safari
+ * tab there is no `Notification` object at all and `supported` is false — which
+ * reads identically to "this browser can never do push". Callers that hide
+ * themselves on `!supported` therefore left every iPhone in a browser tab with
+ * no hint that notifications existed. This separates "can't" from "not yet".
  */
 export const usePushNotifications = (userId) => {
   const [permission, setPermission] = useState(readPermission);
+  const [standalone, setStandalone] = useState(isStandalone);
   const [enabling, setEnabling] = useState(false);
   /** Outcome of the last manual attempt: granted | dismissed | denied | error | not-configured */
   const [lastResult, setLastResult] = useState(null);
@@ -53,6 +62,9 @@ export const usePushNotifications = (userId) => {
     };
   }, []);
 
+  /* Installing mid-session flips this without a reload. */
+  useEffect(() => watchStandalone(() => setStandalone(isStandalone())), []);
+
   /* Once granted (here or in browser settings), make sure the device token is saved. */
   useEffect(() => {
     if (permission !== 'granted' || !userId || tokenSavedFor.current === userId) return;
@@ -81,5 +93,12 @@ export const usePushNotifications = (userId) => {
     }
   }, [userId, enabling]);
 
-  return { supported: isSupported(), permission, enabling, lastResult, enable };
+  return {
+    supported: isSupported(),
+    needsInstall: isIOSDevice() && !standalone && permission !== 'granted',
+    permission,
+    enabling,
+    lastResult,
+    enable,
+  };
 };

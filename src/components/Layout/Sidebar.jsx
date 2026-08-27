@@ -83,10 +83,17 @@ const Sidebar = () => {
     return () => clearInterval(interval);
   }, [role]);
 
-  /* Push Notifications (FCM) — register device token once per session, show toast for foreground pushes */
+  /* Push Notifications (FCM) — refresh the device token once per session, show toast for foreground pushes.
+     Only for users who already said yes: calling this unconditionally fired the
+     browser's permission prompt cold, on the first screen after login, and a
+     dismissal spends the single shot the browser allows. Asking is now the
+     banner's job (NotificationPromptBanner) and the sidebar item's, both of
+     which ask from a deliberate tap and can explain themselves. */
   useEffect(() => {
     if (!user?.id) return;
-    requestAndSaveFcmToken(user.id);
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      requestAndSaveFcmToken(user.id);
+    }
     const unsubscribe = listenForForegroundMessages((notification) => {
       if (notification?.title) toast.info(`${notification.title}${notification.body ? `: ${notification.body}` : ''}`, 8000);
     });

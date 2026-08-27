@@ -5,6 +5,7 @@ import Sidebar from './components/Layout/Sidebar'
 import Login from './components/Auth/Login'
 import { ToastProvider } from './components/Layout/ToastProvider'
 import { InstallPromptBanner } from './components/Layout/InstallPromptBanner'
+import { NotificationPromptBanner } from './components/Layout/NotificationPromptBanner'
 import ErrorBoundary from './components/Layout/ErrorBoundary'
 import './index.css'
 
@@ -128,6 +129,7 @@ function App() {
                   <Sidebar />
                   <main className="content">
                     <InstallPromptBanner />
+                    <NotificationPromptBanner />
                     <ErrorBoundary>
                     <Suspense fallback={<RouteFallback />}>
                     <Routes>
