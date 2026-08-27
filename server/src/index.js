@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { ACADEMY_TIMEZONE } from './utils/academyTime.js';
 import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -349,18 +350,50 @@ httpServer.listen(PORT, () => {
   // page). Pinging our own public URL every 10 minutes counts as inbound
   // traffic and keeps the instance warm. Render injects RENDER_EXTERNAL_URL
   // automatically, so this is inert everywhere else (local dev, tests).
-  // It papers over the free tier rather than fixing it: the instance still
-  // cold-starts after every deploy and Render may still recycle it. The real
-  // fix is a paid instance — delete this block the day the service upgrades.
+  //
+  // But warm around the clock costs ~744 instance-hours a month against a free
+  // cap of 750, which is how the quota came within a few hours of running out
+  // in August — and a suspended backend is a far worse outage than a slow
+  // first request. So the ping keeps office hours instead.
+  //
+  // The window has to cover every scheduled job: the earliest is
+  // recurring-charges at 06:00 and the latest is pay-accrual at 21:05
+  // (see jobs/cron.jobs.js). Outside it nothing is scheduled, so the instance
+  // is free to sleep and whoever knocks at 23:00 waits for the cold start.
+  //
+  // One thing this cannot do is wake itself at 06:00 — a sleeping instance
+  // runs no timers. An external ping (cron-job.org, UptimeRobot) at ~05:50
+  // covers that; without it the day's first visitor starts the process and
+  // runStartupCatchUp() rescues the daily jobs, but any class-reminder slot
+  // before that is simply gone.
   const externalUrl = process.env.RENDER_EXTERNAL_URL;
   if (externalUrl) {
     const KEEP_ALIVE_MS = 10 * 60 * 1000;
-    const ping = () =>
+    // Hours are the academy's wall clock, not the container's UTC.
+    const START_HOUR = Number(process.env.KEEP_ALIVE_START_HOUR ?? 6);
+    const END_HOUR = Number(process.env.KEEP_ALIVE_END_HOUR ?? 22); // exclusive
+    const hourFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: ACADEMY_TIMEZONE,
+      hour: 'numeric',
+      hour12: false,
+    });
+    const academyHour = () => Number(hourFormatter.format(new Date()));
+    const withinWindow = () => {
+      const h = academyHour();
+      return START_HOUR <= END_HOUR
+        ? h >= START_HOUR && h < END_HOUR
+        // A window that wraps past midnight, if anyone ever configures one.
+        : h >= START_HOUR || h < END_HOUR;
+    };
+
+    const ping = () => {
+      if (!withinWindow()) return;
       fetch(`${externalUrl}/api/health`).catch((err) =>
         console.warn('[keep-alive] self-ping failed:', err.message));
+    };
     // unref: a pending timer must never hold the process open on shutdown.
     setInterval(ping, KEEP_ALIVE_MS).unref();
-    console.log(`  Keep-alive:  pinging ${externalUrl}/api/health every ${KEEP_ALIVE_MS / 60000}m`);
+    console.log(`  Keep-alive:  pinging ${externalUrl}/api/health every ${KEEP_ALIVE_MS / 60000}m, ${String(START_HOUR).padStart(2, '0')}:00-${String(END_HOUR).padStart(2, '0')}:00 ${ACADEMY_TIMEZONE}`);
   }
 });
 
