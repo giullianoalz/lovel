@@ -1,0 +1,42 @@
+# Wakes the Render backend before the day's first scheduled job.
+#
+# The server keeps itself warm from 06:00 to 22:00 academy time (see the
+# keep-alive block in server/src/index.js) so the free tier's 750 monthly
+# instance-hours are not spent sleeping through the night. The one thing it
+# cannot do is wake itself: a spun-down instance runs no timers, and the
+# earliest cron — recurring-charges — fires at 06:00. Without this the day's
+# first visitor boots the process instead, and every class-reminder slot
+# before they showed up is gone.
+#
+# This lives here rather than on an uptime-monitor service so it needs no
+# account anywhere else, and so it is versioned next to the thing it wakes.
+name: Wake backend
+
+on:
+  schedule:
+    # 09:50 UTC. The academy runs on America/New_York and GitHub only speaks
+    # UTC, so this is 05:50 in summer and 04:50 in winter. Being an hour early
+    # half the year is harmless — the instance would have woken at 06:00
+    # regardless, and one extra hour a day stays well inside the free cap.
+    # Being an hour *late* would not be harmless, which is why it is not 10:50.
+    - cron: '50 9 * * *'
+  # So it can be tested without waiting for tomorrow morning.
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the health endpoint
+        run: |
+          # A cold start takes 30-50s, so the timeout is generous and the
+          # retries cover GitHub's scheduler firing while Render is still
+          # bringing the instance up. --fail turns an HTTP error into a
+          # non-zero exit, so a broken backend shows as a failed run here
+          # instead of passing quietly.
+          curl --fail --show-error --silent \
+               --max-time 90 \
+               --retry 3 --retry-delay 20 --retry-all-errors \
+               https://lovel-1fyg.onrender.com/api/health
+          echo
+          echo "Backend is awake."
