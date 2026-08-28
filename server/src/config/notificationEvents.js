@@ -127,7 +127,7 @@ export const NOTIFICATION_EVENTS = [
     allowedAudience: ['PARENTS', 'ADMINS'],
     allowedChannels: ['IN_APP', 'EMAIL', 'SMS'],
     params: [
-      { key: 'reloadPunches', label: 'Reload package of', default: 10, min: 1, max: 100, unit: 'punch(es)' },
+      { key: 'reloadPunches', label: 'Reload package of', default: 20, min: 1, max: 100, unit: 'punch(es)' },
       { key: 'reloadPrice', label: 'charged at', default: 10, min: 1, max: 500, unit: '$ per reload' },
     ],
   },

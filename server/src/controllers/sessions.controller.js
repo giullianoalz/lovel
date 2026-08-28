@@ -213,6 +213,22 @@ export const sessionScope = async (user) => {
  */
 const NOT_FOUND = { error: 'Not Found', message: 'Session not found.' };
 
+/**
+ * Everyone teaching a class, lead and co-teachers together.
+ *
+ * A co-teacher is not a spectator: they run the same hour, are paid for it
+ * (payroll.service.js counts co-taught classes) and are held to the same
+ * register. Anything addressed to "the teacher of this class" — a notification,
+ * a redaction check — has to mean all of them, or the co-teacher is the last to
+ * hear about a room they are standing in.
+ *
+ * Takes a class selected with `teacherId` and `coTeachers: { select: { id } }`;
+ * a class with neither yields an empty list rather than throwing.
+ */
+export const teachersAssignedTo = (cls) => [
+  ...new Set([cls?.teacherId, ...(cls?.coTeachers || []).map((t) => t.id)].filter(Boolean)),
+];
+
 const denyForeignClass = async (user, classId) => {
   if (!isOnly(user, 'TEACHER')) return null;
   const cls = await prisma.class.findUnique({
@@ -251,8 +267,13 @@ export const listSessions = async (req, res, next) => {
     }
     if (classId) where.classId = classId;
     if (status) where.status = status.toUpperCase();
+    // A co-teacher stands in the same room as the lead and is paid for the same
+    // hour, so "show me this teacher's calendar" has to find the classes they
+    // co-teach as well. Matching the lead alone made a co-taught class vanish
+    // from its own teacher's timetable, which reads as having been dropped from
+    // the class rather than as a filter that missed it.
     if (teacherId) {
-      where.class = { teacherId };
+      where.class = { OR: [{ teacherId }, { coTeachers: { some: { id: teacherId } } }] };
     }
 
     // AND rather than merging keys: both sides can constrain `class`, and the
@@ -285,6 +306,12 @@ export const listSessions = async (req, res, next) => {
           select: {
             name: true, subject: true, type: true, meetingUrl: true, teacherId: true,
             teacher: { select: { id: true, fullName: true } },
+            // The co-teachers ride along for the same reason the lead's name
+            // does: the calendar names everyone standing in the room off this
+            // payload, and front desk (who can't read GET /classes) saw a
+            // co-taught class credited to the lead alone. It is also what the
+            // redaction below matches on — a co-teacher is on this class.
+            coTeachers: { select: { id: true, fullName: true } },
             ...(isStaff ? {
               enrollments: {
                 where: { status: 'active' },
@@ -321,10 +348,14 @@ export const listSessions = async (req, res, next) => {
     // the academy bills for it is not their business, and a parent must not see
     // a price that nobody has approved yet — it is a draft until it is raised.
     const isAdmin = hasRole(req.user, 'ADMIN');
+    // "Their own class" means assigned to it, lead or co: payroll pays both for
+    // the hour (payroll.service.js), so both have the same claim on seeing what
+    // it pays and on being told the hour was struck off as an absence.
+    const teachesIt = (cls) => teachersAssignedTo(cls).includes(req.user.id);
     res.json({
       sessions: sessions.map((s) => {
         const visible = isAdmin ? s : { ...s, chargeAmount: null, chargeNote: null, chargeOverrides: [] };
-        return isAdmin || s.class?.teacherId === req.user.id
+        return isAdmin || teachesIt(s.class)
           ? visible
           : { ...visible, payRateOverride: null, paidRate: null, absentAt: null, absentReason: null, absentBy: null };
       }),
@@ -1454,7 +1485,11 @@ export const supervisionSessions = async (req, res, next) => {
 
     const where = {};
     if (classId) where.classId = classId;
-    if (teacherId) where.class = { teacherId };
+    // Same rule as the calendar's filter: a teacher's work includes the classes
+    // they co-teach, and supervising them by lead assignment alone hid half of
+    // what a co-teacher actually ran.
+    const taughtBy = (id) => ({ OR: [{ teacherId: id }, { coTeachers: { some: { id } } }] });
+    if (teacherId) where.class = taughtBy(teacherId);
     if (from || to) {
       where.date = {};
       if (from) where.date.gte = new Date(from);
@@ -1479,10 +1514,11 @@ export const supervisionSessions = async (req, res, next) => {
     });
 
     const classes = await prisma.class.findMany({
-      where: teacherId ? { teacherId } : undefined,
+      where: teacherId ? taughtBy(teacherId) : undefined,
       orderBy: { name: 'asc' },
       include: {
         teacher: { select: { id: true, fullName: true } },
+        coTeachers: { select: { id: true, fullName: true } },
         _count: { select: { enrollments: { where: { status: 'active' } } } },
         enrollments: {
           where: { status: 'active' },
@@ -1636,7 +1672,7 @@ export const cancelStudentSession = async (req, res, next) => {
 
     const session = await prisma.session.findUniqueOrThrow({
       where: { id: req.params.id },
-      include: { class: { select: { id: true, name: true, teacherId: true, enrollments: { where: { status: 'active' } } } } },
+      include: { class: { select: { id: true, name: true, teacherId: true, coTeachers: { select: { id: true } }, enrollments: { where: { status: 'active' } } } } },
     });
 
     // A student can only be cancelled from a given session once — a double
@@ -1685,9 +1721,12 @@ export const cancelStudentSession = async (req, res, next) => {
       await prisma.session.update({ where: { id: session.id }, data: { status: 'CANCELLED' } });
     }
 
-    if (session.class.teacherId) {
+    // Everyone assigned to the class hears it, lead and co alike: the person
+    // who needs to know a student isn't coming is whoever is standing in the
+    // room that day, and that is as often the co-teacher as the lead.
+    for (const teacherId of teachersAssignedTo(session.class)) {
       await sendNotification({
-        userId: session.class.teacherId,
+        userId: teacherId,
         type: 'SESSION_CANCELLED',
         title: sessionCancelled ? 'A session was cancelled' : 'A student cancelled their session',
         message: sessionCancelled
@@ -1772,7 +1811,7 @@ export const resolveCancellation = async (req, res, next) => {
 
     const cancellation = await prisma.sessionCancellation.findUniqueOrThrow({
       where: { id: req.params.id },
-      include: { student: { select: { id: true, fullName: true } }, session: { include: { class: { select: { name: true, teacherId: true } } } } },
+      include: { student: { select: { id: true, fullName: true } }, session: { include: { class: { select: { name: true, teacherId: true, coTeachers: { select: { id: true } } } } } } },
     });
 
     // Idempotency guard: a double-click, two admins on the same queue, or a
@@ -1819,9 +1858,9 @@ export const resolveCancellation = async (req, res, next) => {
       }
     }
 
-    if (cancellation.session.class.teacherId) {
+    for (const teacherId of teachersAssignedTo(cancellation.session.class)) {
       await sendNotification({
-        userId: cancellation.session.class.teacherId,
+        userId: teacherId,
         type: 'CANCELLATION_RESOLVED',
         title: 'Cancellation charge decided',
         message: `${cancellation.student.fullName}'s cancellation for ${cancellation.session.class.name} was resolved at ${updated.finalChargePercent}%.`,

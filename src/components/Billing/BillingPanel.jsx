@@ -1764,6 +1764,11 @@ const BillingPanel = () => {
                             <Mail size={13} />
                             <span>{formatDateTimeUS(inv.sentAt)}</span>
                           </span>
+                        ) : inv.status.toLowerCase() === 'sent' ? (
+                          <span className="sent-indicator sent">
+                            <Check size={13} />
+                            <span>Submitted</span>
+                          </span>
                         ) : (
                           <span className="sent-indicator not-sent">
                             <span>Not sent</span>
@@ -2479,6 +2484,11 @@ const BillingPanel = () => {
                         <span className="sent-indicator sent">
                           <Mail size={13} />
                           <span>{formatDateTimeUS(invoiceDetail.invoice.sentAt)}</span>
+                        </span>
+                      ) : invoiceDetail.invoice.status.toLowerCase() === 'sent' ? (
+                        <span className="sent-indicator sent">
+                          <Check size={13} />
+                          <span>Submitted</span>
                         </span>
                       ) : (
                         <span className="sent-indicator not-sent">Not sent</span>
