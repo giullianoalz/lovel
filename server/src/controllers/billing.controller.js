@@ -2323,7 +2323,7 @@ export const refundPayment = async (req, res, next) => {
               where: { id: payment.invoiceId },
               data: {
                 amountPaid: newPaid,
-                status: newPaid <= 0 ? 'SENT' : (newPaid < Number(invoice.totalAmount) ? 'PARTIAL' : 'PAID'),
+                status: newPaid <= 0 ? (invoice.sentAt ? 'SENT' : 'DRAFT') : (newPaid < Number(invoice.totalAmount) ? 'PARTIAL' : 'PAID'),
               },
             });
           }
