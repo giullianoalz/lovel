@@ -300,9 +300,16 @@
   transform: translateY(-1px);
 }
 
-/* Two kinds of work at two prices — no single figure is true, so the column
+/* Two kinds of work at two prices - no single figure is true, so the column
    says so rather than picking one and being quietly wrong. */
-.po-mixed {
-  font-style: italic;
-  color: var(--text-muted, #64748b);
+.po-stacked-rates {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.po-stacked-rate {
+  line-height: 1.2;
+}
+.po-stacked-rate .po-sub {
+  display: inline;
 }

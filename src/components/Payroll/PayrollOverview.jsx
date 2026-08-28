@@ -495,10 +495,14 @@ const PayrollOverview = () => {
                           // Two kinds of work at two prices, or a rate set on one
                           // entry. No single number is true, so it says so and
                           // points at the breakdown rather than picking one.
-                          return <>
-                            <span className="po-mixed">mixed</span>
-                            <span className="po-sub">{paid.map(b => money(b.mixedRates ? b.amount / b.hours : b.rate)).join(' · ')}</span>
-                          </>;
+                          return <div className="po-stacked-rates">
+                            {paid.map(b => (
+                              <div key={b.category || 'none'} className="po-stacked-rate">
+                                {money(b.mixedRates ? b.amount / b.hours : b.rate)}/hr
+                                <span className="po-sub"> ({b.label || 'Uncategorised'})</span>
+                              </div>
+                            ))}
+                          </div>;
                         })()}
                       </td>
                       <td className="num">
