@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, ChevronRight, Plus, MoreVertical, Calendar as CalendarIcon, Search,
-  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers, GitFork, HandCoins
+  UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers, GitFork, HandCoins,
+  Clock, MinusCircle, CircleDot
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { database } from '../../lib/database';
@@ -21,6 +22,32 @@ const formatDateUS = (dateStr) => {
   const [y, m, d] = dateStr.split('T')[0].split('-');
   if (!y || !m || !d) return dateStr;
   return `${m}/${d}/${y.slice(-2)}`;
+};
+
+// Full date + time for the "Sent" column — the date alone is ambiguous when
+// the same invoice is re-sent multiple times in the same day.
+const formatDateTimeUS = (isoStr) => {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d)) return isoStr;
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${mm}/${dd}/${yy} ${h}:${min} ${ampm}`;
+};
+
+const STATUS_CONFIG = {
+  paid:    { icon: CheckCircle,  label: 'Paid' },
+  partial: { icon: CircleDot,    label: 'Partial' },
+  sent:    { icon: Send,         label: 'Sent' },
+  draft:   { icon: FileText,     label: 'Draft' },
+  pending: { icon: Clock,        label: 'Pending' },
+  overdue: { icon: AlertCircle,  label: 'Overdue' },
+  cancelled: { icon: MinusCircle, label: 'Cancelled' },
 };
 
 const BillingPanel = () => {
@@ -1731,10 +1758,31 @@ const BillingPanel = () => {
                       <td style={{color: 'var(--primary)', fontWeight: 600}}>{formatDateUS(inv.date)}</td>
                       <td>{inv.dateRange}</td>
                       <td style={{fontWeight: 700}}>${inv.amount.toFixed(2)}</td>
-                      <td style={{ color: inv.sentAt ? 'inherit' : 'var(--text-muted)' }}>
-                        {inv.sentAt ? formatDateUS(inv.sentAt.split('T')[0]) : 'Not sent'}
+                      <td>
+                        {inv.sentAt ? (
+                          <span className="sent-indicator sent" title={`Sent on ${formatDateTimeUS(inv.sentAt)}`}>
+                            <Mail size={13} />
+                            <span>{formatDateTimeUS(inv.sentAt)}</span>
+                          </span>
+                        ) : (
+                          <span className="sent-indicator not-sent">
+                            <span>Not sent</span>
+                          </span>
+                        )}
                       </td>
-                      <td><span className={`status-badge ${inv.status.toLowerCase()}`}>{inv.status}</span></td>
+                      <td>
+                        {(() => {
+                          const key = inv.status.toLowerCase();
+                          const cfg = STATUS_CONFIG[key] || { icon: FileText, label: inv.status };
+                          const Icon = cfg.icon;
+                          return (
+                            <span className={`status-badge ${key}`}>
+                              <Icon size={13} />
+                              {cfg.label}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td style={{ display: 'flex', gap: '6px' }}>
                         <button
                           className="tx-delete-btn"
@@ -2416,7 +2464,26 @@ const BillingPanel = () => {
                   <div className="inv-detail-meta">
                     <div><span>Issued</span><strong>{formatDateUS(invoiceDetail.invoice.date)}</strong></div>
                     <div><span>Due</span><strong>{invoiceDetail.invoice.dueDate ? formatDateUS(invoiceDetail.invoice.dueDate) : '—'}</strong></div>
-                    <div><span>Status</span><strong>{invoiceDetail.invoice.status}</strong></div>
+                    <div>
+                      <span>Status</span>
+                      {(() => {
+                        const key = invoiceDetail.invoice.status.toLowerCase();
+                        const cfg = STATUS_CONFIG[key] || { icon: FileText, label: invoiceDetail.invoice.status };
+                        const Icon = cfg.icon;
+                        return <span className={`status-badge ${key}`}><Icon size={13} />{cfg.label}</span>;
+                      })()}
+                    </div>
+                    <div>
+                      <span>Sent</span>
+                      {invoiceDetail.invoice.sentAt ? (
+                        <span className="sent-indicator sent">
+                          <Mail size={13} />
+                          <span>{formatDateTimeUS(invoiceDetail.invoice.sentAt)}</span>
+                        </span>
+                      ) : (
+                        <span className="sent-indicator not-sent">Not sent</span>
+                      )}
+                    </div>
                     {invoiceDetail.invoice.poNumbers.length > 0 && (
                       <div><span>PO #</span><strong>{invoiceDetail.invoice.poNumbers.join(', ')}</strong></div>
                     )}
