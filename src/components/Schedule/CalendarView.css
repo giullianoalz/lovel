@@ -2933,6 +2933,31 @@ select.form-control {
   color: #92400e;
 }
 
+/* The Shifts view stacks the rota in document flow instead of positioning it
+   on a timeline — nothing here needs a time axis, and a day with two shifts
+   shouldn't inherit the 2304px height the class grid needs. */
+.week-day-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  flex: 1;
+  min-height: 120px;
+  background: white;
+}
+
+.week-day-list .agenda-event.shift {
+  border-left: 3px solid #d97706;
+}
+
+.shift-day-empty {
+  color: var(--text-muted, #9ca3af);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px 0;
+  user-select: none;
+}
+
 .list-event-row.shift {
   border-left-color: #78350f;
 }

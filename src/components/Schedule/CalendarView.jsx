@@ -607,7 +607,7 @@ const CalendarView = () => {
       const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       return { start: d, end: d };
     }
-    if (viewMode === 'week') {
+    if (viewMode === 'week' || viewMode === 'shifts') {
       const start = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
       const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
       return { start, end };
@@ -1913,7 +1913,7 @@ const CalendarView = () => {
     setCurrentDate(prev => {
       const d = new Date(prev);
       if (view === 'day') d.setDate(d.getDate() - 1);
-      else if (view === 'week') d.setDate(d.getDate() - 7);
+      else if (view === 'week' || view === 'shifts') d.setDate(d.getDate() - 7);
       else d.setMonth(d.getMonth() - 1);
       return d;
     });
@@ -1922,7 +1922,7 @@ const CalendarView = () => {
     setCurrentDate(prev => {
       const d = new Date(prev);
       if (view === 'day') d.setDate(d.getDate() + 1);
-      else if (view === 'week') d.setDate(d.getDate() + 7);
+      else if (view === 'week' || view === 'shifts') d.setDate(d.getDate() + 7);
       else d.setMonth(d.getMonth() + 1);
       return d;
     });
@@ -2017,7 +2017,7 @@ const CalendarView = () => {
               >
                 <CalendarIcon size={14} className="view-icon-only" />
                 <span>
-                  {view === 'month' ? 'Month' : view === 'list' ? 'Week (List)' : view === 'week' ? 'Week (Agenda)' : 'Day'}
+                  {view === 'month' ? 'Month' : view === 'list' ? 'Week (List)' : view === 'week' ? 'Week (Agenda)' : view === 'shifts' ? 'Shifts' : 'Day'}
                 </span>
                 <span style={{ fontSize: '10px' }}>▼</span>
               </button>
@@ -2046,6 +2046,15 @@ const CalendarView = () => {
                   <div className={`view-dropdown-item ${view === 'day' ? 'active' : ''}`} onClick={() => { setView('day'); setIsViewMenuOpen(false); }}>
                     <div className="check-space">{view === 'day' && <CheckCircle2 size={12} className="check-icon" />}</div> Day
                   </div>
+
+                  {/* Paid non-class hours. Gated the same way the data is: the
+                      server only hands work shifts to admins and to their own
+                      owner, so anyone else would land on an empty view. */}
+                  {canSeeStaffEvents && (
+                    <div className={`view-dropdown-item ${view === 'shifts' ? 'active' : ''}`} onClick={() => { setView('shifts'); setIsViewMenuOpen(false); }}>
+                      <div className="check-space">{view === 'shifts' && <CheckCircle2 size={12} className="check-icon" />}</div> Shifts
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2439,7 +2448,9 @@ const CalendarView = () => {
                     const isToday = toISODate(date) === toISODate(new Date());
                     const dayEvents = [
                       ...events.filter(e => e.dateStr === toISODate(date)),
-                      ...staffEvents.filter(e => e.dateStr === toISODate(date)),
+                      // Shifts are excluded here for the same reason as in the
+                      // agenda grid — they live in the Shifts view.
+                      ...staffEvents.filter(e => e.dateStr === toISODate(date) && e.kind !== 'shift'),
                     ].sort((a, b) => {
                       const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
                       const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
@@ -2530,10 +2541,14 @@ const CalendarView = () => {
                     // Staff events like PTO / Holidays / All Day go in the header
                     const allDayEvents = staffDayEvents.filter(e => e.kind === 'pto' || e.kind === 'holiday' || (e.time && e.time.toLowerCase().includes('all-day')));
                     
-                    // Regular events + meetings go in the grid
+                    // Regular events + meetings go in the grid. Work shifts do
+                    // not: a rota that runs alongside the teaching day competes
+                    // with the classes for column width and reads as if it were
+                    // one of them (a front-desk shift titled like a class is
+                    // indistinguishable from it). They get their own view.
                     const gridEvents = [
                        ...dayEvents,
-                       ...staffDayEvents.filter(e => e.kind !== 'pto' && e.kind !== 'holiday' && !(e.time && e.time.toLowerCase().includes('all-day')))
+                       ...staffDayEvents.filter(e => e.kind !== 'pto' && e.kind !== 'holiday' && e.kind !== 'shift' && !(e.time && e.time.toLowerCase().includes('all-day')))
                     ];
                     
                     const layout = layoutOverlaps(gridEvents);
@@ -2748,7 +2763,8 @@ const CalendarView = () => {
                 const dayEvents = isCurrentMonth
                   ? [
                       ...events.filter(e => e.dateStr === toISODate(cellDate)),
-                      ...staffEvents.filter(e => e.dateStr === toISODate(cellDate)),
+                      // Shifts live in the Shifts view, not among the classes.
+                      ...staffEvents.filter(e => e.dateStr === toISODate(cellDate) && e.kind !== 'shift'),
                     ].sort((a, b) => {
                       const pa = a.kind === 'pto' ? -1 : parseTimeToPix(a.time);
                       const pb = b.kind === 'pto' ? -1 : parseTimeToPix(b.time);
@@ -2806,6 +2822,51 @@ const CalendarView = () => {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Shifts — the paid hours that aren't classes (front desk, planning,
+            a staff meeting). Kept out of the class grids on purpose: side by
+            side they compete for column width and a shift titled like a class
+            is indistinguishable from one. Grouped by person rather than laid
+            on a timeline, because what this view answers is "who is covering
+            what this week", not "what happens at 2pm". */}
+        {view === 'shifts' && (
+          <div className="calendar-scroll-wrapper">
+            <div className="week-schedule-grid">
+              <div className="week-days-container" style={{ borderLeft: 'none' }}>
+                {weekDates.map((date, idx) => {
+                  const isToday = toISODate(date) === toISODate(new Date());
+                  const dayShifts = staffEvents
+                    .filter(e => e.kind === 'shift' && e.dateStr === toISODate(date))
+                    .sort((a, b) => parseTimeToPix(a.time) - parseTimeToPix(b.time));
+
+                  return (
+                    <div key={idx} className={`week-day-col ${isToday ? 'today' : ''}`}>
+                      <div className="week-day-header">
+                        <div className="week-day-name">{WEEK_DAYS[idx]}</div>
+                        <div className="week-day-num">{date.getDate()}</div>
+                      </div>
+                      <div className="week-day-list">
+                        {dayShifts.length === 0 ? (
+                          <div className="shift-day-empty">—</div>
+                        ) : dayShifts.map(item => (
+                          <div
+                            key={item.id}
+                            className="agenda-event shift"
+                            style={{ position: 'relative', cursor: 'default', borderLeftColor: item.categoryColor || undefined }}
+                            title={`${item.title} · ${item.time}`}
+                          >
+                            <span className="agenda-ev-time">{item.time}</span>
+                            <div className="agenda-ev-title"><strong>{item.title}</strong></div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
