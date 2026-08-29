@@ -1802,8 +1802,8 @@ const CalendarView = () => {
   const { startOffset, daysInMonth } = getMonthDays();
   const monthCells = Array.from({ length: 42 });
 
-  // Time parsing for Day View Timeline (12 AM to 12 AM)
-  const START_HOUR = 0;
+  // Time parsing for Day View Timeline (9 AM to midnight)
+  const START_HOUR = 9;
   const PIXELS_PER_MINUTE = 1.6; // Approximates ~96px per hour (clear distinction)
 
   const parseTimeToPix = (timeStr) => {
@@ -1818,7 +1818,12 @@ const CalendarView = () => {
     if (period === 'AM' && hours === 12) hours = 0;
     
     const minutesFromStart = (hours - START_HOUR) * 60 + (minutes || 0);
-    return minutesFromStart * PIXELS_PER_MINUTE;
+    // A session earlier than START_HOUR (the odd 8 AM class against a 9 AM
+    // grid) would otherwise get a negative top — rendered above the visible
+    // grid, clipped under the sticky time-axis header where it's unclickable
+    // even though a sliver of it still shows. Pin it to the top edge instead:
+    // still visible, still openable, just not positioned at its true time.
+    return Math.max(0, minutesFromStart * PIXELS_PER_MINUTE);
   };
 
   const getPositionStyles = (timeRange) => {
@@ -2498,7 +2503,7 @@ const CalendarView = () => {
                 {/* Time Axis — shows hover time label in blue when user moves over the grid */}
                 <div className="time-axis" style={{ position: 'relative' }}>
                   <div className="time-axis-header">GMT-5</div>
-                  {Array.from({ length: 24 }).map((_, i) => {
+                  {Array.from({ length: 24 - START_HOUR }).map((_, i) => {
                     const hour = START_HOUR + i;
                     const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
                     return (
@@ -2568,7 +2573,7 @@ const CalendarView = () => {
                          >
 
                            {/* Horizontal lines */}
-                           {Array.from({ length: 24 }).map((_, i) => (
+                           {Array.from({ length: 24 - START_HOUR }).map((_, i) => (
                              <React.Fragment key={i}>
                                <div className="grid-hour-line" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }} />
                                <div className="grid-halfhour-line" style={{ top: `${(i * 60 + 30) * PIXELS_PER_MINUTE}px` }} />
@@ -2644,7 +2649,7 @@ const CalendarView = () => {
                 {/* Time Axis */}
                 <div className="time-axis">
                   <div className="time-axis-header">GMT-5</div>
-                  {Array.from({ length: 24 }).map((_, i) => {
+                  {Array.from({ length: 24 - START_HOUR }).map((_, i) => {
                     const hour = START_HOUR + i;
                     const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
                     return (
@@ -2690,7 +2695,7 @@ const CalendarView = () => {
                          onClick={e => handleGridClick(e, currentDate, teacher)}
                       >
                          {/* Background Hour Lines */}
-                         {Array.from({ length: 24 }).map((_, i) => (
+                         {Array.from({ length: 24 - START_HOUR }).map((_, i) => (
                            <React.Fragment key={i}>
                              <div className="hourLine" style={{ top: `${i * 60 * PIXELS_PER_MINUTE}px` }}></div>
                              <div className="grid-halfhour-line" style={{ top: `${(i * 60 + 30) * PIXELS_PER_MINUTE}px` }}></div>
