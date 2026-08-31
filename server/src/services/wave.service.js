@@ -198,27 +198,40 @@ export const listBusinesses = async () => {
  * Accounts for the connected business, split into the two groups the admin maps:
  * `deposit` (assets money lands in) and `income` (revenue categories).
  */
-export const listAccounts = async () => {
-  const row = await getConnectionRow();
-  if (!row?.businessId) throw new Error('No Wave business selected.');
+// Fetches accounts of a single Wave account type. Filtering by `types` at the
+// GraphQL level matters here: this business has ~200 auto-generated per-customer
+// Accounts Receivable sub-accounts (also ASSET type), which filled page 1 and
+// pushed every real bank/income account off the end when this queried
+// unfiltered and split client-side.
+const fetchAccountsByType = async (businessId, type, excludedSubtypes) => {
   const data = await waveGraphql(
-    `query($businessId: ID!) {
+    `query($businessId: ID!, $types: [AccountTypeValue!], $excludedSubtypes: [AccountSubtypeValue!]) {
       business(id: $businessId) {
-        accounts(page: 1, pageSize: 200) {
+        accounts(page: 1, pageSize: 200, types: $types, excludedSubtypes: $excludedSubtypes) {
           edges { node { id name type { name value } subtype { name value } } }
         }
       }
     }`,
-    { businessId: row.businessId },
+    { businessId, types: [type], excludedSubtypes: excludedSubtypes || null },
   );
-  const nodes = (data.business?.accounts?.edges || []).map((e) => e.node);
-  const byType = (t) => nodes
-    .filter((n) => (n.type?.value || '').toUpperCase() === t)
-    .map((n) => ({ id: n.id, name: n.name, subtype: n.subtype?.name }));
+  return (data.business?.accounts?.edges || []).map((e) => e.node);
+};
+
+export const listAccounts = async () => {
+  const row = await getConnectionRow();
+  if (!row?.businessId) throw new Error('No Wave business selected.');
+  const [assetNodes, incomeNodes] = await Promise.all([
+    // Excludes the auto-generated per-customer receivable accounts — hundreds
+    // of entries named "Accounts Receivable" that swamp the real bank/cash
+    // accounts an admin would actually pick as a deposit target.
+    fetchAccountsByType(row.businessId, 'ASSET', ['RECEIVABLE', 'RECEIVABLE_INVOICES', 'RECEIVABLE_OTHER']),
+    fetchAccountsByType(row.businessId, 'INCOME'),
+  ]);
+  const toOption = (n) => ({ id: n.id, name: n.name, subtype: n.subtype?.name });
   return {
-    deposit: byType('ASSET'),
-    income: byType('INCOME'),
-    all: nodes.map((n) => ({ id: n.id, name: n.name, type: n.type?.value })),
+    deposit: assetNodes.map(toOption),
+    income: incomeNodes.map(toOption),
+    all: [...assetNodes, ...incomeNodes].map((n) => ({ id: n.id, name: n.name, type: n.type?.value })),
   };
 };
 
