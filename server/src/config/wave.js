@@ -19,10 +19,14 @@ export const WAVE = {
   // https://<backend-host>/api/integrations/wave/callback
   redirectUri: process.env.WAVE_REDIRECT_URI || '',
 
-  // Scopes: read businesses/accounts + create money transactions, plus a refresh
-  // token for unattended re-syncs. offline_access is what yields refresh_token.
+  // Scopes: list businesses/accounts + create money transactions. Names must
+  // match https://developer.waveapps.com/hc/en-us/articles/360032818132 exactly
+  // — Wave has no accounting:*, transactions:read/write (plural), or
+  // offline_access scope; requesting any of those 400s with invalid_scope.
+  // Wave issues a refresh_token on every code exchange without needing a scope
+  // for it.
   scopes: (process.env.WAVE_SCOPES ||
-    'accounting:read accounting:write transactions:read transactions:write user:read offline_access'),
+    'business:read account:read transaction:write user:read'),
 };
 
 // True only when the host has the OAuth app credentials configured. The UI uses
