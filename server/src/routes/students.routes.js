@@ -10,6 +10,7 @@ import {
   updateSnackPunches,
   getAttendanceSummary,
   exportStudentsCsv,
+  exportContactsCsv,
 } from '../controllers/students.controller.js';
 
 const router = Router();
@@ -23,6 +24,10 @@ router.get('/', authenticate, requireRole('ADMIN', 'TEACHER', 'RECEPTIONIST'), l
 // GET /api/students/export — Download all students as CSV (Admin)
 // Registered before '/:id' so "export" isn't captured as an id param.
 router.get('/export', authenticate, requireRole('ADMIN'), exportStudentsCsv);
+
+// GET /api/students/export/contacts — Parents in Google Contacts' own CSV
+// format, which is the only one Google Voice/Contacts will accept (Admin).
+router.get('/export/contacts', authenticate, requireRole('ADMIN'), exportContactsCsv);
 
 // GET /api/students/:id — Get student detail (Admin/Teacher or self)
 router.get('/:id', authenticate, requireSelfOrRole('ADMIN', 'TEACHER'), getStudent);

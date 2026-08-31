@@ -42,7 +42,7 @@ const TIMEZONE = ACADEMY_TIMEZONE;
 // ─────────────────────────────────────────────────────────────
 // JOB 1 — Overdue Invoice Alerts
 // Every day at 8:00 AM: find invoices past due_date that are
-// still SENT or PARTIAL, and notify the admin + parent.
+// not yet PAID/CANCELLED/DRAFT, and notify the admin + parent.
 // ─────────────────────────────────────────────────────────────
 const checkOverdueInvoices = async () => {
   console.log('[CRON] Checking overdue invoices…');
@@ -51,7 +51,7 @@ const checkOverdueInvoices = async () => {
 
   const overdue = await prisma.invoice.findMany({
     where: {
-      status: { in: ['SENT', 'PARTIAL'] },
+      status: { notIn: ['PAID', 'CANCELLED', 'DRAFT'] },
       dueDate: { lt: today },
     },
     include: {

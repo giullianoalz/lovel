@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, UserPlus, AlertCircle, Cookie, Mail, Phone, CalendarDays, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy, Shell, Check, X, Pencil } from 'lucide-react';
+import { Search, ChevronDown, UserPlus, AlertCircle, Cookie, Mail, Phone, CalendarDays, MessageSquare, ShoppingBag, GraduationCap, DollarSign, Briefcase, UploadCloud, Download, Users, Send, CheckCircle2, Clock, Copy, Shell, Check, X, Pencil } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -23,6 +23,7 @@ const StudentsList = () => {
   const { hasRole } = useAuth();
   const toast = useToast();
   const [exporting, setExporting] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('students');
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -220,21 +221,28 @@ const StudentsList = () => {
     }
   };
 
-  const handleExportCsv = async () => {
+  // Two shapes of the same data, because they answer to different importers:
+  // 'students' mirrors our own CSV importer; 'contacts' is Google's own column
+  // set, which is the only one Google Contacts — and so Google Voice, which has
+  // no importer of its own — will accept.
+  const handleExportCsv = async (variant = 'students') => {
     if (exporting) return;
+    setExportMenuOpen(false);
     setExporting(true);
     try {
-      const res = await api.get('/students/export', { responseType: 'blob' });
+      const isContacts = variant === 'contacts';
+      const res = await api.get(isContacts ? '/students/export/contacts' : '/students/export', { responseType: 'blob' });
       const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `students-${new Date().toISOString().split('T')[0]}.csv`;
+      const stamp = new Date().toISOString().split('T')[0];
+      a.download = (isContacts ? 'google-contacts-' : 'students-') + stamp + '.csv';
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast.error(err.userMessage || 'Could not export students.');
+      toast.error(err.userMessage || 'Could not export.');
     } finally {
       setExporting(false);
     }
@@ -267,15 +275,33 @@ const StudentsList = () => {
               )}
               {hasRole('ADMIN') && (
                 <>
-                  <button
-                    className="action-btn outline"
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
-                    onClick={handleExportCsv}
-                    disabled={exporting}
-                  >
-                    <Download size={18} />
-                    <span className="desk-only">{exporting ? 'Exporting…' : 'Export CSV'}</span>
-                  </button>
+                  <div className="export-menu-wrap">
+                    <button
+                      className="action-btn outline"
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}
+                      onClick={() => setExportMenuOpen((open) => !open)}
+                      disabled={exporting}
+                    >
+                      <Download size={18} />
+                      <span className="desk-only">{exporting ? 'Exporting…' : 'Export CSV'}</span>
+                      <ChevronDown size={14} />
+                    </button>
+                    {exportMenuOpen && (
+                      <>
+                        <div className="export-menu-scrim" onClick={() => setExportMenuOpen(false)} />
+                        <div className="export-menu" role="menu">
+                          <button type="button" role="menuitem" onClick={() => handleExportCsv('students')}>
+                            <span className="export-menu-title">Students</span>
+                            <span className="export-menu-hint">Our own columns — re-importable here</span>
+                          </button>
+                          <button type="button" role="menuitem" onClick={() => handleExportCsv('contacts')}>
+                            <span className="export-menu-title">Google Contacts</span>
+                            <span className="export-menu-hint">Parents with phones, for Google Voice</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                   <button
                     className="action-btn outline"
                     style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'white', border: '1px solid #e2e8f0', color: '#475569', fontWeight: 600 }}

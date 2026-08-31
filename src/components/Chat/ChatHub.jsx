@@ -16,7 +16,26 @@ const MEDIA_BASE = SOCKET_URL;
 // browser in the reader's, so a message would change hour on reload. `time`
 // stays as the fallback for payloads that predate `sentAt`.
 const clockOf = (item) => (item?.sentAt ? formatClockTime(item.sentAt) : (item?.time || ''));
-const threadClock = (thread) => (thread?.timestamp ? formatClockTime(thread.timestamp) : (thread?.time || ''));
+const threadClock = (thread) => {
+  if (!thread?.timestamp && !thread?.time) return '';
+  const val = thread.timestamp || thread.time;
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return thread.time || '';
+  
+  const today = new Date().toDateString();
+  const dString = d.toDateString();
+  
+  if (dString === today) {
+    return formatClockTime(d);
+  }
+  
+  const yesterday = new Date(Date.now() - 86400000).toDateString();
+  if (dString === yesterday) {
+    return 'Yesterday';
+  }
+  
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
 
 // Messages are grouped under a day heading; "Today" used to be hard-coded above
 // the whole list, so a year-old conversation opened as if it all happened today.
@@ -211,12 +230,16 @@ const ChatHub = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Only auto-scroll when the OPEN thread's messages change — a socket message
-  // landing in a background thread must not yank the reader to the bottom.
+  // Only auto-scroll when a NEW message arrives in the OPEN thread.
+  // We track the last message ID instead of the full array to prevent the view
+  // from being yanked to the bottom if the array reference changes or if the
+  // user is scrolling up while background updates occur.
   const activeThreadMessages = messages[activeChat];
+  const lastMessageId = activeThreadMessages?.[activeThreadMessages.length - 1]?.id;
+  
   useEffect(() => {
     scrollToBottom();
-  }, [activeThreadMessages, activeChat]);
+  }, [lastMessageId, activeChat]);
 
   useEffect(() => {
     const loadMessages = async () => {
@@ -816,8 +839,10 @@ const ChatHub = () => {
           </>
         ) : (
           <div className="no-chat-selected">
-            <MessageSquare size={48} />
-            <h2>Select a conversation to start communicating</h2>
+            <div className="no-chat-icon-wrapper">
+              <MessageSquare size={36} />
+            </div>
+            <h2>Select a conversation</h2>
             <p>Admin supervision is active for all academy communication.</p>
           </div>
         )}

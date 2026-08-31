@@ -207,6 +207,156 @@ export const exportStudentsCsv = async (req, res, next) => {
 };
 
 /**
+ * GET /api/students/export/contacts
+ *
+ * The students export mirrors the *importer's* columns, which is exactly what
+ * makes Google reject it: Google Contacts (and therefore Google Voice, which
+ * has no importer of its own — it reads the account's contacts) only accepts
+ * its own column set. So this is a second, separate export written to Google's
+ * import template, one row per parent/guardian rather than per student.
+ */
+export const exportContactsCsv = async (req, res, next) => {
+  try {
+    const memberships = await prisma.familyMember.findMany({
+      where: {
+        user: {
+          OR: [{ role: 'PARENT' }, { secondaryRoles: { has: 'PARENT' } }],
+        },
+      },
+      select: {
+        user: { select: { id: true, fullName: true, email: true, phone: true } },
+        family: {
+          select: {
+            name: true,
+            address: true,
+            members: {
+              where: { user: { role: 'STUDENT' } },
+              select: { user: { select: { fullName: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    // Google matches an existing contact on the number, so a parent listed in
+    // two households (the Streeters and the Brookses both are) would import
+    // twice and then need merging by hand.
+    const byUser = new Map();
+    for (const m of memberships) {
+      const seen = byUser.get(m.user.id);
+      if (seen) {
+        seen.families.push(m.family);
+      } else {
+        byUser.set(m.user.id, { user: m.user, families: [m.family] });
+      }
+    }
+
+    // Google Voice dials E.164. The roster holds every shape a form field ever
+    // allowed — '727-709-2211', '7278619710', '(727)4811922', '17272485245',
+    // '+13057073218', and one number carrying an invisible directional mark —
+    // so normalise on digits alone and drop what can't be a US number. A
+    // contact with no number is of no use in Voice.
+    const toE164 = (raw) => {
+      const digits = String(raw ?? '').replace(/\D/g, '');
+      if (digits.length === 10) return `+1${digits}`;
+      if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+      if (String(raw ?? '').trim().startsWith('+') && digits.length >= 11) return `+${digits}`;
+      return null;
+    };
+
+    // Nobody in this list is a family to text from Voice: the admin's own
+    // account, the accounts used to rehearse invitations, and seed data.
+    // example.com is reserved for documentation (RFC 2606), so that domain
+    // only ever marks a fixture — the Doe family and its 555 number among them.
+    const EXCLUDED_EMAILS = new Set([
+      'giullianoalz@gmail.com',
+      'giullianoalzateg@gmail.com',
+    ]);
+    const isExcluded = (user, families) => {
+      const email = (user.email || '').toLowerCase();
+      if (EXCLUDED_EMAILS.has(email)) return true;
+      if (/@example\.com$/.test(email)) return true;
+      return families.some((f) => /^invite test/i.test(f.name || ''));
+    };
+
+    // Google's import template, column for column. Blank ones are kept so the
+    // header still lines up with what the importer expects to find.
+    const headers = [
+      'Name Prefix', 'First Name', 'Middle Name', 'Last Name', 'Name Suffix',
+      'Phonetic First Name', 'Phonetic Middle Name', 'Phonetic Last Name',
+      'Nickname', 'File As',
+      'E-mail 1 - Label', 'E-mail 1 - Value',
+      'Phone 1 - Label', 'Phone 1 - Value',
+      'Address 1 - Label', 'Address 1 - Country', 'Address 1 - Street',
+      'Address 1 - Extended Address', 'Address 1 - City', 'Address 1 - Region',
+      'Address 1 - Postal Code', 'Address 1 - PO Box',
+      'Organization Name', 'Organization Title', 'Organization Department',
+      'Birthday',
+      'Event 1 - Label', 'Event 1 - Value',
+      'Relation 1 - Label', 'Relation 1 - Value',
+      'Website 1 - Label', 'Website 1 - Value',
+      'Custom Field 1 - Label', 'Custom Field 1 - Value',
+      'Notes', 'Labels',
+    ];
+
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    const lines = [headers.join(',')];
+    let skippedNoPhone = 0;
+    let skippedFixture = 0;
+
+    for (const { user, families } of byUser.values()) {
+      if (isExcluded(user, families)) { skippedFixture += 1; continue; }
+      const phone = toE164(user.phone);
+      if (!phone) { skippedNoPhone += 1; continue; }
+
+      const parts = String(user.fullName || '').trim().split(/\s+/);
+      const firstName = parts.shift() || '';
+      const lastName = parts.join(' ');
+
+      const familyNames = [...new Set(families.map((f) => f.name).filter(Boolean))];
+      const address = families.map((f) => f.address).find(Boolean) || '';
+      const students = [...new Set(
+        families.flatMap((f) => f.members.map((m) => m.user.fullName)).filter(Boolean),
+      )];
+
+      lines.push([
+        '', firstName, '', lastName, '',
+        '', '', '',
+        '', '',
+        user.email ? 'Home' : '', user.email ?? '',
+        'Mobile', phone,
+        address ? 'Home' : '', '', address,
+        '', '', '',
+        '', '',
+        familyNames.join(' / '), '', '',
+        '',
+        '', '',
+        '', '',
+        '', '',
+        '', '',
+        students.length ? `Students: ${students.join(', ')}` : '',
+        // One label, not one per household: a label per family would land 60+
+        // groups in Contacts. This is the group you pick in Voice.
+        'Lovelearning Families',
+      ].map(esc).join(','));
+    }
+
+    // No BOM. Excel wants one, which is why the students export carries it, but
+    // Google's importer reads it as part of the first header cell — 'Name
+    // Prefix' stops matching and the whole file comes back unrecognised.
+    const csv = lines.join('\r\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="google-contacts.csv"');
+    res.setHeader('X-Contacts-Skipped-No-Phone', String(skippedNoPhone));
+    res.setHeader('X-Contacts-Skipped-Fixture', String(skippedFixture));
+    res.send(csv);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * GET /api/students
  * List all students with optional filtering
  */

@@ -4,7 +4,7 @@ import { sendNotification, notifyAdmins } from '../jobs/notification.helper.js';
 
 // POST /api/payments/stripe/webhook
 // Confirms Checkout Sessions started from the parent portal (createPaymentSession)
-// and settles the invoice: marks it PAID/PARTIAL, records a Payment, and logs
+// and settles the invoice: marks it PAID when fully covered, records a Payment, and logs
 // the ledger Transaction. Mounted with express.raw() so req.body is a Buffer.
 export const handleStripeWebhook = async (req, res) => {
   if (!stripe) return res.status(503).send('Stripe not configured.');
@@ -69,13 +69,9 @@ const settleCheckoutSession = async (session, io) => {
     });
 
     const newPaid = Number(invoice.amountPaid) + amount;
-    await tx.invoice.update({
-      where: { id: invoice.id },
-      data: {
-        amountPaid: newPaid,
-        status: newPaid >= Number(invoice.totalAmount) ? 'PAID' : 'PARTIAL',
-      },
-    });
+    const data = { amountPaid: newPaid };
+    if (newPaid >= Number(invoice.totalAmount)) data.status = 'PAID';
+    await tx.invoice.update({ where: { id: invoice.id }, data });
 
     await tx.transaction.create({
       data: {

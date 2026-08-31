@@ -368,12 +368,6 @@
   border-color: #cbd5e1;
 }
 
-.status-badge.partial {
-  background: linear-gradient(135deg, #fef3c7, #fde68a);
-  color: #92400e;
-  border-color: #fbbf24;
-}
-
 .status-badge.cancelled {
   background: linear-gradient(135deg, #f1f5f9, #e2e8f0);
   color: #94a3b8;

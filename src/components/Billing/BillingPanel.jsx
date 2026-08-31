@@ -3,7 +3,7 @@ import {
   DollarSign, AlertCircle, Coffee, Filter, Download, Send, X, CheckCircle, 
   CreditCard, History, ChevronLeft, ChevronRight, Plus, MoreVertical, Calendar as CalendarIcon, Search,
   UploadCloud, FileText, Check, User, Trash2, Pencil, ExternalLink, Eye, Mail, Receipt, Layers, GitFork, HandCoins,
-  Clock, MinusCircle, CircleDot
+  Clock, MinusCircle
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { database } from '../../lib/database';
@@ -42,7 +42,6 @@ const formatDateTimeUS = (isoStr) => {
 
 const STATUS_CONFIG = {
   paid:    { icon: CheckCircle,  label: 'Paid' },
-  partial: { icon: CircleDot,    label: 'Partial' },
   sent:    { icon: Send,         label: 'Sent' },
   draft:   { icon: FileText,     label: 'Draft' },
   pending: { icon: Clock,        label: 'Pending' },

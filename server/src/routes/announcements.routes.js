@@ -12,6 +12,7 @@ import {
   deleteAnnouncement,
   updateAnnouncement,
   addAnnouncementComment,
+  getAnnouncementMediaFile,
   deleteAnnouncementComment,
 } from '../controllers/announcements.controller.js';
 
@@ -46,6 +47,12 @@ router.get('/', authenticate, withCache(req => `announcements:${req.user.id}`, 3
 // POST /api/announcements — Academy Feed post (Admin only — teachers can view but not publish)
 // Accepts up to 10 photos/videos for a carousel-style post.
 router.post('/', authenticate, requireRole('ADMIN'), upload.array('media', 10), createAnnouncement);
+
+// GET /api/announcements/media/:mediaId/file — the bytes behind one carousel
+// item. Declared before the /:id routes so "media" is never read as a post id.
+// Authenticated rather than static: the files live in Drive, privately, and
+// the controller checks the post's audience before streaming anything.
+router.get('/media/:mediaId/file', authenticate, getAnnouncementMediaFile);
 
 // POST /api/announcements/:id/read
 router.post('/:id/read', authenticate, markAnnouncementRead);

@@ -570,11 +570,17 @@ export const createGroupThread = async (req, res, next) => {
         f.family.members.filter(m => hasRole(m.user, 'PARENT')).map(m => m.userId));
       name = `Class ${enrollments[0]?.class?.name || 'Announcements'}`;
     } else if (groupType === 'MANAGEMENT') {
-      const managers = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true } });
+      const managers = await prisma.user.findMany({
+        where: { OR: [{ role: 'ADMIN' }, { secondaryRoles: { hasSome: ['ADMIN'] } }] },
+        select: { id: true }
+      });
       participantIds = managers.map(m => m.id);
       name = 'Management Team';
     } else if (groupType === 'OCEAN_NAVIGATORS') {
-      const staff = await prisma.user.findMany({ where: { role: { in: ['TEACHER', 'ADMIN'] } }, select: { id: true } });
+      const staff = await prisma.user.findMany({
+        where: { OR: [{ role: { in: ['TEACHER', 'ADMIN'] } }, { secondaryRoles: { hasSome: ['TEACHER', 'ADMIN'] } }] },
+        select: { id: true }
+      });
       participantIds = staff.map(s => s.id);
       name = 'Ocean Navigators';
     }

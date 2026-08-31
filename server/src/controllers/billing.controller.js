@@ -218,9 +218,9 @@ export const deleteTransaction = async (req, res, next) => {
           subtotal: newTotal,
           totalAmount: newTotal,
           // amountPaid is untouched by this edit, so if it's still <=0 the
-          // invoice can't have been PAID/PARTIAL before — its DRAFT/SENT/
-          // OVERDUE status is unaffected by a line's total changing.
-          status: amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
+          // invoice can't have been PAID before — its DRAFT/SENT/OVERDUE
+          // status is unaffected by a line's total changing.
+          status: amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : invoice.status),
         },
       });
     });
@@ -324,7 +324,7 @@ export const updateTransaction = async (req, res, next) => {
             ...(newDate !== undefined && { date: newDate }),
             subtotal: newTotal,
             totalAmount: newTotal,
-            status: amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL'),
+            status: amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : invoice.status),
           },
         });
       }
@@ -553,7 +553,7 @@ export const editInvoice = async (req, res, next) => {
 
       const newTotal = round2(lines.reduce((sum, l) => sum + Number(l.amount), 0));
       const amountPaid = Number(invoice.amountPaid);
-      const status = amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : 'PARTIAL');
+      const status = amountPaid <= 0 ? invoice.status : (amountPaid >= newTotal ? 'PAID' : invoice.status);
 
       return tx.invoice.update({
         where: { id: invoice.id },
@@ -765,8 +765,8 @@ export const sendInvoice = async (req, res, next) => {
       });
     }
 
-    // Only a DRAFT graduates to SENT here — an invoice already PARTIAL/PAID/
-    // OVERDUE keeps its accounting status even if an admin re-sends the copy.
+    // Only a DRAFT graduates to SENT here — an invoice already PAID/OVERDUE
+    // keeps its accounting status even if an admin re-sends the copy.
     // sentAt itself is always stamped with the latest send, status change or not.
     await prisma.invoice.update({
       where: { id: invoice.id },
@@ -853,7 +853,7 @@ export const createTransaction = async (req, res, next) => {
           const newPaid = Number(invoice.amountPaid) + appliedToInvoice;
           await db.invoice.update({
             where: { id: invoiceId },
-            data: { amountPaid: newPaid, status: newPaid >= Number(invoice.totalAmount) ? 'PAID' : 'PARTIAL' },
+            data: { amountPaid: newPaid, status: newPaid >= Number(invoice.totalAmount) ? 'PAID' : invoice.status },
           });
           txAmount = appliedToInvoice;
           excess = parsedAmount - appliedToInvoice;
@@ -1170,7 +1170,7 @@ export const splitInvoice = async (req, res, next) => {
       // The keeper: re-point at only its own lines and re-total. amountPaid
       // and status reset to zero/DRAFT along with everything else — whatever
       // was covering the old combined total is about to be recomputed from
-      // scratch below, and leaving the old PARTIAL/amountPaid in place here
+      // scratch below, and leaving the old status/amountPaid in place here
       // would only matter if applyCreditAcrossInvoices found less credit than
       // before, which cannot happen: splitting does not spend or create any.
       await tx.invoice.update({
@@ -1460,7 +1460,7 @@ const createManualInvoice = async (req, res, next, { studentId, lines }) => {
 
       const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
       return applied > 0
-        ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' }
+        ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'DRAFT' }
         : created;
     });
 
@@ -1600,7 +1600,7 @@ export const createInvoice = async (req, res, next) => {
         const amount = applied.get(inv.id) ?? 0;
         if (amount <= 0) return inv;
         const total = totals.find((t) => t.id === inv.id).total;
-        return { ...inv, amountPaid: amount, status: amount >= total ? 'PAID' : 'PARTIAL' };
+        return { ...inv, amountPaid: amount, status: amount >= total ? 'PAID' : inv.status };
       });
     });
 
@@ -1685,14 +1685,15 @@ export const generateEmaBatch = async (req, res, next) => {
       // ── The invoice each student's rows belong to ─────────────────────
       // Step Up is paying an invoice that already exists: the term's coves and
       // electives were billed when the calendar charges were approved, and the
-      // scholarship covers part of that (which is why these invoices sit at
-      // PARTIAL). Minting a fresh invoice per batch would bill the family a
-      // second time for money already invoiced, so reuse the open one and only
-      // create a number when the student genuinely has none.
+      // scholarship covers part of that (which is why these invoices are still
+      // open — SENT/OVERDUE with a partial amountPaid). Minting a fresh invoice
+      // per batch would bill the family a second time for money already
+      // invoiced, so reuse the open one and only create a number when the
+      // student genuinely has none.
       const openInvoices = matchedIds.length > 0 || matchedFamilyIds.length > 0
         ? await tx.invoice.findMany({
             where: {
-              status: { in: ['SENT', 'PARTIAL'] },
+              status: { notIn: ['PAID', 'CANCELLED'] },
               OR: [
                 { studentId: { in: matchedIds } },
                 // Invoices raised for the household rather than one child.
@@ -1895,7 +1896,7 @@ export const generateEmaBatch = async (req, res, next) => {
                 poNumbers: g.poNumbers || [],
                 subtotal: total,
                 totalAmount: total,
-                status: 'SENT',
+                status: 'DRAFT',
                 dateRange: 'EMA Step Up Batch',
                 lines: rows.length > 0
                   ? { create: rows.map((r) => ({ description: `EMA session — PO ${r.poNumber}`, amount: Number(r.amount) || 0 })) }
@@ -1941,7 +1942,7 @@ export const generateEmaBatch = async (req, res, next) => {
               poNumbers: g.poNumbers || [],
               subtotal: total,
               totalAmount: total,
-              status: 'SENT',
+              status: 'DRAFT',
               dateRange: 'EMA Step Up Batch',
               lines: rows.length > 0
                 ? { create: rows.map((r) => ({ description: `EMA session — PO ${r.poNumber}`, amount: Number(r.amount) || 0 })) }
@@ -2052,7 +2053,7 @@ export const generateEmaBatch = async (req, res, next) => {
           if (recordedPayments > 0) {
             await tx.invoice.update({
               where: { id: targetInvoice.id },
-              data: { amountPaid: paidSoFar, status: paidSoFar >= invoiceTotal ? 'PAID' : 'PARTIAL' },
+              data: { amountPaid: paidSoFar, status: paidSoFar >= invoiceTotal ? 'PAID' : targetInvoice.status || 'DRAFT' },
             });
           }
         }
@@ -2213,11 +2214,11 @@ const runReconciliation = async (db, lines, { dryRun, recordedById = null }) => 
 
     r.matched.push({ ...line, invoiceNumber: invoice.invoiceNumber, familyId: invoice.familyId, creditApplied: excess });
     r.totalMatched += amount;
-    touched.set(invoice.id, { total: totalAmount, paid: newPaid, number: invoice.invoiceNumber });
+    touched.set(invoice.id, { total: totalAmount, paid: newPaid, number: invoice.invoiceNumber, currentStatus: invoice.status });
   }
 
   for (const [id, info] of touched) {
-    const status = info.paid >= info.total ? 'PAID' : 'PARTIAL';
+    const status = info.paid >= info.total ? 'PAID' : info.currentStatus;
     if (!dryRun) {
       await db.invoice.update({ where: { id }, data: { status } });
     }
@@ -2230,7 +2231,7 @@ const runReconciliation = async (db, lines, { dryRun, recordedById = null }) => 
 // POST /api/billing/ema/reconcile
 // Body: { lines: [{ poNumber, studentName, amount }], dryRun?: boolean }
 // Matches each remittance line to the invoice covering that PO #, records a
-// scholarship payment, and marks invoices PAID/PARTIAL. With dryRun: true,
+// scholarship payment, and marks fully-paid invoices PAID. With dryRun: true,
 // runs the exact same matching logic read-only — this is what the "preview"
 // step in the reconcile modal calls, so what the admin sees is guaranteed to
 // match what confirming will actually do (previously the preview re-matched
@@ -2323,7 +2324,7 @@ export const refundPayment = async (req, res, next) => {
               where: { id: payment.invoiceId },
               data: {
                 amountPaid: newPaid,
-                status: newPaid <= 0 ? (invoice.sentAt ? 'SENT' : 'DRAFT') : (newPaid < Number(invoice.totalAmount) ? 'PARTIAL' : 'PAID'),
+                status: newPaid <= 0 ? (invoice.sentAt ? 'SENT' : 'DRAFT') : (newPaid >= Number(invoice.totalAmount) ? 'PAID' : invoice.status),
               },
             });
           }
@@ -2763,7 +2764,7 @@ const writeBlockInvoice = async (tx, { familyId, studentId, priced, subtotal, la
 
   const { applied } = await applyAvailableCredit(tx, { familyId, invoiceId: created.id, invoiceTotal: subtotal });
   return applied > 0
-    ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'PARTIAL' }
+    ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'DRAFT' }
     : created;
 };
 

@@ -51,8 +51,8 @@ export const applyAvailableCredit = async (tx, { familyId, invoiceId, invoiceTot
   // charges are already CHARGE rows on the ledger (linked to invoiceId by the
   // caller), so a plain family balance would count them against the very credit
   // meant to pay them — a family with $30 credit getting a new $20 invoice would
-  // see only $10 "available" and the invoice would stay PARTIAL, triggering false
-  // overdue notices even though its credit covers the invoice in full.
+  // see only $10 "available" and the invoice would stay SENT with a balance due,
+  // triggering false overdue notices even though its credit covers it in full.
   //
   // Filtering in JS rather than with `NOT: { invoiceId }` on purpose: in SQL
   // `invoiceId <> $id` drops rows where invoiceId IS NULL, and standalone credits
@@ -73,15 +73,11 @@ export const applyAvailableCredit = async (tx, { familyId, invoiceId, invoiceTot
 
   const applied = Math.min(availableCredit, invoiceTotal);
 
-  // Allocation only — no ledger transaction. The surplus is already on the
-  // books (that's WHY the balance is negative); the invoice's own charges are
-  // already CHARGE rows. Writing another balance-decreasing CREDIT here would
-  // count the same surplus twice and leave phantom credit on the account.
-  const status = applied >= invoiceTotal ? 'PAID' : 'PARTIAL';
-  await tx.invoice.update({
-    where: { id: invoiceId },
-    data: { amountPaid: applied, status },
-  });
+  // Only promote to PAID when the credit fully covers the invoice; partial
+  // credit leaves the accounting status untouched (DRAFT/SENT/OVERDUE).
+  const data = { amountPaid: applied };
+  if (applied >= invoiceTotal) data.status = 'PAID';
+  await tx.invoice.update({ where: { id: invoiceId }, data });
 
   return { applied };
 };
@@ -131,13 +127,11 @@ export const applyCreditAcrossInvoices = async (tx, { familyId, batchTxIds, invo
     remaining -= amount;
     applied.set(inv.id, amount);
 
-    // Allocation only, no ledger row — same reasoning as applyAvailableCredit:
-    // the surplus is already on the books, and writing a CREDIT here would
-    // count it twice.
-    await tx.invoice.update({
-      where: { id: inv.id },
-      data: { amountPaid: amount, status: amount >= inv.total ? 'PAID' : 'PARTIAL' },
-    });
+    // Only promote to PAID when the credit fully covers the invoice; partial
+    // credit leaves the accounting status untouched.
+    const data = { amountPaid: amount };
+    if (amount >= inv.total) data.status = 'PAID';
+    await tx.invoice.update({ where: { id: inv.id }, data });
   }
 
   return applied;
@@ -183,10 +177,9 @@ export const applyPerStudentCredit = async (tx, { familyId, studentId, batchTxId
   if (available <= 0) return { applied: 0 };
 
   const applied = Math.round(Math.min(available, invoiceTotal) * 100) / 100;
-  await tx.invoice.update({
-    where: { id: invoiceId },
-    data: { amountPaid: applied, status: applied >= invoiceTotal ? 'PAID' : 'PARTIAL' },
-  });
+  const data = { amountPaid: applied };
+  if (applied >= invoiceTotal) data.status = 'PAID';
+  await tx.invoice.update({ where: { id: invoiceId }, data });
 
   return { applied };
 };
@@ -236,10 +229,9 @@ export const sweepPaymentOntoOpenInvoices = async (tx, { familyId, studentId, am
     if (due <= 0) continue;
     const give = Math.round(Math.min(remaining, due) * 100) / 100;
     const newPaid = round2(Number(inv.amountPaid) + give);
-    await tx.invoice.update({
-      where: { id: inv.id },
-      data: { amountPaid: newPaid, status: newPaid >= Number(inv.totalAmount) ? 'PAID' : 'PARTIAL' },
-    });
+    const data = { amountPaid: newPaid };
+    if (newPaid >= Number(inv.totalAmount)) data.status = 'PAID';
+    await tx.invoice.update({ where: { id: inv.id }, data });
     remaining = round2(remaining - give);
     applied = round2(applied + give);
   }

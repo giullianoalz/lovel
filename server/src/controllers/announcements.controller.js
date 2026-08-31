@@ -1,6 +1,87 @@
+import fs from 'fs';
+import path from 'path';
 import prisma from '../config/database.js';
 import { allRoles, hasRole } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
+import {
+  drive, driveAuthMode, uploadFileToDrive, downloadFileWithType,
+} from '../config/drive.js';
+
+const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'announcements');
+
+// Local disk only lasts as long as the process. On Render the container is
+// replaced on every restart and comes back with an empty filesystem, so a
+// photo that never reached Drive is gone before anyone reloads the feed —
+// which is exactly how a post published on the 30th showed its pictures that
+// evening and served four broken images the next morning. Drive is therefore
+// the store; disk is kept only as a same-process fast path.
+const localDiskIsDurable = () => process.env.NODE_ENV === 'development';
+
+const isVideo = (mimetype) => (mimetype || '').startsWith('video/');
+
+/**
+ * Pushes the just-uploaded files to Drive and returns the rows worth writing.
+ * A file that reached nowhere durable is dropped rather than recorded, so the
+ * feed never lists media it cannot produce.
+ */
+const storeMediaFiles = async (files, startPosition = 0) => {
+  if (files.length === 0) return { rows: [], failed: [], warning: null };
+
+  // Falls back to the marketing folder so this works on the Render config as
+  // it stands, with no new variable to set; point the announcements one at its
+  // own folder to keep the two apart.
+  const folderId = process.env.DRIVE_ANNOUNCEMENTS_FOLDER_ID || process.env.DRIVE_MARKETING_FOLDER_ID || null;
+  let driveError = null;
+
+  const results = await Promise.all(files.map(async (file, i) => {
+    let driveFileId = null;
+
+    if (drive) {
+      try {
+        const uploaded = await uploadFileToDrive(file.path, file.originalname, file.mimetype, folderId);
+        driveFileId = uploaded?.id || null;
+      } catch (err) {
+        console.error(`[Announcements] Drive upload failed for ${file.originalname}:`, err.message);
+        driveError = err.message;
+      }
+    }
+
+    if (!driveFileId && !localDiskIsDurable()) {
+      // Nothing durable holds it, so drop the file rather than promise the
+      // author it was published.
+      await fs.promises.unlink(file.path).catch(() => {});
+      return { ok: false, fileName: file.originalname };
+    }
+
+    return {
+      ok: true,
+      row: {
+        url: `/uploads/announcements/${file.filename}`,
+        driveFileId,
+        type: isVideo(file.mimetype) ? 'video' : 'image',
+        position: startPosition + i,
+      },
+    };
+  }));
+
+  const rows = results.filter(r => r.ok).map(r => r.row);
+  const failed = results.filter(r => !r.ok).map(r => r.fileName);
+
+  // The post itself is the point, so losing its text because Drive is down
+  // would be the worse failure: publish what made it and hand the rest back
+  // for the composer to report.
+  const warning = failed.length === 0 ? null
+    : `${failed.length} of ${files.length} attachment(s) could not be saved. ` + (
+      driveAuthMode === 'none'
+        ? 'Google Drive is not configured on the server.'
+        : driveAuthMode === 'service-account'
+          ? 'Google Drive is using a service account, which has no storage quota. Set DRIVE_REFRESH_TOKEN.'
+          : `Google Drive rejected the upload${driveError ? `: ${driveError}` : '.'}`
+    );
+
+  return { rows, failed, warning };
+};
+
 
 export const createAnnouncement = async (req, res, next) => {
   try {
@@ -13,7 +94,8 @@ export const createAnnouncement = async (req, res, next) => {
     // Only admins may pin a post to the top of the feed.
     const canPin = hasRole(req.user, 'ADMIN');
     const files = req.files || [];
-    const isVideo = (mimetype) => mimetype.startsWith('video/');
+
+    const { rows: mediaRows, warning: mediaWarning } = await storeMediaFiles(files);
 
     const announcement = await prisma.announcement.create({
       data: {
@@ -21,18 +103,14 @@ export const createAnnouncement = async (req, res, next) => {
         body,
         targetAudience: targetAudience || 'all',
         category: category || 'general',
-        // imageUrl kept for backwards compatibility with older posts; new posts use `media`.
-        imageUrl: files[0] && !isVideo(files[0].mimetype) ? `/uploads/announcements/${files[0].filename}` : null,
+        // imageUrl is a bare local path with nothing behind it, so new posts
+        // leave it null and carry everything in `media`. The column stays on
+        // the model only for posts written before that existed.
+        imageUrl: null,
         isPinned: canPin && (isPinned === 'true' || isPinned === true),
         expiresAt: expiresAt ? new Date(expiresAt) : null,
         authorId: req.user.id,
-        media: files.length > 0 ? {
-          create: files.map((file, i) => ({
-            url: `/uploads/announcements/${file.filename}`,
-            type: isVideo(file.mimetype) ? 'video' : 'image',
-            position: i,
-          })),
-        } : undefined,
+        media: mediaRows.length > 0 ? { create: mediaRows } : undefined,
       },
       include: {
         author: { select: { fullName: true, role: true } },
@@ -71,7 +149,11 @@ export const createAnnouncement = async (req, res, next) => {
       });
     }).catch(() => {});
 
-    res.status(201).json({ message: 'Announcement created successfully', announcement });
+    res.status(201).json({
+      message: 'Announcement created successfully',
+      announcement,
+      ...(mediaWarning && { mediaWarning }),
+    });
   } catch (error) {
     next(error);
   }
@@ -111,7 +193,9 @@ export const updateAnnouncement = async (req, res, next) => {
     const { title, body, category, targetAudience, isPinned, removeMediaIds } = req.body;
     const canPin = hasRole(req.user, 'ADMIN');
     const newFiles = req.files || [];
-    const isVideo = (mimetype) => mimetype.startsWith('video/');
+
+    // Start at 1000 so additions land after whatever the post already had.
+    const { rows: mediaRows, warning: mediaWarning } = await storeMediaFiles(newFiles, 1000);
 
     // Optionally remove specific existing media items.
     if (removeMediaIds) {
@@ -127,15 +211,7 @@ export const updateAnnouncement = async (req, res, next) => {
         ...(category    !== undefined && { category }),
         ...(targetAudience !== undefined && { targetAudience }),
         ...(isPinned    !== undefined && canPin && { isPinned: isPinned === 'true' || isPinned === true }),
-        ...(newFiles.length > 0 && {
-          media: {
-            create: newFiles.map((file, i) => ({
-              url: `/uploads/announcements/${file.filename}`,
-              type: isVideo(file.mimetype) ? 'video' : 'image',
-              position: i + 1000, // append after existing
-            })),
-          },
-        }),
+        ...(mediaRows.length > 0 && { media: { create: mediaRows } }),
       },
       include: {
         author: { select: { fullName: true, role: true } },
@@ -144,7 +220,11 @@ export const updateAnnouncement = async (req, res, next) => {
     });
 
     invalidate('announcements:*');
-    res.json({ message: 'Announcement updated.', announcement: updated });
+    res.json({
+      message: 'Announcement updated.',
+      announcement: updated,
+      ...(mediaWarning && { mediaWarning }),
+    });
   } catch (error) {
     next(error);
   }
@@ -240,6 +320,53 @@ const canSeeAnnouncement = (user, announcement) =>
   hasRole(user, 'ADMIN') ||
   announcement.targetAudience === 'all' ||
   allRoles(user).map(r => r.toLowerCase()).includes(announcement.targetAudience);
+
+/**
+ * GET /api/announcements/media/:mediaId/file
+ * Streams one carousel item. The bytes are never on a public URL: Drive holds
+ * them privately and this route is what turns an id into pixels, so the same
+ * audience rule that hides a staff-only post also hides its photos.
+ */
+export const getAnnouncementMediaFile = async (req, res, next) => {
+  try {
+    const { mediaId } = req.params;
+
+    const media = await prisma.announcementMedia.findUnique({
+      where: { id: mediaId },
+      include: { announcement: { select: { targetAudience: true } } },
+    });
+    if (!media) return res.status(404).json({ error: 'Not Found' });
+    // 404 rather than 403, as everywhere else here: whether a staff-only post
+    // exists is not a parent's business either.
+    if (!canSeeAnnouncement(req.user, media.announcement)) {
+      return res.status(404).json({ error: 'Not Found' });
+    }
+
+    if (media.driveFileId) {
+      try {
+        const file = await downloadFileWithType(media.driveFileId);
+        if (file?.stream) {
+          // Without a Content-Type, helmet's nosniff makes the browser refuse
+          // to render a perfectly good image.
+          if (file.mimeType) res.setHeader('Content-Type', file.mimeType);
+          res.setHeader('Cache-Control', 'private, max-age=3600');
+          file.stream.on('error', (err) => next(err));
+          return file.stream.pipe(res);
+        }
+      } catch (err) {
+        console.error(`[Announcements] Drive download failed for media ${mediaId}, falling back to local disk:`, err.message);
+      }
+    }
+
+    const localPath = path.join(UPLOAD_DIR, path.basename(media.url));
+    if (fs.existsSync(localPath)) return res.sendFile(localPath);
+
+    // Posted before this route existed, and wiped with the container since.
+    res.status(404).json({ error: 'Not Found', message: 'This file is no longer available.' });
+  } catch (error) {
+    next(error);
+  }
+};
 
 /**
  * POST /api/announcements/:id/comments

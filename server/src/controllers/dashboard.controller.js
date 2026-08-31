@@ -140,7 +140,7 @@ export const getDashboard = async (req, res, next) => {
 
     // 3. Billing quick summary
     const pendingInvoices = await prisma.invoice.findMany({
-      where: { status: { in: ['SENT', 'PARTIAL', 'OVERDUE'] } },
+      where: { status: { notIn: ['PAID', 'CANCELLED', 'DRAFT'] } },
       take: 1,
       orderBy: { dueDate: 'asc' },
       include: { lines: true },

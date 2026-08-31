@@ -1804,7 +1804,7 @@ const CalendarView = () => {
 
   // Time parsing for Day View Timeline (9 AM to midnight)
   const START_HOUR = 9;
-  const PIXELS_PER_MINUTE = 1.6; // Approximates ~96px per hour (clear distinction)
+  const PIXELS_PER_MINUTE = 2.0; // ~120px per hour — taller blocks for readability
 
   const parseTimeToPix = (timeStr) => {
     if (!timeStr || typeof timeStr !== 'string') return 0;
@@ -2568,6 +2568,7 @@ const CalendarView = () => {
                          </div>
                          <div 
                            className="week-day-body"
+                           style={{ minHeight: `${(24 - START_HOUR) * 60 * PIXELS_PER_MINUTE}px` }}
                            onDragOver={e => e.preventDefault()}
                            onDrop={e => handleDropOnWeekDay(e, date)}
                            onMouseMove={e => {
@@ -2706,7 +2707,7 @@ const CalendarView = () => {
 
                       <div 
                          className="timeline-container" 
-                         style={{ height: `${24 * 60 * PIXELS_PER_MINUTE}px` }}
+                         style={{ height: `${(24 - START_HOUR) * 60 * PIXELS_PER_MINUTE}px` }}
                          onClick={e => handleGridClick(e, currentDate, teacher)}
                       >
                          {/* Background Hour Lines */}

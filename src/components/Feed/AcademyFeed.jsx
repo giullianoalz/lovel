@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Megaphone, MapPin, Users, Home, Camera, ClipboardList, Pin, Trash2,
-  ImagePlus, X, Send, Plus, Bell, ChevronLeft, ChevronRight, Film, Pencil,
+  ImagePlus, ImageOff, X, Send, Plus, Bell, ChevronLeft, ChevronRight, Film, Pencil,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../Layout/ToastProvider';
 import Linkified from '../../lib/linkify';
+import { useProtectedMedia } from '../../hooks/useProtectedMedia';
 import './AcademyFeed.css';
 
 const CATEGORIES = [
@@ -41,24 +42,93 @@ const timeAgo = (iso) => {
   return new Date(iso).toLocaleDateString();
 };
 
-/* ── Media carousel ── */
+/* ── One carousel item ──
+   Announcement media lives in Drive, not on a public /uploads path, so an
+   <img src> can't reach it: the bytes come back through the API with our auth
+   header and are rendered from a blob URL, the same way chat attachments and
+   marketing photos already work. */
+const MediaItem = ({ item, alt, compact = false }) => {
+  const { url, error } = useProtectedMedia(`/announcements/media/${item.id}/file`);
+
+  // Posts from before the Drive migration point at files the container wiped.
+  // Say so plainly instead of leaving a broken-image icon in the card.
+  if (error) {
+    return (
+      <div className="feed-carousel-missing">
+        <ImageOff size={22} />
+        <span>{item.type === 'video' ? 'Video unavailable' : 'Image unavailable'}</span>
+      </div>
+    );
+  }
+
+  if (!url) return <div className="feed-carousel-loading" aria-busy="true" />;
+
+  return item.type === 'video'
+    ? <video src={url} controls={!compact} muted={compact} playsInline className="feed-carousel-media" />
+    : <img src={url} alt={alt} className="feed-carousel-media" />;
+};
+
+/* ── Media carousel ──
+   Arrows, dots and the counter are absolutely positioned over a fixed frame so
+   a tall portrait photo and a wide screenshot both sit in the same box, instead
+   of the card jumping every time you page through them. */
 const MediaCarousel = ({ media, alt }) => {
   const [idx, setIdx] = useState(0);
+
   if (!media?.length) return null;
-  const item = media[idx];
+
+  const count   = media.length;
+  const current = Math.min(idx, count - 1);
+  const item    = media[current];
+  // Stepped from `current`, not from the stored index: editing a post can drop
+  // the item we were parked on, and `current` is the one actually on screen.
+  const go      = (delta) => setIdx((current + delta + count) % count);
+
   return (
-    <div className="feed-carousel">
-      {item.type === 'video' ? (
-        <video src={MEDIA_BASE + item.url} controls className="feed-carousel-media" />
-      ) : (
-        <img src={MEDIA_BASE + item.url} alt={`${alt} ${idx + 1}`} className="feed-carousel-media" />
-      )}
-      {media.length > 1 && (
-        <div className="feed-carousel-controls">
-          <button onClick={() => setIdx(i => (i - 1 + media.length) % media.length)}><ChevronLeft size={16} /></button>
-          <span>{idx + 1} / {media.length}</span>
-          <button onClick={() => setIdx(i => (i + 1) % media.length)}><ChevronRight size={16} /></button>
-        </div>
+    <div
+      className="feed-carousel"
+      role="group"
+      aria-roledescription="carousel"
+      aria-label={alt}
+      tabIndex={count > 1 ? 0 : -1}
+      onKeyDown={e => {
+        if (count < 2) return;
+        if (e.key === 'ArrowLeft')  { e.preventDefault(); go(-1); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+      }}
+    >
+      <div className="feed-carousel-frame">
+        <MediaItem
+          key={item.id}
+          item={item}
+          alt={count > 1 ? `${alt} — ${current + 1} of ${count}` : alt}
+        />
+      </div>
+
+      {count > 1 && (
+        <>
+          <button type="button" className="feed-carousel-nav prev" aria-label="Previous" onClick={() => go(-1)}>
+            <ChevronLeft size={18} />
+          </button>
+          <button type="button" className="feed-carousel-nav next" aria-label="Next" onClick={() => go(1)}>
+            <ChevronRight size={18} />
+          </button>
+
+          <span className="feed-carousel-count">{current + 1} / {count}</span>
+
+          <div className="feed-carousel-dots">
+            {media.map((m, i) => (
+              <button
+                type="button"
+                key={m.id}
+                className={`feed-carousel-dot${i === current ? ' active' : ''}`}
+                aria-label={`Go to item ${i + 1}`}
+                aria-current={i === current}
+                onClick={() => setIdx(i)}
+              />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
@@ -191,7 +261,8 @@ const EditComposer = ({ post, onSave, onCancel }) => {
       const res = await api.patch(`/announcements/${post.id}`, data, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success('Post updated!');
+      if (res.data.mediaWarning) toast.error(res.data.mediaWarning);
+      else toast.success('Post updated!');
       onSave(res.data.announcement);
     } catch {
       toast.error('Could not update the post.');
@@ -225,9 +296,7 @@ const EditComposer = ({ post, onSave, onCancel }) => {
         <div className="composer-media-grid">
           {existingMedia.map(m => (
             <div key={m.id} className="composer-media-thumb">
-              {m.type === 'video'
-                ? <video src={MEDIA_BASE + m.url} muted />
-                : <img src={MEDIA_BASE + m.url} alt="media" />}
+              <MediaItem item={m} alt="Attached media" compact />
               {m.type === 'video' && <span className="composer-media-video-tag"><Film size={12} /></span>}
               <button onClick={() => setRemoveIds(prev => [...prev, m.id])} title="Remove"><X size={12} /></button>
             </div>
@@ -387,8 +456,9 @@ const AcademyFeed = () => {
       data.append('isPinned', form.isPinned);
       mediaItems.forEach(item => data.append('media', item.file));
 
-      await api.post('/announcements', data, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success('Posted to Announcements!');
+      const res = await api.post('/announcements', data, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (res.data.mediaWarning) toast.error(res.data.mediaWarning);
+      else toast.success('Posted to Announcements!');
       clearComposer();
       setComposerOpen(false);
       await loadPosts();
