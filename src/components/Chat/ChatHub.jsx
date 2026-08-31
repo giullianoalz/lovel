@@ -521,7 +521,9 @@ const ChatHub = () => {
       try {
         const res = await api.get('/users', { params: { search: query, limit: 20 } });
         if (seq !== peopleSearchSeq.current) return; // a newer search superseded this one
-        setPeople((res.data.users || []).filter(u => u.id !== user?.id));
+        // Students never sign in themselves (their parent does), so a thread
+        // addressed to one sits unread forever. Keep them out of the picker.
+        setPeople((res.data.users || []).filter(u => u.id !== user?.id && u.canSignIn));
       } catch (err) {
         console.error('Error searching users:', err);
       } finally {
