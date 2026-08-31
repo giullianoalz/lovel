@@ -52,9 +52,31 @@ const MarketingHub = () => {
 
   useEffect(() => { loadSubmissions(); }, [filterWeek]);
 
+  // Matches the server's upload.array('photos', 20) — a block that goes over
+  // this gets rejected as one request with no partial success, so the cap has
+  // to be enforced here too, before a teacher fills out the whole form only to
+  // have the submit fail.
+  //
+  // iOS Safari's own photo picker limits how many images it hands back from a
+  // single "Photo Library" pick (a phone with a big camera roll may cap that
+  // well under 20). That's the OS, not this page — nothing here can raise it.
+  // What this page can do is make adding a second round obvious, since the
+  // dropzone and "Add Photo" already accumulate across picks with no extra
+  // step needed.
+  const MAX_PHOTOS_PER_BLOCK = 20;
+
   // Photo handlers
   const handlePhotoSelect = (e, target) => {
-    const files = Array.from(e.target.files);
+    const incoming = Array.from(e.target.files);
+    const current = target === 'bulk' ? photoFiles : target === 'sotw' ? sotwForm.photos : aotwForm.photos;
+    const room = MAX_PHOTOS_PER_BLOCK - current.length;
+    const files = incoming.slice(0, Math.max(room, 0));
+    if (files.length < incoming.length) {
+      toast.error(`Only added ${files.length} of ${incoming.length} photos — a submission can hold up to ${MAX_PHOTOS_PER_BLOCK}.`);
+    }
+    // Clear the input so selecting the same photos again (e.g. after being
+    // trimmed by the cap above) still fires a change event.
+    e.target.value = '';
     const previews = files.map(f => URL.createObjectURL(f));
 
     if (target === 'bulk') {
@@ -264,7 +286,12 @@ const MarketingHub = () => {
                   ))}
                 </div>
               )}
-              <div className="photo-count">{photoFiles.length} photo{photoFiles.length !== 1 ? 's' : ''} selected</div>
+              <div className="photo-count">
+                {photoFiles.length} of {MAX_PHOTOS_PER_BLOCK} photo{photoFiles.length !== 1 ? 's' : ''} selected
+                {photoFiles.length > 0 && photoFiles.length < MAX_PHOTOS_PER_BLOCK && (
+                  <span className="photo-count-hint"> — if your phone only lets you pick a few at a time, tap here again to add more</span>
+                )}
+              </div>
 
               <textarea
                 className="form-control"

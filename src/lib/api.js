@@ -22,6 +22,22 @@ let signupInFlight = false;
 export const setSignupInFlight = (value) => { signupInFlight = value; };
 export const isSignupInFlight = () => signupInFlight;
 
+// getIdToken() talks to Firebase over the network whenever the cached token
+// is stale, and axios's own `timeout` above never starts counting until the
+// request actually leaves the browser — it does not cover this interceptor.
+// A stalled token refresh (flaky wifi, a captive portal, a tab that was
+// backgrounded long enough for the SDK's internal state to wedge) used to hang
+// every request indefinitely: no error, no timeout, a submit button stuck on
+// "Submitting…" forever. Racing it against a hard cap turns that into an
+// ordinary failed request the app's existing error handling already covers.
+const withTimeout = (promise, ms) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
+  promise.then(
+    (v) => { clearTimeout(timer); resolve(v); },
+    (e) => { clearTimeout(timer); reject(e); },
+  );
+});
+
 // Request interceptor — attach Firebase JWT or dev bypass header
 api.interceptors.request.use(
   async (config) => {
@@ -32,9 +48,12 @@ api.interceptors.request.use(
       const user = auth.currentUser;
       if (user) {
         try {
-          const token = await user.getIdToken();
+          const token = await withTimeout(user.getIdToken(), 8000);
           config.headers.Authorization = `Bearer ${token}`;
         } catch (error) {
+          // Proceeds without a token rather than hanging — the server answers
+          // 401 almost immediately, which the response interceptor and the
+          // caller's own catch block already know how to surface.
           console.error('[API] Error getting Firebase ID Token:', error);
         }
       }

@@ -6,6 +6,25 @@
 export const errorHandler = (err, req, res, _next) => {
   console.error(`[Error] ${req.method} ${req.path}:`, err);
 
+  // Multer errors — a photo/attachment upload that broke one of the limits set
+  // on its route (too many files, a file too large, a field it wasn't
+  // expecting). These used to fall through to the generic 500 below, which
+  // told an uploader nothing about which limit they hit; a teacher who added
+  // photos in a few rounds and crossed 20 just saw "an internal server error
+  // occurred" with no idea why, right after the submission it belonged to got
+  // rolled back.
+  if (err.name === 'MulterError') {
+    const messages = {
+      LIMIT_FILE_COUNT: 'Too many files in one upload. Add the rest as a separate upload.',
+      LIMIT_UNEXPECTED_FILE: 'Too many files in one upload. Add the rest as a separate upload.',
+      LIMIT_FILE_SIZE: 'One of those files is too large.',
+    };
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: messages[err.code] || err.message,
+    });
+  }
+
   // Prisma known errors
   if (err.code === 'P2002') {
     return res.status(409).json({

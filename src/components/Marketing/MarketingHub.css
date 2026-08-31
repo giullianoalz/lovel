@@ -81,6 +81,7 @@
 .photo-thumb:hover .remove-thumb { opacity: 1; }
 
 .photo-count { text-align: center; margin-top: 10px; font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.photo-count-hint { font-weight: 400; }
 
 .photos-card textarea.form-control { margin-top: 12px; width: 100%; box-sizing: border-box; resize: vertical; }
 
