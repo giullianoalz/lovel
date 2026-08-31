@@ -221,10 +221,10 @@ export const listAccounts = async () => {
   const row = await getConnectionRow();
   if (!row?.businessId) throw new Error('No Wave business selected.');
   const [assetNodes, incomeNodes] = await Promise.all([
-    // Excludes the auto-generated per-customer receivable accounts — hundreds
-    // of entries named "Accounts Receivable" that swamp the real bank/cash
-    // accounts an admin would actually pick as a deposit target.
-    fetchAccountsByType(row.businessId, 'ASSET', ['RECEIVABLE', 'RECEIVABLE_INVOICES', 'RECEIVABLE_OTHER']),
+    // Excludes the auto-generated per-customer receivable and transfer-clearing
+    // accounts — hundreds of "Accounts Receivable"/"Transfer Clearing" entries
+    // that swamp the real bank/cash accounts an admin would pick as a deposit.
+    fetchAccountsByType(row.businessId, 'ASSET', ['RECEIVABLE', 'RECEIVABLE_INVOICES', 'RECEIVABLE_OTHER', 'TRANSFERS']),
     fetchAccountsByType(row.businessId, 'INCOME'),
   ]);
   const toOption = (n) => ({ id: n.id, name: n.name, subtype: n.subtype?.name });
