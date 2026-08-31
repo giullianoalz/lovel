@@ -1487,6 +1487,166 @@
   margin-top: auto;
 }
 
+/* Timeline view — horizontal hour axis, one row per tutor (mirrors TutorBird's
+   Timeline calendar view: rows are resources, not days). */
+.timeline-view-grid {
+  display: flex;
+  flex-direction: column;
+  min-width: max-content;
+}
+
+.timeline-hours-header {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: white;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.timeline-row-label-spacer {
+  min-width: 200px;
+  flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  z-index: 21;
+  background: white;
+  border-right: 1px solid var(--border-light);
+}
+
+.timeline-hours-track {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.timeline-hour-label {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-left: 1px solid var(--border-light);
+  height: 40px;
+}
+
+.timeline-row {
+  display: flex;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.timeline-row-label {
+  min-width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: white;
+  border-right: 1px solid var(--border-light);
+}
+
+.timeline-row-label .avatar {
+  background: var(--primary-light);
+  color: var(--primary);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.timeline-row-label .name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-h-track {
+  position: relative;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.timeline-hour-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-light);
+  z-index: 1;
+}
+
+.timeline-event {
+  position: absolute;
+  border-radius: 8px;
+  padding: 4px 8px;
+  z-index: 5;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+.timeline-event:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 10px -2px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.timeline-event strong {
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-event .ev-time {
+  font-size: 10px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.timeline-event.math {
+  background: #dbeafe;
+  border-left: 4px solid #3b82f6;
+  color: #1e3a8a;
+}
+
+.timeline-event.science {
+  background: #dcfce7;
+  border-left: 4px solid #22c55e;
+  color: #14532d;
+}
+
+.timeline-event.languages {
+  background: #fee2e2;
+  border-left: 4px solid #ef4444;
+  color: #7f1d1d;
+}
+
+.timeline-event.arts {
+  background: #f3e8ff;
+  border-left: 4px solid #a855f7;
+  color: #581c87;
+}
+
 /* Empty State */
 .empty-slot {
   height: 100%;
@@ -2220,6 +2380,44 @@
     flex: 0 0 82vw;
     min-width: 82vw;
     scroll-snap-align: start;
+  }
+
+  /* ── Timeline view on mobile ──
+     The 200px name column ate more than half a phone's width, leaving barely
+     one hour of the horizontal axis visible. Shrink it to just the avatar plus
+     a short name, matching the compact time-axis treatment above, so most of
+     the screen goes to the actual schedule. */
+  .timeline-row-label-spacer,
+  .timeline-row-label {
+    min-width: 108px;
+  }
+
+  .timeline-row-label {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .timeline-row-label .avatar {
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+  }
+
+  .timeline-row-label .name {
+    font-size: 12px;
+  }
+
+  .timeline-hour-label {
+    font-size: 10px;
+    height: 34px;
+  }
+
+  .timeline-event strong {
+    font-size: 10px;
+  }
+
+  .timeline-event .ev-time {
+    font-size: 9px;
   }
 
   /* ── Agenda week on mobile ──

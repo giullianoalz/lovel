@@ -603,7 +603,7 @@ const CalendarView = () => {
   // the leading/trailing days from adjacent months that are shown) so nothing
   // in the visible grid silently comes up empty.
   const getVisibleRange = (viewMode, date) => {
-    if (viewMode === 'day') {
+    if (viewMode === 'day' || viewMode === 'timeline') {
       const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       return { start: d, end: d };
     }
@@ -1805,6 +1805,7 @@ const CalendarView = () => {
   // Time parsing for Day View Timeline (9 AM to midnight)
   const START_HOUR = 9;
   const PIXELS_PER_MINUTE = 2.0; // ~120px per hour — taller blocks for readability
+  const TIMELINE_EVENT_ROW_HEIGHT = 42; // Timeline view: stacked-row height for overlapping events within one tutor's lane
 
   const parseTimeToPix = (timeStr) => {
     if (!timeStr || typeof timeStr !== 'string') return 0;
@@ -1912,7 +1913,7 @@ const CalendarView = () => {
   const goToPrevPeriod = () => {
     setCurrentDate(prev => {
       const d = new Date(prev);
-      if (view === 'day') d.setDate(d.getDate() - 1);
+      if (view === 'day' || view === 'timeline') d.setDate(d.getDate() - 1);
       else if (view === 'week' || view === 'shifts') d.setDate(d.getDate() - 7);
       else d.setMonth(d.getMonth() - 1);
       return d;
@@ -1921,13 +1922,13 @@ const CalendarView = () => {
   const goToNextPeriod = () => {
     setCurrentDate(prev => {
       const d = new Date(prev);
-      if (view === 'day') d.setDate(d.getDate() + 1);
+      if (view === 'day' || view === 'timeline') d.setDate(d.getDate() + 1);
       else if (view === 'week' || view === 'shifts') d.setDate(d.getDate() + 7);
       else d.setMonth(d.getMonth() + 1);
       return d;
     });
   };
-  const headerLabel = view === 'day'
+  const headerLabel = (view === 'day' || view === 'timeline')
     ? currentDate.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : currentDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
 
@@ -2017,7 +2018,7 @@ const CalendarView = () => {
               >
                 <CalendarIcon size={14} className="view-icon-only" />
                 <span>
-                  {view === 'month' ? 'Month' : view === 'list' ? 'Week (List)' : view === 'week' ? 'Week (Agenda)' : view === 'shifts' ? 'Shifts' : 'Day'}
+                  {view === 'month' ? 'Month' : view === 'list' ? 'Week (List)' : view === 'week' ? 'Week (Agenda)' : view === 'shifts' ? 'Shifts' : view === 'timeline' ? 'Timeline' : 'Day'}
                 </span>
                 <span style={{ fontSize: '10px' }}>▼</span>
               </button>
@@ -2045,6 +2046,10 @@ const CalendarView = () => {
 
                   <div className={`view-dropdown-item ${view === 'day' ? 'active' : ''}`} onClick={() => { setView('day'); setIsViewMenuOpen(false); }}>
                     <div className="check-space">{view === 'day' && <CheckCircle2 size={12} className="check-icon" />}</div> Day
+                  </div>
+
+                  <div className={`view-dropdown-item ${view === 'timeline' ? 'active' : ''}`} onClick={() => { setView('timeline'); setIsViewMenuOpen(false); }}>
+                    <div className="check-space">{view === 'timeline' && <CheckCircle2 size={12} className="check-icon" />}</div> Timeline
                   </div>
 
                   {/* Paid non-class hours. Gated the same way the data is: the
@@ -2743,6 +2748,102 @@ const CalendarView = () => {
                   );
                 })}
              </div>
+          </div>
+        )}
+
+        {view === 'timeline' && uniqueTeachers.length === 0 && (
+          <div className="calendar-empty-day">
+            <CalendarIcon size={40} />
+            <h3>No classes scheduled</h3>
+            <p>
+              {sessionsLoading
+                ? 'Loading the day…'
+                : `Nothing on the books for ${currentDate.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}.`}
+            </p>
+            {canAddEvents && !sessionsLoading && (
+              <button className="calendar-empty-cta" onClick={() => setActiveModal('full')}>
+                <Plus size={15} /> Add an event
+              </button>
+            )}
+          </div>
+        )}
+
+        {view === 'timeline' && uniqueTeachers.length > 0 && (
+          <div className="calendar-scroll-wrapper">
+            <div className="timeline-view-grid">
+              <div className="timeline-hours-header">
+                <div className="timeline-row-label-spacer" />
+                <div className="timeline-hours-track" style={{ width: `${(24 - START_HOUR) * 60 * PIXELS_PER_MINUTE}px` }}>
+                  {Array.from({ length: 24 - START_HOUR }).map((_, i) => {
+                    const hour = START_HOUR + i;
+                    const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
+                    return (
+                      <div key={i} className="timeline-hour-label" style={{ width: `${60 * PIXELS_PER_MINUTE}px` }}>
+                        <span>{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {uniqueTeachers.map(teacher => {
+                const teacherEvents = dayEventsList.filter(e => {
+                  const primary = e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames[0] : e.teacher;
+                  return primary === teacher;
+                });
+                const teacherLayout = layoutOverlaps(teacherEvents);
+                const maxCols = teacherEvents.reduce((max, e) => Math.max(max, (teacherLayout.get(e.id) || { cols: 1 }).cols), 1);
+                const rowHeight = maxCols * TIMELINE_EVENT_ROW_HEIGHT + 8;
+                const teacherName = teacher.replace('Prof. ', '');
+                const isOutToday = staffEvents.some(se =>
+                  se.kind === 'pto' && se.dateStr === toISODate(currentDate) &&
+                  se.teacherName.replace('Prof. ', '') === teacherName
+                );
+                return (
+                  <div key={teacher} className="timeline-row">
+                    <div className="timeline-row-label">
+                      <div className="avatar">{teacher.charAt(6)}</div>
+                      <div className="name">{teacherName}</div>
+                      {isOutToday && <span className="instructor-pto-badge">Out</span>}
+                    </div>
+                    <div
+                      className="timeline-h-track"
+                      style={{ width: `${(24 - START_HOUR) * 60 * PIXELS_PER_MINUTE}px`, height: `${rowHeight}px` }}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => handleDropOnTeacher(e, teacher)}
+                    >
+                      {Array.from({ length: 24 - START_HOUR }).map((_, i) => (
+                        <div key={i} className="timeline-hour-line" style={{ left: `${i * 60 * PIXELS_PER_MINUTE}px` }} />
+                      ))}
+                      {teacherEvents.map(e => {
+                        const { col } = teacherLayout.get(e.id) || { col: 0 };
+                        const left = parseTimeToPix(e.time);
+                        const width = Math.max(getDurationMins(e.time) * PIXELS_PER_MINUTE - 6, 50);
+                        return (
+                          <div
+                            key={e.id}
+                            className={`timeline-event ${e.subject}`}
+                            style={{
+                              left: `${left + 3}px`,
+                              width: `${width}px`,
+                              top: `${col * TIMELINE_EVENT_ROW_HEIGHT + 4}px`,
+                              height: `${TIMELINE_EVENT_ROW_HEIGHT - 6}px`,
+                              cursor: hasRole('ADMIN') ? 'grab' : 'pointer',
+                            }}
+                            draggable={hasRole('ADMIN')}
+                            onDragStart={(evt) => handleDragStart(evt, e)}
+                            onClick={() => handleEventClick(e)}
+                          >
+                            <strong>{e.title}</strong>
+                            <span className="ev-time">{e.time}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
