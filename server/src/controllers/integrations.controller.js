@@ -1,4 +1,5 @@
 import prisma from '../config/database.js';
+import { drive, driveAuthMode } from '../config/drive.js';
 import { isWaveConfigured } from '../config/wave.js';
 import {
   buildAuthorizeUrl,
@@ -188,6 +189,119 @@ export const waveSyncRun = async (req, res, next) => {
     }
 
     res.json({ ...results, attempted: payments.length });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drive status
+//
+// Drive fails silently by design of the thing it talks to: a missing token
+// leaves `drive` null and every upload is simply skipped, and a stale folder id
+// 404s inside a Promise.all nobody watches. That invisibility is what let the
+// marketing hub run for weeks storing zero photos while telling teachers their
+// submission had gone through, and what lost 35 photos before that.
+//
+// So: one endpoint that actually calls Drive and reports what came back. It
+// answers the only question worth asking after a deploy — is the Drive this
+// process can reach the same one the folder ids point at?
+//
+// Reports no secrets. Token values never appear, only whether one is present.
+const DRIVE_FOLDERS = [
+  { env: 'DRIVE_MARKETING_FOLDER_ID', label: 'Marketing photos' },
+  { env: 'DRIVE_CHAT_FOLDER_ID',      label: 'Chat attachments' },
+  { env: 'DRIVE_WAIVERS_FOLDER_ID',   label: 'Signed waivers' },
+  { env: 'DRIVE_SNACKS_FOLDER_ID',    label: 'Snack photos', fallback: 'DRIVE_MARKETING_FOLDER_ID' },
+];
+
+export const driveStatus = async (req, res, next) => {
+  try {
+    const result = {
+      authMode: driveAuthMode,
+      // The distinction the logs bury: "service-account" looks configured and
+      // can never store a byte, because a service account on a non-Workspace
+      // account has a hard quota of zero.
+      canStore: driveAuthMode === 'oauth',
+      hasRefreshToken: !!process.env.DRIVE_REFRESH_TOKEN,
+      account: null,
+      quota: null,
+      folders: [],
+      problems: [],
+      healthy: false,
+    };
+
+    if (driveAuthMode === 'none') {
+      result.problems.push('Google Drive is not configured. Set DRIVE_REFRESH_TOKEN (plus GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET) on this service. Until then every photo, chat attachment and signed waiver upload is rejected.');
+      return res.json({ drive: result });
+    }
+
+    if (driveAuthMode === 'service-account') {
+      result.problems.push('Drive is falling back to a service account, which has zero storage quota — every upload will fail. Set DRIVE_REFRESH_TOKEN on this service.');
+    }
+
+    try {
+      const about = await drive.about.get({ fields: 'user(emailAddress),storageQuota' });
+      result.account = about.data.user?.emailAddress || null;
+      const q = about.data.storageQuota || {};
+      if (q.limit) {
+        result.quota = {
+          limitBytes: Number(q.limit),
+          usageBytes: Number(q.usage || 0),
+          percentUsed: Math.round((Number(q.usage || 0) / Number(q.limit)) * 100),
+        };
+        if (result.quota.percentUsed >= 95) {
+          result.problems.push(`Drive is ${result.quota.percentUsed}% full. Uploads start failing at 100%.`);
+        }
+      }
+    } catch (err) {
+      result.problems.push(`Could not reach Drive at all: ${err.message}. The credentials are probably expired or revoked.`);
+      return res.json({ drive: result });
+    }
+
+    // A folder id is only meaningful against the account the token belongs to.
+    // After the move to a new Google account this is exactly what broke: the
+    // token was swapped and the ids still pointed into the old account's Drive.
+    for (const f of DRIVE_FOLDERS) {
+      const id = process.env[f.env] || (f.fallback ? process.env[f.fallback] : null);
+      const entry = {
+        env: f.env, label: f.label, id: id || null,
+        usingFallback: !process.env[f.env] && !!id,
+        reachable: false, name: null, writable: false, error: null,
+      };
+
+      if (!id) {
+        entry.error = 'not set';
+        result.problems.push(`${f.label}: ${f.env} is not set — uploads land loose in the account's My Drive root instead of a folder.`);
+        result.folders.push(entry);
+        continue;
+      }
+
+      try {
+        const meta = await drive.files.get({
+          fileId: id,
+          fields: 'id,name,mimeType,trashed,capabilities(canAddChildren)',
+          supportsAllDrives: true,
+        });
+        entry.reachable = true;
+        entry.name = meta.data.name;
+        entry.writable = !!meta.data.capabilities?.canAddChildren;
+        if (meta.data.trashed) {
+          entry.error = 'in trash';
+          result.problems.push(`${f.label}: folder "${meta.data.name}" is in the trash.`);
+        } else if (!entry.writable) {
+          result.problems.push(`${f.label}: folder "${meta.data.name}" is not writable by ${result.account}.`);
+        }
+      } catch (err) {
+        entry.error = err.message;
+        result.problems.push(`${f.label}: folder id ${id} is not reachable from ${result.account} (${err.message}). This is what a folder id left over from a different Google account looks like.`);
+      }
+
+      result.folders.push(entry);
+    }
+
+    result.healthy = result.canStore && result.problems.length === 0;
+    res.json({ drive: result });
   } catch (error) {
     next(error);
   }

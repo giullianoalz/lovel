@@ -11,6 +11,7 @@ import {
   deleteSubmission,
   uploadPhotos,
   getPhotoFile,
+  listFamilyFeed,
 } from '../controllers/marketing.controller.js';
 
 // Multer storage config for marketing photo uploads
@@ -41,6 +42,11 @@ const upload = multer({
 
 const router = Router();
 
+// GET /api/marketing/feed — approved highlights for families.
+// No requireRole: this is the one marketing surface parents and students are
+// meant to reach. The controller restricts it to released submissions.
+router.get('/feed', authenticate, listFamilyFeed);
+
 // POST /api/marketing/submissions — Create submission (Teacher/Admin)
 router.post('/submissions', authenticate, requireRole('ADMIN', 'TEACHER'), createSubmission);
 
@@ -66,7 +72,9 @@ router.post(
   uploadPhotos
 );
 
-// GET /api/marketing/photos/:photoId/file — stream a photo (Teacher/Admin)
-router.get('/photos/:photoId/file', authenticate, requireRole('ADMIN', 'TEACHER'), getPhotoFile);
+// GET /api/marketing/photos/:photoId/file — stream a photo. Open to any
+// signed-in user because the family gallery renders through it; the controller
+// hands non-staff only photos from an approved or posted submission.
+router.get('/photos/:photoId/file', authenticate, getPhotoFile);
 
 export default router;

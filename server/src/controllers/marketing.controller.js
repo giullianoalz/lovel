@@ -93,6 +93,55 @@ export const listSubmissions = async (req, res, next) => {
   }
 };
 
+// GET /api/marketing/feed — what families see.
+//
+// Deliberately a separate endpoint rather than a role branch inside
+// listSubmissions: that one is a review queue and exposes the pipeline —
+// who submitted what, what is still pending. Parents get the finished product
+// only, a submission an admin has already cleared. `submitted` never appears
+// here, which is the entire point of the approval step.
+export const FAMILY_VISIBLE_STATUSES = ['approved', 'posted'];
+
+export const listFamilyFeed = async (req, res, next) => {
+  try {
+    const take = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    const before = req.query.before ? new Date(req.query.before) : null;
+
+    const submissions = await prisma.marketingSubmission.findMany({
+      where: {
+        status: { in: FAMILY_VISIBLE_STATUSES },
+        ...(before ? { createdAt: { lt: before } } : {}),
+        // Same emptiness guard as the review queue: a card with neither photos
+        // nor a description says nothing, and to a parent it reads as a bug.
+        OR: [
+          { photos: { some: {} } },
+          { AND: [{ description: { not: null } }, { description: { not: '' } }] },
+        ],
+      },
+      include: {
+        teacher: { select: { id: true, fullName: true } },
+        photos: { select: { id: true, fileName: true }, orderBy: { uploadedAt: 'asc' } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: take + 1,
+    });
+
+    const hasMore = submissions.length > take;
+    const page = hasMore ? submissions.slice(0, take) : submissions;
+
+    // fileUrl and driveFileId stay on the server. A family needs a photo's id
+    // to stream its bytes through /photos/:id/file and nothing more; handing
+    // out the Drive id would invite trying that file directly.
+    res.json({
+      submissions: page,
+      hasMore,
+      nextBefore: hasMore ? page[page.length - 1].createdAt : null,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // PATCH /api/marketing/submissions/:id — Admin approves/marks as posted
 export const updateSubmission = async (req, res, next) => {
   try {
@@ -249,8 +298,21 @@ export const getPhotoFile = async (req, res, next) => {
   try {
     const { photoId } = req.params;
 
-    const photo = await prisma.marketingPhoto.findUnique({ where: { id: photoId } });
+    const photo = await prisma.marketingPhoto.findUnique({
+      where: { id: photoId },
+      include: { submission: { select: { status: true } } },
+    });
     if (!photo) {
+      return res.status(404).json({ error: 'Not Found', message: 'Photo not found.' });
+    }
+
+    // The route is open to any signed-in user so families can load the gallery,
+    // so the release check lives here: staff see everything, everyone else only
+    // photos hanging off a submission an admin has already cleared. Without it,
+    // a parent holding a photo id could pull a pending submission's pictures
+    // straight out of the review queue.
+    if (!hasRole(req.user, 'ADMIN', 'TEACHER')
+        && !FAMILY_VISIBLE_STATUSES.includes(photo.submission?.status)) {
       return res.status(404).json({ error: 'Not Found', message: 'Photo not found.' });
     }
 

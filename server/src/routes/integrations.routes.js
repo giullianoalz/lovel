@@ -9,6 +9,7 @@ import {
   waveDisconnect,
   waveSyncPreview,
   waveSyncRun,
+  driveStatus,
 } from '../controllers/integrations.controller.js';
 
 const router = Router();
@@ -24,5 +25,11 @@ router.put('/wave/accounts', authenticate, requireRole('ADMIN'), waveSaveAccount
 router.post('/wave/disconnect', authenticate, requireRole('ADMIN'), waveDisconnect);
 router.post('/wave/sync/preview', authenticate, requireRole('ADMIN'), waveSyncPreview);
 router.post('/wave/sync', authenticate, requireRole('ADMIN'), waveSyncRun);
+
+// GET /api/integrations/drive — is Drive actually usable from this process?
+// Answers the question a deploy leaves open: the token, the account it belongs
+// to, and whether each folder id resolves inside that account. Admin-only, and
+// it never returns a token value.
+router.get('/drive', authenticate, requireRole('ADMIN'), driveStatus);
 
 export default router;

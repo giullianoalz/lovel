@@ -248,3 +248,51 @@
   border-color: color-mix(in srgb, #dc2626 40%, transparent);
   color: #dc2626;
 }
+
+/* ── Google Drive card ── */
+
+.int-card-title h2 { display: flex; align-items: center; gap: 8px; }
+
+.int-pill-err {
+  background: color-mix(in srgb, #dc2626 14%, transparent);
+  color: #dc2626;
+}
+
+/* The problem list is the whole reason this card exists, so it is styled to be
+   read, not skimmed past: one line per thing that is actually wrong. */
+.int-note-err {
+  background: color-mix(in srgb, #dc2626 8%, transparent);
+  border: 1px solid color-mix(in srgb, #dc2626 25%, transparent);
+  color: var(--text-main);
+}
+
+.int-problem-list {
+  margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 6px;
+  font-size: 13px; line-height: 1.5;
+}
+
+.int-folder-list {
+  list-style: none; margin: 14px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.int-folder-list li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 10px; font-size: 13px;
+  border: 1px solid var(--border-light);
+}
+.int-folder-list li.ok  { color: var(--text-main); }
+.int-folder-list li.bad {
+  color: #b91c1c;
+  background: color-mix(in srgb, #dc2626 6%, transparent);
+  border-color: color-mix(in srgb, #dc2626 25%, transparent);
+}
+
+.int-folder-label { font-weight: 600; min-width: 140px; }
+.int-folder-name  { color: var(--text-muted); font-size: 12px; }
+.int-folder-list li.bad .int-folder-name { color: #b91c1c; }
+
+@media (max-width: 640px) {
+  .int-folder-list li { flex-wrap: wrap; gap: 4px 10px; }
+  .int-folder-label { min-width: 0; }
+}

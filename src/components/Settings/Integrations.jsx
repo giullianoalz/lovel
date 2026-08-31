@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plug, CheckCircle2, AlertTriangle, RefreshCw, Link2, Unlink, Save } from 'lucide-react';
+import { Plug, CheckCircle2, AlertTriangle, RefreshCw, Link2, Unlink, Save, HardDrive, FolderOpen } from 'lucide-react';
 import api from '../../lib/api';
 import './Integrations.css';
 
@@ -17,6 +17,14 @@ const Integrations = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [banner, setBanner] = useState(null);   // post-OAuth redirect feedback
+
+  // Drive is read-only here: it is configured entirely through this service's
+  // environment variables, so the panel can only report what it found. That
+  // report is the point — a misconfigured Drive is otherwise completely silent,
+  // and silence is what let the marketing hub store zero photos for weeks.
+  const [driveData, setDriveData] = useState(null);
+  const [driveLoading, setDriveLoading] = useState(true);
+  const [driveError, setDriveError] = useState(null);
 
   const [anchorId, setAnchorId] = useState('');
   const [incomeId, setIncomeId] = useState('');
@@ -43,7 +51,21 @@ const Integrations = () => {
     }
   }, []);
 
+  const loadDrive = useCallback(async () => {
+    setDriveLoading(true);
+    try {
+      const res = await api.get('/integrations/drive');
+      setDriveData(res.data.drive);
+      setDriveError(null);
+    } catch {
+      setDriveError('Could not read Drive status.');
+    } finally {
+      setDriveLoading(false);
+    }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadDrive(); }, [loadDrive]);
 
   // Read the ?wave=connected|error feedback Wave's callback redirected back with.
   useEffect(() => {
@@ -129,7 +151,7 @@ const Integrations = () => {
         <Plug size={22} />
         <div>
           <h1>Integrations</h1>
-          <p className="text-muted">Connect external services. Wave keeps your income accounting in sync.</p>
+          <p className="text-muted">Connect external services. Wave keeps your income accounting in sync; Drive stores every photo, attachment and signed waiver.</p>
         </div>
       </div>
 
@@ -253,6 +275,68 @@ const Integrations = () => {
             <button className="int-btn int-btn-ghost int-disconnect" onClick={handleDisconnect}>
               <Unlink size={15} /> Disconnect Wave
             </button>
+          </>
+        )}
+      </div>
+
+      {/* ── Google Drive ── */}
+      <div className="int-card">
+        <div className="int-card-head">
+          <div className="int-card-title">
+            <h2><HardDrive size={18} /> Google Drive</h2>
+            {driveLoading
+              ? <span className="int-pill int-pill-off">Checking…</span>
+              : driveData?.healthy
+                ? <span className="int-pill int-pill-on"><CheckCircle2 size={13} /> Working</span>
+                : <span className="int-pill int-pill-err"><AlertTriangle size={13} /> Not working</span>}
+          </div>
+          <button className="int-btn int-btn-ghost" onClick={loadDrive} disabled={driveLoading}>
+            <RefreshCw size={14} /> Re-check
+          </button>
+        </div>
+
+        <p className="int-desc">
+          Uploads act as the academy's own Google account. This panel reports what this
+          server can actually reach — check it after every deploy that changes environment
+          variables.
+        </p>
+
+        {driveError && <div className="int-banner int-banner-err"><AlertTriangle size={16} /> {driveError}</div>}
+
+        {driveData && (
+          <>
+            <div className="int-meta">
+              <span><strong>Mode:</strong> {driveData.authMode}</span>
+              {driveData.account && <span><strong>Account:</strong> {driveData.account}</span>}
+              {driveData.quota && (
+                <span><strong>Storage:</strong> {driveData.quota.percentUsed}% used
+                  {' '}({(driveData.quota.usageBytes / 1e9).toFixed(2)} GB of {(driveData.quota.limitBytes / 1e9).toFixed(0)} GB)</span>
+              )}
+            </div>
+
+            {driveData.problems?.length > 0 && (
+              <div className="int-note int-note-err">
+                <AlertTriangle size={15} />
+                <ul className="int-problem-list">
+                  {driveData.problems.map((p, i) => <li key={i}>{p}</li>)}
+                </ul>
+              </div>
+            )}
+
+            {driveData.folders?.length > 0 && (
+              <ul className="int-folder-list">
+                {driveData.folders.map(f => (
+                  <li key={f.env} className={f.reachable && f.writable ? 'ok' : 'bad'}>
+                    <FolderOpen size={14} />
+                    <span className="int-folder-label">{f.label}</span>
+                    <span className="int-folder-name">
+                      {f.reachable ? f.name : (f.error || 'unreachable')}
+                      {f.usingFallback && ' (no folder of its own — sharing the marketing folder)'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </>
         )}
       </div>
