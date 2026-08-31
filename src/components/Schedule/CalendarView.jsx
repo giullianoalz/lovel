@@ -319,6 +319,10 @@ const CalendarView = () => {
 
   // Advanced Search States
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  // Timeline view groups tutors by subject, collapsed by default — same as
+  // TutorBird's Timeline, which is why a subject group starts closed rather
+  // than open.
+  const [expandedTimelineGroups, setExpandedTimelineGroups] = useState({});
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [hoverTime, setHoverTime] = useState(null); // { top, label } for hover indicator
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
@@ -794,6 +798,11 @@ const CalendarView = () => {
           classId: s.classId,
           title: s.class?.name || classInfo.name || 'Class',
           subject: subjectClass(s.class?.subject || classInfo.subject),
+          // The class's own free-text subject, if staff ever set one — powers
+          // the Timeline view's subject grouping. Most classes here never get
+          // one, which is deliberately fine: they fall into "Unspecified
+          // Subject", the same bucket TutorBird groups untagged classes into.
+          rawSubject: (s.class?.subject || classInfo.subject || '').trim(),
           time: `${formatTimeOfDay(s.startTime)} - ${formatTimeOfDay(s.endTime)}`,
           dateStr: new Date(s.date).toISOString().split('T')[0],
           type: cls.type === 'VIRTUAL' || s.meetingUrl ? 'Virtual' : 'In-Person',
@@ -1902,10 +1911,52 @@ const CalendarView = () => {
   ].filter(Boolean))].sort();
 
   if (searchForm.tutors.length > 0) {
-    uniqueTeachers = uniqueTeachers.filter(t => 
+    uniqueTeachers = uniqueTeachers.filter(t =>
       searchForm.tutors.some(st => t.toLowerCase().includes(st.toLowerCase()))
     );
   }
+
+  // Timeline view groups tutor rows by subject — TutorBird's own Timeline
+  // does the same, collapsing every subject (including the untagged bucket)
+  // behind a disclosure arrow. A tutor who's out with nothing scheduled still
+  // needs a row to show the "Out" badge on, so PTO-only tutors land in the
+  // untagged bucket too, same as an untagged session would.
+  const UNSPECIFIED_SUBJECT = 'Unspecified Subject';
+  const timelineSubjectGroups = (() => {
+    const groups = new Map(); // label -> Set<teacherName>
+    dayEventsList.forEach(e => {
+      const primary = e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames[0] : e.teacher;
+      if (!primary) return;
+      const label = e.rawSubject || UNSPECIFIED_SUBJECT;
+      if (!groups.has(label)) groups.set(label, new Set());
+      groups.get(label).add(primary);
+    });
+    const scheduledTeachers = new Set([...groups.values()].flatMap(s => [...s]));
+    const ptoOnly = todaysPtoTeachers.filter(t => !scheduledTeachers.has(t));
+    if (ptoOnly.length > 0) {
+      if (!groups.has(UNSPECIFIED_SUBJECT)) groups.set(UNSPECIFIED_SUBJECT, new Set());
+      ptoOnly.forEach(t => groups.get(UNSPECIFIED_SUBJECT).add(t));
+    }
+    return [...groups.entries()]
+      .map(([label, teacherSet]) => {
+        let teacherNames = [...teacherSet].sort();
+        if (searchForm.tutors.length > 0) {
+          teacherNames = teacherNames.filter(t => searchForm.tutors.some(st => t.toLowerCase().includes(st.toLowerCase())));
+        }
+        return { label, teacherNames };
+      })
+      .filter(g => g.teacherNames.length > 0)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  })();
+  const timelineWidth = (24 - START_HOUR) * 60 * PIXELS_PER_MINUTE;
+  const timelineHalfHourTicks = Array.from({ length: (24 - START_HOUR) * 2 });
+  const timelineHourLines = (
+    <>
+      {timelineHalfHourTicks.map((_, i) => (
+        <div key={i} className="timeline-hour-line" style={{ left: `${i * 30 * PIXELS_PER_MINUTE}px` }} />
+      ))}
+    </>
+  );
 
   // Moves currentDate by one unit of whatever's currently in view — this is
   // what the header's ◀ ▶ arrows call; each change re-fetches sessions via
@@ -2751,7 +2802,7 @@ const CalendarView = () => {
           </div>
         )}
 
-        {view === 'timeline' && uniqueTeachers.length === 0 && (
+        {view === 'timeline' && timelineSubjectGroups.length === 0 && (
           <div className="calendar-empty-day">
             <CalendarIcon size={40} />
             <h3>No classes scheduled</h3>
@@ -2768,17 +2819,20 @@ const CalendarView = () => {
           </div>
         )}
 
-        {view === 'timeline' && uniqueTeachers.length > 0 && (
+        {view === 'timeline' && timelineSubjectGroups.length > 0 && (
           <div className="calendar-scroll-wrapper">
             <div className="timeline-view-grid">
               <div className="timeline-hours-header">
                 <div className="timeline-row-label-spacer" />
-                <div className="timeline-hours-track" style={{ width: `${(24 - START_HOUR) * 60 * PIXELS_PER_MINUTE}px` }}>
-                  {Array.from({ length: 24 - START_HOUR }).map((_, i) => {
-                    const hour = START_HOUR + i;
-                    const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
+                <div className="timeline-hours-track" style={{ width: `${timelineWidth}px` }}>
+                  {timelineHalfHourTicks.map((_, i) => {
+                    const totalMin = i * 30;
+                    const hour = START_HOUR + Math.floor(totalMin / 60);
+                    const min = totalMin % 60;
+                    const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                    const label = `${h12}:${String(min).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`;
                     return (
-                      <div key={i} className="timeline-hour-label" style={{ width: `${60 * PIXELS_PER_MINUTE}px` }}>
+                      <div key={i} className="timeline-hour-label" style={{ width: `${30 * PIXELS_PER_MINUTE}px` }}>
                         <span>{label}</span>
                       </div>
                     );
@@ -2786,61 +2840,101 @@ const CalendarView = () => {
                 </div>
               </div>
 
-              {uniqueTeachers.map(teacher => {
-                const teacherEvents = dayEventsList.filter(e => {
-                  const primary = e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames[0] : e.teacher;
-                  return primary === teacher;
-                });
-                const teacherLayout = layoutOverlaps(teacherEvents);
-                const maxCols = teacherEvents.reduce((max, e) => Math.max(max, (teacherLayout.get(e.id) || { cols: 1 }).cols), 1);
-                const rowHeight = maxCols * TIMELINE_EVENT_ROW_HEIGHT + 8;
-                const teacherName = teacher.replace('Prof. ', '');
-                const isOutToday = staffEvents.some(se =>
-                  se.kind === 'pto' && se.dateStr === toISODate(currentDate) &&
-                  se.teacherName.replace('Prof. ', '') === teacherName
-                );
+              {/* TutorBird's Timeline always opens on a school-wide row before
+                  the subject groups — we have no org-wide all-day banner to put
+                  in it yet, so it renders as chrome, matching the empty state
+                  TutorBird itself shows on a day with no birthdays. */}
+              <div className="timeline-row timeline-entire-school-row">
+                <div className="timeline-row-label"><div className="name">Entire School</div></div>
+                <div className="timeline-h-track" style={{ width: `${timelineWidth}px`, height: `${TIMELINE_EVENT_ROW_HEIGHT + 8}px` }}>
+                  {timelineHourLines}
+                </div>
+              </div>
+
+              {timelineSubjectGroups.map(group => {
+                const isOpen = !!expandedTimelineGroups[group.label];
                 return (
-                  <div key={teacher} className="timeline-row">
-                    <div className="timeline-row-label">
-                      <div className="avatar">{teacher.charAt(6)}</div>
-                      <div className="name">{teacherName}</div>
-                      {isOutToday && <span className="instructor-pto-badge">Out</span>}
-                    </div>
+                  <React.Fragment key={group.label}>
                     <div
-                      className="timeline-h-track"
-                      style={{ width: `${(24 - START_HOUR) * 60 * PIXELS_PER_MINUTE}px`, height: `${rowHeight}px` }}
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={e => handleDropOnTeacher(e, teacher)}
+                      className="timeline-row timeline-group-header-row"
+                      onClick={() => setExpandedTimelineGroups(prev => ({ ...prev, [group.label]: !prev[group.label] }))}
                     >
-                      {Array.from({ length: 24 - START_HOUR }).map((_, i) => (
-                        <div key={i} className="timeline-hour-line" style={{ left: `${i * 60 * PIXELS_PER_MINUTE}px` }} />
-                      ))}
-                      {teacherEvents.map(e => {
-                        const { col } = teacherLayout.get(e.id) || { col: 0 };
-                        const left = parseTimeToPix(e.time);
-                        const width = Math.max(getDurationMins(e.time) * PIXELS_PER_MINUTE - 6, 50);
-                        return (
-                          <div
-                            key={e.id}
-                            className={`timeline-event ${e.subject}`}
-                            style={{
-                              left: `${left + 3}px`,
-                              width: `${width}px`,
-                              top: `${col * TIMELINE_EVENT_ROW_HEIGHT + 4}px`,
-                              height: `${TIMELINE_EVENT_ROW_HEIGHT - 6}px`,
-                              cursor: hasRole('ADMIN') ? 'grab' : 'pointer',
-                            }}
-                            draggable={hasRole('ADMIN')}
-                            onDragStart={(evt) => handleDragStart(evt, e)}
-                            onClick={() => handleEventClick(e)}
-                          >
-                            <strong>{e.title}</strong>
-                            <span className="ev-time">{e.time}</span>
-                          </div>
-                        );
-                      })}
+                      <div className="timeline-row-label timeline-group-label">
+                        <ChevronRight size={14} className={`timeline-group-arrow ${isOpen ? 'open' : ''}`} />
+                        <span className="name">{group.label}</span>
+                      </div>
+                      <div className="timeline-h-track" style={{ width: `${timelineWidth}px`, height: `${TIMELINE_EVENT_ROW_HEIGHT + 8}px` }}>
+                        {timelineHourLines}
+                      </div>
                     </div>
-                  </div>
+
+                    {isOpen && (
+                      <>
+                        <div className="timeline-row timeline-nested-entire-school-row">
+                          <div className="timeline-row-label"><div className="name">Entire School</div></div>
+                          <div className="timeline-h-track" style={{ width: `${timelineWidth}px`, height: `${TIMELINE_EVENT_ROW_HEIGHT + 8}px` }}>
+                            {timelineHourLines}
+                          </div>
+                        </div>
+
+                        {group.teacherNames.map(teacher => {
+                          const teacherEvents = dayEventsList.filter(e => {
+                            const primary = e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames[0] : e.teacher;
+                            return primary === teacher && (e.rawSubject || UNSPECIFIED_SUBJECT) === group.label;
+                          });
+                          const teacherLayout = layoutOverlaps(teacherEvents);
+                          const maxCols = teacherEvents.reduce((max, e) => Math.max(max, (teacherLayout.get(e.id) || { cols: 1 }).cols), 1);
+                          const rowHeight = maxCols * TIMELINE_EVENT_ROW_HEIGHT + 8;
+                          const teacherName = teacher.replace('Prof. ', '');
+                          const isOutToday = staffEvents.some(se =>
+                            se.kind === 'pto' && se.dateStr === toISODate(currentDate) &&
+                            se.teacherName.replace('Prof. ', '') === teacherName
+                          );
+                          return (
+                            <div key={teacher} className="timeline-row">
+                              <div className="timeline-row-label">
+                                <div className="avatar">{teacher.charAt(6)}</div>
+                                <div className="name">{teacherName}</div>
+                                {isOutToday && <span className="instructor-pto-badge">Out</span>}
+                              </div>
+                              <div
+                                className="timeline-h-track"
+                                style={{ width: `${timelineWidth}px`, height: `${rowHeight}px` }}
+                                onDragOver={e => e.preventDefault()}
+                                onDrop={e => handleDropOnTeacher(e, teacher)}
+                              >
+                                {timelineHourLines}
+                                {teacherEvents.map(e => {
+                                  const { col } = teacherLayout.get(e.id) || { col: 0 };
+                                  const left = parseTimeToPix(e.time);
+                                  const width = Math.max(getDurationMins(e.time) * PIXELS_PER_MINUTE - 6, 50);
+                                  return (
+                                    <div
+                                      key={e.id}
+                                      className={`timeline-event ${e.subject}`}
+                                      style={{
+                                        left: `${left + 3}px`,
+                                        width: `${width}px`,
+                                        top: `${col * TIMELINE_EVENT_ROW_HEIGHT + 4}px`,
+                                        height: `${TIMELINE_EVENT_ROW_HEIGHT - 6}px`,
+                                        cursor: hasRole('ADMIN') ? 'grab' : 'pointer',
+                                      }}
+                                      draggable={hasRole('ADMIN')}
+                                      onDragStart={(evt) => handleDragStart(evt, e)}
+                                      onClick={() => handleEventClick(e)}
+                                    >
+                                      <strong>{e.title}</strong>
+                                      <span className="ev-time">{e.time}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </div>

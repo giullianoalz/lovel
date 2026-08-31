@@ -1647,6 +1647,38 @@
   color: #581c87;
 }
 
+/* Timeline view's subject grouping — mirrors TutorBird's Timeline, which
+   opens on a school-wide row, then one collapsible row per subject (each
+   holding its own "Entire School" row plus one row per tutor). */
+.timeline-entire-school-row .name,
+.timeline-nested-entire-school-row .name {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.timeline-group-header-row {
+  cursor: pointer;
+  background: #f8fafc;
+}
+
+.timeline-group-header-row:hover {
+  background: #f1f5f9;
+}
+
+.timeline-group-label {
+  gap: 6px;
+}
+
+.timeline-group-arrow {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.timeline-group-arrow.open {
+  transform: rotate(90deg);
+}
+
 /* Empty State */
 .empty-slot {
   height: 100%;
