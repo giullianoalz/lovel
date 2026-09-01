@@ -101,12 +101,21 @@ export const listUsers = async (req, res, next) => {
     if (search) {
       const nameMatch = { fullName: { contains: search, mode: 'insensitive' } };
       const emailMatch = { email: { contains: search, mode: 'insensitive' } };
+      // Students never sign in themselves, so surface their guardian instead —
+      // typing a child's name should find the parent to message, not a dead end.
+      const guardianOfMatchingStudent = {
+        familyMembers: {
+          some: {
+            family: { members: { some: { user: { AND: [{ role: 'STUDENT' }, nameMatch] } } } },
+          },
+        },
+      };
 
       if (masksParentIdentity(req.user)) {
         // Masking the label isn't enough on its own: if searching "maria" still
         // returned the row rendered as "Ana's Parent", the search box would
         // give back the exact name the label hides — same for the address.
-        // For a teacher, guardians are reachable through their child's name.
+        // For a teacher, guardians are reachable through their child's name only.
         andClauses.push({
           OR: [
             {
@@ -116,17 +125,11 @@ export const listUsers = async (req, res, next) => {
                 { OR: [nameMatch, emailMatch] },
               ],
             },
-            {
-              familyMembers: {
-                some: {
-                  family: { members: { some: { user: { AND: [{ role: 'STUDENT' }, nameMatch] } } } },
-                },
-              },
-            },
+            guardianOfMatchingStudent,
           ],
         });
       } else {
-        andClauses.push({ OR: [nameMatch, emailMatch] });
+        andClauses.push({ OR: [nameMatch, emailMatch, guardianOfMatchingStudent] });
       }
     }
 
