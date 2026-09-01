@@ -303,3 +303,165 @@ export const createIncomeTransaction = async ({ connection, payment, amount, des
   }
   return result.transaction?.id || null;
 };
+
+// ── Invoice sync ─────────────────────────────────────────────────────────────
+// Pushes each app invoice to Wave as Accounts Receivable at creation time (see
+// syncInvoiceToWave, called from billing.controller.js and
+// registration.controller.js right after each invoice-creating transaction
+// commits — never from inside one, since a failed Wave call must never roll
+// back a real invoice, and holding a DB transaction open across a network call
+// would starve the connection pool).
+
+const inputErrorMessage = (result, fallback) =>
+  (result?.inputErrors || []).map((e) => e.message).join('; ') || fallback;
+
+/** Finds a Wave Customer by email, creating one if none matches. */
+const findOrCreateCustomer = async (businessId, { email, name }) => {
+  const found = await waveGraphql(
+    `query($businessId: ID!, $email: String) {
+      business(id: $businessId) {
+        customers(page: 1, pageSize: 1, email: $email) {
+          edges { node { id } }
+        }
+      }
+    }`,
+    { businessId, email },
+  );
+  const existing = found.business?.customers?.edges?.[0]?.node;
+  if (existing) return existing.id;
+
+  const created = await waveGraphql(
+    `mutation($input: CustomerCreateInput!) {
+      customerCreate(input: $input) {
+        didSucceed
+        inputErrors { message code path }
+        customer { id }
+      }
+    }`,
+    { input: { businessId, name: name || email, email } },
+  );
+  const result = created.customerCreate;
+  if (!result?.didSucceed) throw new Error(inputErrorMessage(result, 'Failed to create Wave customer.'));
+  return result.customer.id;
+};
+
+/**
+ * The one Wave Product every synced invoice line bills against — invoiceCreate
+ * takes a productId per line, not a bare account. Created once against the
+ * connection's mapped income account and cached on WaveConnection.waveProductId.
+ */
+const getOrCreateDefaultProduct = async (row) => {
+  if (row.waveProductId) return row.waveProductId;
+  const created = await waveGraphql(
+    `mutation($input: ProductCreateInput!) {
+      productCreate(input: $input) {
+        didSucceed
+        inputErrors { message code path }
+        product { id }
+      }
+    }`,
+    {
+      input: {
+        businessId: row.businessId,
+        name: 'Tuition & Fees',
+        unitPrice: '0.00',
+        incomeAccountId: row.incomeAccountId,
+      },
+    },
+  );
+  const result = created.productCreate;
+  if (!result?.didSucceed) throw new Error(inputErrorMessage(result, 'Failed to create Wave product.'));
+  await prisma.waveConnection.update({ where: { id: row.id }, data: { waveProductId: result.product.id } });
+  return result.product.id;
+};
+
+const dateOnly = (d) => new Date(d).toISOString().slice(0, 10);
+
+/**
+ * Syncs one invoice to Wave as an approved (SAVED) invoice against the mapped
+ * income account. Idempotent (skips if already synced) and never throws —
+ * callers fire this after their own transaction commits and do not await
+ * error handling; failures are recorded on the invoice for the admin to see
+ * and retry from Settings > Integrations.
+ */
+export const syncInvoiceToWave = async (invoiceId) => {
+  try {
+    const status = await getConnectionStatus();
+    if (!status.readyToSync) return;
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        lines: true,
+        family: {
+          select: {
+            name: true,
+            members: {
+              select: { isInvoiceRecipient: true, user: { select: { email: true } } },
+            },
+          },
+        },
+      },
+    });
+    // Gone (e.g. deleted right after creation) or already pushed — nothing to do.
+    if (!invoice || invoice.waveInvoiceId) return;
+
+    if (!invoice.family) {
+      await prisma.invoice.update({ where: { id: invoiceId }, data: { waveSyncError: 'No family on invoice — nothing to bill in Wave.' } });
+      return;
+    }
+    const recipient = invoice.family.members.find((m) => m.isInvoiceRecipient) || invoice.family.members[0];
+    const email = recipient?.user?.email;
+    if (!email) {
+      await prisma.invoice.update({ where: { id: invoiceId }, data: { waveSyncError: 'No invoice-recipient email on file for this family.' } });
+      return;
+    }
+
+    const row = await getConnectionRow();
+    const customerId = await findOrCreateCustomer(row.businessId, { email, name: invoice.family.name });
+    const productId = await getOrCreateDefaultProduct(row);
+
+    const items = invoice.lines.length > 0
+      ? invoice.lines.map((l) => ({
+          productId,
+          description: l.description,
+          quantity: String(l.quantity || 1),
+          unitPrice: (Number(l.amount) / (l.quantity || 1)).toFixed(2),
+        }))
+      : [{ productId, description: invoice.dateRange || 'Charges', quantity: '1', unitPrice: Number(invoice.totalAmount).toFixed(2) }];
+
+    const data = await waveGraphql(
+      `mutation($input: InvoiceCreateInput!) {
+        invoiceCreate(input: $input) {
+          didSucceed
+          inputErrors { message code path }
+          invoice { id }
+        }
+      }`,
+      {
+        input: {
+          businessId: row.businessId,
+          customerId,
+          status: 'SAVED',
+          invoiceNumber: invoice.invoiceNumber,
+          invoiceDate: dateOnly(invoice.date),
+          dueDate: invoice.dueDate ? dateOnly(invoice.dueDate) : undefined,
+          items,
+        },
+      },
+    );
+    const result = data.invoiceCreate;
+    if (!result?.didSucceed) throw new Error(inputErrorMessage(result, 'Failed to create Wave invoice.'));
+
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { waveInvoiceId: result.invoice.id, waveSyncedAt: new Date(), waveSyncError: null },
+    });
+  } catch (error) {
+    console.error(`[Wave] Failed to sync invoice ${invoiceId}:`, error);
+    await prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { waveSyncError: String(error.message || error).slice(0, 500) },
+    }).catch(() => {});
+  }
+};

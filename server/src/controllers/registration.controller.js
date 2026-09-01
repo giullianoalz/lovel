@@ -7,6 +7,15 @@ import { buildQuarterCharges } from '../services/quarterlyBilling.service.js';
 import { raiseInvoicedCharge } from '../services/invoicing.service.js';
 import { sendRegistrationBillingEmail } from '../services/email.service.js';
 import { sendNotification } from '../jobs/notification.helper.js';
+import { syncInvoiceToWave } from '../services/wave.service.js';
+
+// See the identical helper in billing.controller.js — fires the Wave sync for
+// a just-created registration-deposit invoice without blocking the response.
+const queueWaveSync = (invoiceIds) => {
+  for (const id of [].concat(invoiceIds).filter(Boolean)) {
+    syncInvoiceToWave(id).catch((err) => console.error(`[Wave] queueWaveSync(${id}) failed:`, err));
+  }
+};
 
 /**
  * Notifies the student and the family's invoice-recipient parent (if any) that a
@@ -287,6 +296,11 @@ export const submitRegistrationRequest = async (req, res, next) => {
       return res.status(409).json({ message: 'This student already has a request for this term.' });
     }
 
+    // Populated below by postCharge with the registration-deposit invoice's id
+    // (if one was raised) — read after the transaction commits to fire its
+    // Wave sync.
+    const newInvoiceIds = [];
+
     // 1. Transaction to ensure data integrity during resolution
     const result = await prisma.$transaction(async (tx) => {
       // Lock both candidate classes before reading their capacity — see
@@ -330,13 +344,14 @@ export const submitRegistrationRequest = async (req, res, next) => {
       // think Q1 was already fully billed and skip raising the remainder.
       const postCharge = async (className) => {
         if (familyId && billing.depositAmount > 0) {
-          await raiseInvoicedCharge(tx, {
+          const { invoice } = await raiseInvoicedCharge(tx, {
             familyId,
             studentId,
             termId,
             amount: billing.depositAmount,
             description: `Registration Deposit (15%) - ${term.name} - ${className}`,
           });
+          newInvoiceIds.push(invoice.id);
         }
       };
 
@@ -405,6 +420,7 @@ export const submitRegistrationRequest = async (req, res, next) => {
 
       return { status: 'waitlisted_both', first: firstClass.name, requestId: request.id, className: firstClass.name, electives };
     });
+    queueWaveSync(newInvoiceIds);
 
     // 2. Fire the billing confirmation email (outside the transaction — a failed send
     // must never roll back an enrollment that already succeeded).
@@ -1516,6 +1532,11 @@ export const adminRegisterStudent = async (req, res, next) => {
     // comment above.
     const usesSecondChoiceFallback = classIds.length === 1 && Boolean(secondChoiceClassId);
 
+    // Populated below by postCharge with the registration-deposit invoice's id
+    // (if one was raised) — read after the transaction commits to fire its
+    // Wave sync.
+    const newInvoiceIds = [];
+
     const result = await prisma.$transaction(async (tx) => {
       // Lock every candidate class before reading capacity — see lockClassRows
       // for why this is required to avoid overbooking.
@@ -1590,13 +1611,14 @@ export const adminRegisterStudent = async (req, res, next) => {
       const postCharge = async (amount, className) => {
         const depositAmount = round2(amount * DEPOSIT_RATE);
         if (familyId && depositAmount > 0) {
-          await raiseInvoicedCharge(tx, {
+          const { invoice } = await raiseInvoicedCharge(tx, {
             familyId,
             studentId,
             termId,
             amount: depositAmount,
             description: `Registration Deposit (15%) - ${term.name} - ${className}`,
           });
+          newInvoiceIds.push(invoice.id);
         }
       };
 
@@ -1676,6 +1698,7 @@ export const adminRegisterStudent = async (req, res, next) => {
     if (result.error) {
       return res.status(result.error.status).json({ message: result.error.message });
     }
+    queueWaveSync(newInvoiceIds);
 
     // The roster counts this UI shows are cached for a minute; a seat that just
     // filled must not keep reading as free to the admin who filled it.

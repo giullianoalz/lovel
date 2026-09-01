@@ -854,6 +854,13 @@ model Invoice {
   // partial payments — only a full payment moves it to PAID.
   sentAt              DateTime?     @map("sent_at") @db.Timestamptz(6)
   createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Wave accounting sync (see server/src/services/wave.service.js). Set once
+  // this invoice has been raised as Accounts Receivable in Wave; waveSyncError
+  // holds the last failure so Settings > Integrations can surface it for retry,
+  // and is cleared on the next successful sync.
+  waveInvoiceId       String?       @map("wave_invoice_id") @db.VarChar(255)
+  waveSyncedAt        DateTime?     @map("wave_synced_at") @db.Timestamptz(6)
+  waveSyncError       String?       @map("wave_sync_error")
   lines               InvoiceLine[]
   family              Family?       @relation(fields: [familyId], references: [id])
   payments            Payment[]
@@ -938,6 +945,11 @@ model WaveConnection {
   anchorAccountName String?   @map("anchor_account_name") @db.VarChar(255)
   incomeAccountId   String?   @map("income_account_id") @db.VarChar(255)
   incomeAccountName String?   @map("income_account_name") @db.VarChar(255)
+  // The one Wave Product every synced invoice's line items bill against —
+  // Wave's invoiceCreate requires a productId per line, not a bare account,
+  // so this is created once (named "Tuition & Fees", tied to incomeAccountId)
+  // the first time an invoice syncs, and reused after.
+  waveProductId     String?   @map("wave_product_id") @db.VarChar(255)
   connectedById     String?   @map("connected_by") @db.Uuid
   connectedAt       DateTime? @map("connected_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)

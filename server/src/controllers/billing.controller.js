@@ -13,6 +13,17 @@ import { sendInvoiceEmail } from '../services/email.service.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
 import { buildSessionCharges, isBillable } from '../services/sessionCharges.service.js';
 import { academyToday, academyDayOffset } from '../utils/academyTime.js';
+import { syncInvoiceToWave } from '../services/wave.service.js';
+
+// Fires the Wave sync for one or more just-created invoices without blocking
+// the response — a Wave outage or misconfiguration must never delay or fail
+// invoice creation. syncInvoiceToWave never throws; this is only a belt for
+// the case a caller awaits it directly.
+const queueWaveSync = (invoiceIds) => {
+  for (const id of [].concat(invoiceIds).filter(Boolean)) {
+    syncInvoiceToWave(id).catch((err) => console.error(`[Wave] queueWaveSync(${id}) failed:`, err));
+  }
+};
 
 /**
  * Methods an admin can put on a payment they are keying in by hand.
@@ -1164,6 +1175,11 @@ export const splitInvoice = async (req, res, next) => {
       .sort((a, b) => b.total - a.total);
     const [keeper, ...rest] = ranked;
 
+    // Populated inside the transaction below with the ids of the brand-new
+    // invoices the split raises (not the keeper, which already existed) —
+    // read after the transaction commits to fire their Wave sync.
+    const newInvoiceIds = [];
+
     const created = await prisma.$transaction(async (tx) => {
       const out = [];
 
@@ -1202,6 +1218,7 @@ export const splitInvoice = async (req, res, next) => {
             dueDate: invoice.dueDate,
           },
         });
+        newInvoiceIds.push(doc.id);
 
         await tx.invoiceLine.updateMany({
           where: { id: { in: group.lines.map((l) => l.id) } },
@@ -1254,6 +1271,7 @@ export const splitInvoice = async (req, res, next) => {
       // whichever ones actually received any. A plain re-read is the truth.
       return tx.invoice.findMany({ where: { id: { in: out.map((o) => o.id) } } });
     });
+    queueWaveSync(newInvoiceIds);
 
     const shape = (d) => ({
       id: d.invoiceNumber,
@@ -1463,6 +1481,7 @@ const createManualInvoice = async (req, res, next, { studentId, lines }) => {
         ? { ...created, amountPaid: applied, status: applied >= subtotal ? 'PAID' : 'DRAFT' }
         : created;
     });
+    queueWaveSync(invoice.id);
 
     console.log(`[Billing] ${req.user.email} raised invoice ${invoice.invoiceNumber} for ${student.fullName} ($${subtotal}, ${cleanLines.length} lines)`);
 
@@ -1603,6 +1622,7 @@ export const createInvoice = async (req, res, next) => {
         return { ...inv, amountPaid: amount, status: amount >= total ? 'PAID' : inv.status };
       });
     });
+    queueWaveSync(invoices.map((inv) => inv.id));
 
     const shape = (invoice) => ({
       id: invoice.invoiceNumber,
@@ -2069,10 +2089,14 @@ export const generateEmaBatch = async (req, res, next) => {
           scholarshipPending,
           rowDates,
           unmatchedRowCount: Object.values(rowDates).filter((d) => d === null).length,
+          // Only present for a brand-new invoice this batch raised — carried
+          // through so the caller can fire its Wave sync without re-querying.
+          newInvoiceId: !reusedInvoice ? (targetInvoice?.id ?? null) : null,
         });
       }
       return out;
     }, { timeout: 120000, maxWait: 20000 });
+    queueWaveSync(results.map((g) => g.newInvoiceId).filter(Boolean));
 
     console.log(
       `[Billing] ${req.user.email} filed an EMA batch: ${results.length} group(s), `
@@ -2080,7 +2104,7 @@ export const generateEmaBatch = async (req, res, next) => {
       + `$${results.reduce((sum, g) => sum + g.scholarshipPending, 0).toFixed(2)}`
     );
 
-    res.json({ groups: results });
+    res.json({ groups: results.map(({ newInvoiceId, ...g }) => g) });
   } catch (error) {
     next(error);
   }
@@ -2981,6 +3005,7 @@ export const createBlockInvoice = async (req, res, next) => {
     const invoice = await prisma.$transaction((tx) => writeBlockInvoice(tx, {
       familyId, studentId, priced: plan.priced, subtotal: plan.subtotal, label, due: dueParsed.due,
     }));
+    queueWaveSync(invoice.id);
 
     console.log(
       `[Billing] ${req.user.email} raised block invoice ${invoice.invoiceNumber} for ${student.fullName} `
@@ -3276,6 +3301,7 @@ export const createBlockInvoices = async (req, res, next) => {
       },
       { timeout: 120000, maxWait: 20000 }
     );
+    queueWaveSync(invoices.map(({ invoice }) => invoice.id));
 
     const total = round2(plans.reduce((sum, p) => sum + p.subtotal, 0));
     console.log(
