@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX, Receipt } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { database } from '../../lib/database';
@@ -336,6 +336,8 @@ const CalendarView = () => {
 
   // Advanced Search States
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const weekGridRef = useRef(null);
+  const [weekAxisHeaderH, setWeekAxisHeaderH] = useState(null);
   // Month cells had no cap: one busy day stretched its whole week row (546px
   // against 74px for a quiet day in August), because the cells share a grid
   // row. Showing the first few and folding the rest behind "+N more" keeps the
@@ -1170,6 +1172,31 @@ const CalendarView = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [mappedEvents, searchForm, allStudents]
   );
+
+  // The hour axis has to start exactly where the day columns' grid starts, or
+  // every hour label sits off its own line. It can't assume a height: a day
+  // column stacks a header *and* a 10px column gap above its body, and the
+  // header itself grows when the week has all-day chips (PTO, birthdays) — so
+  // the error was 11px on a quiet week and would be larger on a busy one.
+  // Mirror what the first column actually puts above its grid.
+  useLayoutEffect(() => {
+    if (view !== 'week') return;
+    const measure = () => {
+      const grid = weekGridRef.current;
+      const col = grid?.querySelector('.week-day-col');
+      const body = col?.querySelector('.week-day-body');
+      if (!col || !body) return;
+      const h = body.getBoundingClientRect().top - col.getBoundingClientRect().top;
+      if (h > 0) setWeekAxisHeaderH(prev => (prev !== null && Math.abs(prev - h) < 0.5 ? prev : h));
+    };
+    // Re-measuring on these deps is what covers the all-day row growing: those
+    // chips come from staffEvents, so the row can't change without a render.
+    // Deliberately not a ResizeObserver — this needs to hold in every browser,
+    // and the data path already tells us when the header can have moved.
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [view, currentDate, events, staffEvents]);
 
   // The tile only carries lightweight info — fetch the class roster and the
   // session's full notes/materials the moment it's actually opened. Split out
@@ -2625,7 +2652,7 @@ const CalendarView = () => {
 
         {view === 'week' && (
           <div className="calendar-scroll-wrapper">
-             <div className="week-schedule-grid">
+             <div className="week-schedule-grid" ref={weekGridRef}>
                 {/* Time Axis — shows hover time label in blue when user moves over the grid */}
                 <div className="time-axis" style={{ position: 'relative' }}>
                   {/* Deliberately empty: it aligns the hour axis with the
@@ -2633,8 +2660,13 @@ const CalendarView = () => {
                       "GMT-5", which claimed a conversion that never happens —
                       session times are the academy's wall clock, stored and
                       read as-is (see lib/time.js) — and was wrong outright
-                      from March to November, when the academy is GMT-4. */}
-                  <div className="time-axis-header" />
+                      from March to November, when the academy is GMT-4.
+                      Its height mirrors the day column's header + gap so the
+                      hour labels line up with the hour lines. */}
+                  <div
+                    className="time-axis-header"
+                    style={weekAxisHeaderH ? { height: `${weekAxisHeaderH}px` } : undefined}
+                  />
                   {Array.from({ length: 24 - START_HOUR }).map((_, i) => {
                     const hour = START_HOUR + i;
                     const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
