@@ -12,6 +12,9 @@ import ShiftScheduler from './ShiftScheduler';
 import './CalendarView.css';
 
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// How many events a Month cell shows before folding the rest behind "+N more".
+// Three is what fits the cell's min-height without the row growing.
+const MONTH_CELL_EVENT_CAP = 3;
 const SUBJECT_KEYS = ['math', 'science', 'languages', 'arts'];
 const DAY_NAME_TO_NUM = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
 
@@ -93,26 +96,28 @@ const RosterLoadError = ({ onRetry }) => (
   </div>
 );
 
-const CATEGORY_GROUPS = [
-  {
-    category: 'Learning COVEs',
-    options: ['All Morning COVEs', 'All Afternoon COVEs']
-  },
-  {
-    category: 'Other Services',
-    options: ['All Electives', 'All Tutoring', 'All Events']
-  }
-];
-
+// The only distinction a session actually carries is where it meets: the class
+// is IN_PERSON or VIRTUAL (a one-off Zoom link on an in-person class counts as
+// virtual for that meeting). Everything this list used to offer — COVE,
+// Elective, Tutoring, Event, Meeting, morning vs afternoon — has no field
+// behind it, so those options either silently emptied the calendar or quietly
+// returned every in-person class instead of the subset they named. Filtering
+// honestly on what exists beats offering eight options where two are real.
+//
+// Telling a COVE from an elective from tutoring needs a category field on
+// Class; there isn't one today (groupType is REGULAR/ANCHORED, and that drives
+// pricing, not what kind of session this is).
 const AVAILABLE_CATEGORIES = [
   'All',
-  'COVE',
-  'In-Person Class',
-  'Online Class',
-  'Event',
-  'Meeting',
-  'In Person Tutoring',
-  'Online Tutoring'
+  'In-Person',
+  'Online',
+];
+
+const CATEGORY_GROUPS = [
+  {
+    category: 'Class format',
+    options: ['In-Person', 'Online'],
+  },
 ];
 
 const MultiDatePicker = ({ selectedDates, onChange }) => {
@@ -331,6 +336,16 @@ const CalendarView = () => {
 
   // Advanced Search States
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  // Month cells had no cap: one busy day stretched its whole week row (546px
+  // against 74px for a quiet day in August), because the cells share a grid
+  // row. Showing the first few and folding the rest behind "+N more" keeps the
+  // rows even, and the day can still be opened in place.
+  const [expandedMonthDays, setExpandedMonthDays] = useState({});
+  const isMonthDayExpanded = (d) => !!expandedMonthDays[toISODate(d)];
+  const toggleMonthDay = (d) => {
+    const key = toISODate(d);
+    setExpandedMonthDays(prev => ({ ...prev, [key]: !prev[key] }));
+  };
   // Timeline view groups tutors by subject, collapsed by default — same as
   // TutorBird's Timeline, which is why a subject group starts closed rather
   // than open.
@@ -1097,17 +1112,17 @@ const CalendarView = () => {
   const getFilteredEvents = () => {
     let filtered = mappedEvents;
 
-    // Filter by Categories. Sessions only carry a Virtual/In-Person type, so
-    // each category maps onto that axis — "Online ..." matches virtual classes,
-    // "In-Person ..."/COVE matches in-person ones. Event/Meeting never match a
-    // class session (those are the read-only staff chips, not filterable here).
+    // Matches on the same Virtual/In-Person value the tile displays, so the
+    // filter and the chip can never disagree about what a meeting is. Anything
+    // unrecognised matches nothing rather than silently matching everything —
+    // but AVAILABLE_CATEGORIES is now the only source of these strings, so an
+    // unrecognised one means a genuine bug rather than a dead menu entry.
     if (searchForm.categories.length > 0) {
       filtered = filtered.filter(e =>
         searchForm.categories.some(c => {
           if (c === 'All') return true;
-          const cl = c.toLowerCase();
-          if (cl.includes('online')) return e.type === 'Virtual';
-          if (cl.includes('person') || cl.includes('cove')) return e.type === 'In-Person';
+          if (c === 'Online') return e.type === 'Virtual';
+          if (c === 'In-Person') return e.type === 'In-Person';
           return false;
         })
       );
@@ -2808,7 +2823,7 @@ const CalendarView = () => {
                       onDrop={e => handleDropOnTeacher(e, teacher)}
                     >
                       <div className="instructor-header">
-                         <div className="avatar">{teacher.charAt(6)}</div>
+                         <div className="avatar">{teacherName.charAt(0).toUpperCase()}</div>
                          <div className="name">{teacherName}</div>
                          {isOutToday && <span className="instructor-pto-badge">Out</span>}
                       </div>
@@ -2946,7 +2961,7 @@ const CalendarView = () => {
                           return (
                             <div key={teacher} className="timeline-row">
                               <div className="timeline-row-label">
-                                <div className="avatar">{teacher.charAt(6)}</div>
+                                <div className="avatar">{teacherName.charAt(0).toUpperCase()}</div>
                                 <div className="name">{teacherName}</div>
                                 {isOutToday && <span className="instructor-pto-badge">Out</span>}
                               </div>
@@ -3040,7 +3055,7 @@ const CalendarView = () => {
                           <span className="cell-date">{cellDateLabel}</span>
                         </div>
                         <div className="cell-events-area">
-                          {dayEvents.map(item => {
+                          {(isMonthDayExpanded(cellDate) ? dayEvents : dayEvents.slice(0, MONTH_CELL_EVENT_CAP)).map(item => {
                             const isStaff = !!item.kind;
                             return (
                               <div
@@ -3065,6 +3080,18 @@ const CalendarView = () => {
                               </div>
                             );
                           })}
+
+                          {dayEvents.length > MONTH_CELL_EVENT_CAP && (
+                            <button
+                              type="button"
+                              className="month-more-btn"
+                              onClick={() => toggleMonthDay(cellDate)}
+                            >
+                              {isMonthDayExpanded(cellDate)
+                                ? 'Show less'
+                                : `+${dayEvents.length - MONTH_CELL_EVENT_CAP} more`}
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
