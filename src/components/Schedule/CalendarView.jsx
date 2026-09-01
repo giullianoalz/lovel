@@ -3477,7 +3477,7 @@ const CalendarView = () => {
                         <p className="cal-pay-hint">
                           {editEventForm.chargeAmount === '' || editEventForm.chargeAmount == null
                             ? 'Leave this empty and the meeting charges nothing — the term’s tuition is billed separately.'
-                            : `Charges each of the ${selectedEvent.students} enrolled ${selectedEvent.students === 1 ? 'family' : 'families'} $${Number(editEventForm.chargeAmount || 0).toFixed(2)}. Nothing is billed until you approve it under Billing → Calendar Charges, which also raises the invoice.`}
+                            : `Charges each of the ${selectedEvent.students} enrolled ${selectedEvent.students === 1 ? 'family' : 'families'} $${Number(editEventForm.chargeAmount || 0).toFixed(2)} as soon as you save. To correct it, change the price here — clearing it takes the charge back off their balance, unless it has already gone onto an invoice.`}
                         </p>
                       </div>
                     )}
@@ -4147,8 +4147,9 @@ const CalendarView = () => {
                         <div className="form-group half">
                           <label>How it's billed</label>
                           <p className="cal-price-note">
-                            Once per meeting, to each enrolled family. Nothing is charged until
-                            you approve it under <strong>Billing → Calendar Charges</strong>.
+                            Once per meeting, to each enrolled family, <strong>as soon as you
+                            save</strong>. Correct it by changing the price; clearing it takes
+                            the charge back off.
                           </p>
                         </div>
                     </div>

@@ -4,7 +4,7 @@
  * ⚠️ NOT THE LIVE BILLING PATH — and running it would double-bill.
  *
  * The academy charges families from the calendar instead: a price typed onto the
- * first week of each class, approved under Billing → Calendar Charges. Confirmed
+ * first week of each class, which charges it as soon as it is saved. Confirmed
  * by the admin on 2026-08-15 ("yo solo uso el flujo del calendario"). See
  * sessionCharges.service.js.
  *

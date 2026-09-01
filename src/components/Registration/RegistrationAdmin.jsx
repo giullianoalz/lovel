@@ -2193,8 +2193,8 @@ const RegistrationAdmin = () => {
                     <AlertTriangle size={14} />
                     <span>
                       <strong>You bill from the calendar, not from here.</strong> These same classes
-                      already carry their price on the first week of the term, waiting under
-                      Billing → Calendar Charges. Raising tuition here as well would charge every
+                      already carry their price on the first week of the term, and that price has
+                      already been charged. Raising tuition here as well would charge every
                       family twice — the two run independently and neither blocks the other.
                     </span>
                   </p>

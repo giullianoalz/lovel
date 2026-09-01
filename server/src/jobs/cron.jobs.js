@@ -4,7 +4,7 @@ import { sendNotification, notifyAdmins } from './notification.helper.js';
 import { previousOccurrence } from './cronSchedule.js';
 import { runRecurringCharges } from '../services/recurringCharges.service.js';
 import { freezeSessionRates, freezeShiftRates } from '../services/payroll.service.js';
-import { buildSessionCharges } from '../services/sessionCharges.service.js';
+import { raiseSessionCharges } from '../services/sessionCharges.service.js';
 import {
   getEventConfig,
   getAdminUserIds,
@@ -21,7 +21,7 @@ import { ACADEMY_TIMEZONE, academyToday, academyDayOffset, sessionStartInstant }
  *   - Low snack-punches alert      → every Monday at 7:00 AM
  *   - Class starting-soon reminder → every 5 minutes
  *   - Pay accrual (rate stamping)  → every hour, five past
- *   - Weekly billing review        → every Monday at 9:00 AM
+ *   - Calendar charge sweep        → every day at 9:00 AM
  *
  * All jobs are registered in the JOBS table at the bottom of this file and
  * started by calling startCronJobs() from index.js after the server starts.
@@ -402,54 +402,73 @@ const accruePay = async () => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// JOB 7 — Weekly billing review
-// Every Monday: count what the priced calendar entries are
-// waiting to charge, and put it in front of an admin. Never
-// charges anything on its own.
+// JOB 7 — Daily calendar-charge sweep
+// Raises anything a priced meeting owes that the calendar
+// itself could not see at save time, and tells an admin what
+// was deliberately held back.
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Tells an admin there is money waiting to be approved.
+ * The safety net under calendar charging.
  *
- * Charging is weekly, and the approval is not optional: a price on a calendar
- * entry is a draft until a person releases it, and nothing here changes that.
- * What this job fixes is the other half of the problem — a review step nobody
- * is reminded about is a review step that gets skipped, and the charges then sit
- * unbilled for a month while the families who owe them forget the lesson ever
- * happened.
+ * Saving a priced session charges it (sessions.controller.js), which covers the
+ * ordinary case completely. What it cannot cover is anything that changes the
+ * roster *afterwards*: a family enrolled in August into a class whose first
+ * week was priced in July owes that price, and no calendar save is ever going
+ * to happen to notice. This sweep is what finds them.
  *
- * Deliberately only a notification. It would be a small change to have this
- * raise the charges itself, and that is exactly the change that must not be
- * made: the whole point of the gap between pricing and charging is that a
- * human looks at the number first.
+ * It is also the retry for a save whose ledger write failed — that path logs
+ * and moves on rather than refusing the edit, on the understanding that this
+ * job runs within the day.
+ *
+ * Daily, not weekly. It used to be a Monday reminder that money was waiting for
+ * approval; there is no approval any more, and a family who enrols on Tuesday
+ * should not wait six days to be billed.
+ *
+ * Charging here obeys exactly the same rules as everywhere else — a student who
+ * joined after the meeting is still not billed for it. Those are what the
+ * notification is about: money the sweep decided NOT to raise is the only part
+ * that needs a human.
  */
-const remindWeeklyBillingReview = async () => {
-  const { summary } = await buildSessionCharges({});
+const sweepCalendarCharges = async () => {
+  const result = await raiseSessionCharges({});
 
-  if (summary.billable === 0) {
-    console.log('[CRON] Weekly billing review: nothing waiting.');
+  if (result.created || result.corrected) {
+    console.log(
+      `[CRON] Calendar charges: raised ${result.created} ($${result.total}), `
+      + `corrected ${result.corrected}.`
+    );
+  }
+
+  if (result.held.length === 0) {
+    if (!result.created && !result.corrected) console.log('[CRON] Calendar charges: nothing to do.');
     return;
   }
 
-  const waived = summary.waived > 0
-    ? ` ${summary.overridden} line${summary.overridden === 1 ? '' : 's'} priced down by $${summary.waived.toLocaleString()}.`
-    : '';
+  const late = result.held.filter((l) => l.joinedLate);
+  const orphaned = result.held.filter((l) => l.missingFamily);
+  const heldTotal = result.held.reduce((sum, l) => sum + l.amount, 0);
 
   await notifyAdmins({
     type: 'BILLING',
-    title: `$${summary.total.toLocaleString()} waiting to be charged`,
+    title: `$${heldTotal.toLocaleString()} priced but not charged`,
     message:
-      `${summary.billable} charge${summary.billable === 1 ? '' : 's'} across ${summary.sessions} `
-      + `meeting${summary.sessions === 1 ? '' : 's'} are priced and waiting for approval.${waived} `
-      + `Review them under Billing → Calendar Charges. Nothing has been billed.`,
+      `${result.held.length} line${result.held.length === 1 ? '' : 's'} were left off the ledger. `
+      + (late.length > 0
+        ? `${late.length} for students who enrolled after the meeting (${late.slice(0, 5).map((l) => l.studentName).join(', ')}${late.length > 5 ? '…' : ''}) — charge them from the meeting if they are owed. `
+        : '')
+      + (orphaned.length > 0
+        ? `${orphaned.length} for students with no family on file, which has to be fixed on the student. `
+        : '')
+      + `Everything else priced on the calendar has been charged.`,
     referenceType: 'billing',
-    // One reminder per week, not one per boot: the catch-up pass re-runs a
-    // missed job, and without this a Monday spent redeploying would stack up
+    // One alert per day, not one per boot: the catch-up pass re-runs a missed
+    // job, and without this a morning spent redeploying would stack up
     // identical alerts.
-    dedupKey: `weekly-billing-review:${academyToday().toISOString().slice(0, 10)}`,
+    dedupKey: `calendar-charge-sweep:${academyToday().toISOString().slice(0, 10)}`,
   });
 
-  console.log(`[CRON] Weekly billing review: flagged $${summary.total} across ${summary.sessions} meeting(s).`);
+  console.log(`[CRON] Calendar charges: held back ${result.held.length} line(s) worth $${heldTotal}.`);
 };
 
 const JOBS = [
@@ -495,9 +514,9 @@ const JOBS = [
     handler: accruePay,
   },
   {
-    name: 'weekly-billing-review',
-    schedule: '0 9 * * 1', // every Monday at 9:00 AM
-    handler: remindWeeklyBillingReview,
+    name: 'calendar-charge-sweep',
+    schedule: '0 9 * * *', // every day at 9:00 AM
+    handler: sweepCalendarCharges,
   },
 ];
 

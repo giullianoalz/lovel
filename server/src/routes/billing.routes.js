@@ -20,7 +20,6 @@ import {
   generateEmaBatch,
   reconcileEmaRemittance,
   refundPayment,
-  previewSessionCharges,
   generateSessionCharges,
   setSessionChargeOverride,
   listBlockSessions,
@@ -104,12 +103,9 @@ router.post('/ema/reconcile', authenticate, requireRole('ADMIN'), reconcileEmaRe
 // POST /api/billing/payments/:id/refund — Refund a payment (Stripe reversal if card, ledger-only otherwise) (Admin)
 router.post('/payments/:id/refund', authenticate, requireRole('ADMIN'), refundPayment);
 
-// GET /api/billing/session-charges — What the priced meetings would charge (Admin).
-// Read-only: this is the sheet reviewed before any money is committed.
-router.get('/session-charges', authenticate, requireRole('ADMIN'), previewSessionCharges);
-
-// POST /api/billing/session-charges — Raise those charges into the ledger (Admin).
-// Committing money to real families is an admin decision and nobody else's.
+// POST /api/billing/session-charges — the exception path (Admin). Pricing a
+// meeting on the calendar already charges it; this is for the one case the
+// automatic path refuses: a student who enrolled after the meeting happened.
 router.post('/session-charges', authenticate, requireRole('ADMIN'), generateSessionCharges);
 
 // PUT /api/billing/session-charges/override — what one student pays for one

@@ -11,7 +11,6 @@ import { getSocket } from '../../lib/socket';
 import { useToast } from '../Layout/ToastProvider';
 import ErrorBanner from '../Layout/ErrorBanner';
 import EmailPreviewModal from '../Layout/EmailPreviewModal';
-import SessionChargesPanel from './SessionChargesPanel';
 import BlockBillingPanel from './BlockBillingPanel';
 import { defaultInvoiceSubject, defaultInvoiceMessage, INVOICE_FIXED_NOTE } from '../../lib/emailDefaults';
 import './BillingPanel.css';
@@ -94,8 +93,6 @@ const BillingPanel = () => {
   // Modal States
   const [isAddTxModalOpen, setIsAddTxModalOpen] = useState(false);
   const [isEmaModalOpen, setIsEmaModalOpen] = useState(false);
-  // Meetings priced on the calendar, waiting to be turned into real charges.
-  const [isSessionChargesOpen, setIsSessionChargesOpen] = useState(false);
   // Billing a block of classes to a whole roster before they are taught — the
   // many-families counterpart of the per-family block on a family's ledger.
   const [isBlockBillingOpen, setIsBlockBillingOpen] = useState(false);
@@ -1096,11 +1093,8 @@ const BillingPanel = () => {
             <p>Manage family accounts, process payments, and generate invoices.</p>
           </div>
           <div className="billing-quick-actions">
-            <button className="btn-action outline" onClick={() => setIsSessionChargesOpen(true)}>
-              <Receipt size={16} /> Calendar Charges
-            </button>
-            {/* Forward-looking twin of Calendar Charges: that one releases what
-                has been taught, this one bills what has not. */}
+            {/* The forward-looking half of calendar billing: a priced meeting bills
+                what has been taught, this bills what has not. */}
             <button className="btn-action outline" onClick={() => setIsBlockBillingOpen(true)}>
               <Layers size={16} /> Bill Blocks
             </button>
@@ -1222,16 +1216,6 @@ const BillingPanel = () => {
             </table>
           </div>
         </div>
-
-        {/* Meetings given a price on the calendar. Reloads the ledger on the
-            way out so the charges it raised show up on the family accounts
-            behind it, rather than only after a refresh. */}
-        {isSessionChargesOpen && (
-          <SessionChargesPanel
-            onClose={() => setIsSessionChargesOpen(false)}
-            onDone={loadBilling}
-          />
-        )}
 
         {/* A block of classes billed to a whole roster in advance. Same reload
             on the way out, for the same reason. */}
@@ -1969,8 +1953,8 @@ const BillingPanel = () => {
             <div className="tx-form">
               <p className="text-muted" style={{ marginTop: 0, fontSize: '13px' }}>
                 One invoice for a run of classes, charged before they are taught.
-                Each class is billed against its own calendar entry, so approving it
-                later in Calendar Charges will not bill the family a second time.
+                Each class is billed against its own calendar entry, so pricing that
+                entry later will not bill the family a second time.
               </p>
 
               <div className="br-range">

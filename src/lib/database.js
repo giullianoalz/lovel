@@ -556,28 +556,9 @@ export const database = {
   },
 
   // --- Charges priced on the calendar ---
-  // What the priced meetings in a range would charge each enrolled family.
-  // Read-only: this is the sheet reviewed before any money is committed.
-  fetchSessionCharges: async ({ from, to } = {}) => {
-    const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    const qs = params.toString() ? `?${params}` : '';
-    const response = await api.get(`/billing/session-charges${qs}`);
-    return response.data;
-  },
-
-  // Commits those charges to the ledger. The server recomputes the amounts —
-  // the browser never names the price — and re-running is safe, so a double
-  // click cannot bill a family twice. No mock fallback: it moves real money.
-  raiseSessionCharges: async ({ from, to, sessionIds } = {}) => {
-    const response = await api.post('/billing/session-charges', { from, to, sessionIds });
-    return response.data;
-  },
-
   // What one student pays for one meeting, when the meeting's own price doesn't
-  // apply to them. `amount: null` puts them back on the full price. Charges
-  // nobody on its own — it changes what the pending charge will be.
+  // apply to them. `amount: null` puts them back on the full price. Re-prices
+  // the charge as well as the price: on the calendar the two are the same thing.
   setStudentChargePrice: async ({ sessionId, studentIds, amount, reason }) => {
     const response = await api.put('/billing/session-charges/override', {
       sessionId, studentIds, amount, reason,

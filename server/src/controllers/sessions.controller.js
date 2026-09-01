@@ -10,6 +10,7 @@ import {
   getParentUserIdsForStudents,
 } from '../services/notificationConfig.service.js';
 import { loadPayCategories, freezeSessionRates, clearFrozenRates } from '../services/payroll.service.js';
+import { raiseSessionCharges } from '../services/sessionCharges.service.js';
 import { sessionStartInstant } from '../utils/academyTime.js';
 import {
   CANCELLATION_WINDOW_HOURS,
@@ -74,10 +75,15 @@ const readPayFields = async (req) => {
  * reads what it bills the client. Admin-only for the same reason and then some
  * — it is the number a family will be asked for.
  *
- * Typing it charges nobody. It records what the meeting costs; an admin reviews
- * the pending ones and approves them into the ledger (see
- * sessionCharges.service.js), so a fat-fingered price is caught on a review
- * screen rather than on somebody's invoice.
+ * Typing it CHARGES (changed 2026-09-01 — there used to be an approval screen
+ * between the two). Every enrolled family owes it the moment the session is
+ * saved; `chargeCalendarSessions` below is what commits it.
+ *
+ * Which means a fat-fingered price lands on a real balance, so correcting it
+ * has to work: re-saving with the right number re-prices the charge, clearing
+ * the price zeroes it, and cancelling the meeting zeroes it. All of that is
+ * `raiseSessionCharges` in sessionCharges.service.js. The one thing that cannot
+ * be undone from here is a charge already pulled onto an invoice.
  */
 const readChargeFields = async (req) => {
   const { chargeAmount, chargeNote } = req.body;
@@ -110,6 +116,42 @@ const readChargeFields = async (req) => {
   }
 
   return { data };
+};
+
+/**
+ * Bill what these meetings now cost, right after they were saved.
+ *
+ * Called on every path that can change what a meeting charges — its price, its
+ * date, whether it happens at all. Cheap to call when nothing changed: a
+ * meeting with no price produces no lines, and one already charged at the same
+ * number produces no writes.
+ *
+ * Never fails the save. The session is the record of what was scheduled and it
+ * is already written; if the ledger write fails, the daily sweep in
+ * cron.jobs.js raises the same charges within the day. Refusing the edit
+ * instead would leave an admin unable to fix a calendar because billing is
+ * having a bad afternoon.
+ */
+const chargeCalendarSessions = async (sessionIds, actorEmail) => {
+  if (!sessionIds || sessionIds.length === 0) return;
+  try {
+    const result = await raiseSessionCharges({ sessionIds });
+    if (result.created || result.corrected || result.zeroed) {
+      console.log(
+        `[Billing] ${actorEmail} priced ${sessionIds.length} session(s): `
+        + `${result.created} charge(s) raised ($${result.total.toFixed(2)}), `
+        + `${result.corrected} corrected, ${result.zeroed} zeroed`
+        // Priced but deliberately not raised — almost always a student who
+        // enrolled after the meeting. Released, if ever, by POST
+        // /api/billing/session-charges with includeJoinedLate.
+        + (result.held.length > 0 ? `, ${result.held.length} held back` : '')
+        // Already invoiced, so the new price did not reach it.
+        + (result.locked.length > 0 ? `, ${result.locked.length} already invoiced and left alone` : '')
+      );
+    }
+  } catch (error) {
+    console.error('[Billing] Could not charge saved session(s); the daily sweep will retry.', error);
+  }
 };
 
 // Every cancellation reaches the admin for a decision — none is ever charged
@@ -457,6 +499,9 @@ export const createSession = async (req, res, next) => {
       },
     });
 
+    // A price typed here is charged here.
+    await chargeCalendarSessions([session.id], req.user.email);
+
     // Attendance is recorded by the teacher when the session happens (see
     // updateAttendance) — pre-filling PRESENT here would fabricate attendance
     // for a session that hasn't occurred yet, and payroll only pays for
@@ -541,6 +586,14 @@ export const bulkScheduleSessions = async (req, res, next) => {
           data: { classId, date, startTime: startObj, endTime: endObj, status: 'SCHEDULED', ...pay.data, ...(index === 0 || chargeAllSessions ? charge.data : {}) },
         })
       )
+    );
+
+    // Only the sessions that actually carry the price are worth looking at —
+    // with `chargeAllSessions` off that is the first one, which is the habit
+    // the whole calendar-charging model is built around.
+    await chargeCalendarSessions(
+      createdSessions.filter((s) => s.chargeAmount != null).map((s) => s.id),
+      req.user.email
     );
 
     res.status(201).json({ message: `${createdSessions.length} sessions scheduled.`, created: createdSessions.length });
@@ -633,6 +686,10 @@ export const bulkUpdateSessions = async (req, res, next) => {
     }
     await freezeSessionRates(targetIds);
 
+    // Retiming a series moves the dates its charges carry, cancelling it zeroes
+    // them, and re-pricing it re-prices them — all three are the same call.
+    await chargeCalendarSessions(targetIds, req.user.email);
+
     res.json({
       message: `${targets.length} session${targets.length === 1 ? '' : 's'} updated.`,
       updated: targets.length,
@@ -688,6 +745,10 @@ export const updateSession = async (req, res, next) => {
       await clearFrozenRates({ sessionIds: [req.params.id] });
     }
     await freezeSessionRates([req.params.id]);
+
+    // And the same for what the family owes: a new price is charged, a cleared
+    // one is zeroed, a cancellation takes the charge with it.
+    await chargeCalendarSessions([req.params.id], req.user.email);
 
     res.json({ message: 'Session updated.', session });
   } catch (error) {

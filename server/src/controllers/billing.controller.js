@@ -11,7 +11,7 @@ import { nextLcNumber } from '../services/invoicing.service.js';
 import { buildInvoicePdf, invoicePdfFilename } from '../services/invoicePdf.service.js';
 import { sendInvoiceEmail } from '../services/email.service.js';
 import { getOrCreateInvoiceCheckoutUrl } from '../services/stripeCheckout.service.js';
-import { buildSessionCharges, isBillable } from '../services/sessionCharges.service.js';
+import { raiseSessionCharges } from '../services/sessionCharges.service.js';
 import { academyToday, academyDayOffset } from '../utils/academyTime.js';
 import { syncInvoiceToWave } from '../services/wave.service.js';
 
@@ -2402,37 +2402,23 @@ export const refundPayment = async (req, res, next) => {
 };
 
 /**
- * GET /api/billing/session-charges?from=&to=
- * What the priced meetings in a date range would charge. Read-only — this is
- * the sheet an admin checks before any money is committed.
- */
-export const previewSessionCharges = async (req, res, next) => {
-  try {
-    const { from, to } = req.query;
-    const range = parseChargeRange(from, to);
-    if (range.error) {
-      return res.status(400).json({ error: 'Validation Error', message: range.error });
-    }
-    res.json(await buildSessionCharges(range));
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
  * POST /api/billing/session-charges
- * Body: { from?, to?, sessionIds?: string[] }
- * Raises the priced meetings as Transactions, which the invoicing screen then
- * bundles onto an invoice.
+ * Body: { from?, to?, sessionIds?: string[], includeJoinedLate?: boolean }
  *
- * Recomputed here rather than trusting amounts posted by the client: the browser
+ * The exception path, not the normal one. Pricing a meeting on the calendar
+ * charges it there and then (see sessionCharges.service.js) — there is no
+ * approval queue any more and nothing here has to be run for the ledger to be
+ * right.
+ *
+ * What is left for this route is the one case the automatic path deliberately
+ * refuses: a student enrolled after the meeting happened, whom an admin has
+ * looked at and decided is owed anyway. That is `includeJoinedLate`, and it
+ * only ever applies to named meetings — allowing it across a whole range would
+ * put the retroactive sweep this flag exists to stop one careless click away.
+ *
+ * Amounts are recomputed server-side, never taken from the request: the browser
  * must not be able to name the price. Re-running is safe — the unique index on
- * (studentId, sessionId) refuses a second charge for the same meeting, so a
- * double click or a retry after a timeout cannot bill twice.
- *
- * `sessionIds` narrows the commit to particular meetings, for the admin who
- * wants to raise this week's workshop without also releasing everything else
- * sitting in the range.
+ * (studentId, sessionId) refuses a second charge for the same meeting.
  */
 export const generateSessionCharges = async (req, res, next) => {
   try {
@@ -2442,14 +2428,8 @@ export const generateSessionCharges = async (req, res, next) => {
       return res.status(400).json({ error: 'Validation Error', message: range.error });
     }
 
-    const wanted = Array.isArray(sessionIds) && sessionIds.length > 0
-      ? new Set(sessionIds)
-      : null;
+    const wanted = Array.isArray(sessionIds) && sessionIds.length > 0 ? sessionIds : null;
 
-    // Billing somebody for a class they joined after it happened is a decision,
-    // never a default — and only ever for named meetings. Allowing it on a
-    // whole range would put it one careless click away from the retroactive
-    // sweep this flag exists to stop.
     if (includeJoinedLate && !wanted) {
       return res.status(400).json({
         error: 'Validation Error',
@@ -2457,68 +2437,40 @@ export const generateSessionCharges = async (req, res, next) => {
       });
     }
 
-    const { lines } = await buildSessionCharges(range);
-    const allowJoinedLate = Boolean(includeJoinedLate);
-    const billable = lines.filter((l) => isBillable(l, { allowJoinedLate }) && (!wanted || wanted.has(l.sessionId)));
-
-    if (billable.length === 0) {
-      return res.json({
-        message: 'Nothing to charge — every priced meeting in that range is already billed.',
-        created: 0,
-        skipped: lines.length,
-      });
-    }
-
-    const created = await prisma.transaction.createMany({
-      data: billable.map((l) => ({
-        studentId: l.studentId,
-        familyId: l.familyId,
-        amount: l.amount,
-        type: 'CHARGE',
-        // Carries the student's name onto the charge itself, not just the
-        // meeting's name — a sibling pair in the same class raises two
-        // otherwise-identical lines, and this is what tells them apart on the
-        // invoice a family actually reads.
-        description: `${l.description} — ${l.studentName}`,
-        date: l.date,
-        sessionId: l.sessionId,
-      })),
-      // Belt and braces alongside the unique index: a concurrent second run
-      // skips what it finds rather than failing the whole batch.
-      skipDuplicates: true,
+    const result = await raiseSessionCharges({
+      ...range,
+      sessionIds: wanted || undefined,
+      allowJoinedLate: Boolean(includeJoinedLate),
     });
 
-    // Approving a batch raises the charges and stops there — no invoice.
-    //
-    // It used to raise one invoice per family per run, which sounds right
-    // until you approve two batches: the same family gets a second document
-    // for the same week, and neither is the bill they were expecting. The
-    // invoice is a statement of a *period*, not of whatever an admin happened
-    // to tick in one sitting, so it is raised from Billing → the family →
-    // "Bill a period" once the period's charges are all on the ledger.
-    //
-    // Until then the family sees the money in their portal balance, which
-    // counts uninvoiced charges; what they cannot do is pay it by card, since
-    // the portal's checkout runs off an invoice.
-    const late = billable.filter((l) => l.joinedLate);
+    // Named individually: this is the one path that bills a student for a
+    // meeting predating their enrollment, so who did it has to be on record.
     console.log(
-      `[Billing] ${req.user.email} raised ${created.count} session charge(s) `
-      + `totalling $${billable.reduce((sum, l) => sum + l.amount, 0).toFixed(2)}`
-      // Named individually: this is the one path that bills a student for a
-      // meeting predating their enrollment, so who did it has to be on record.
-      + (late.length > 0
-        ? ` — including ${late.length} for students enrolled after the meeting: `
-          + late.map((l) => `${l.studentName} ($${l.amount})`).join(', ')
-        : '')
+      `[Billing] ${req.user.email} raised ${result.created} session charge(s) `
+      + `totalling $${result.total.toFixed(2)}`
+      + (includeJoinedLate ? ' — including students enrolled after the meeting' : '')
     );
 
+    // Raising charges stops at the ledger — no invoice.
+    //
+    // It used to raise one invoice per family per run, which sounds right until
+    // you run it twice: the same family gets a second document for the same
+    // week, and neither is the bill they were expecting. The invoice is a
+    // statement of a *period*, not of whatever happened to be raised in one
+    // sitting, so it comes from Billing → the family → "Bill a period" once the
+    // period's charges are all on the ledger.
+    //
+    // Until then the family sees the money in their portal balance, which counts
+    // uninvoiced charges; what they cannot do is pay it by card, since the
+    // portal's checkout runs off an invoice.
     res.json({
-      message: created.count === 0
+      message: result.created === 0
         ? 'Nothing new to charge — those meetings are already billed.'
-        : `Raised ${created.count} charge${created.count === 1 ? '' : 's'}. `
+        : `Raised ${result.created} charge${result.created === 1 ? '' : 's'}. `
           + 'Bill them from the family\'s Invoices tab when the period is complete.',
-      created: created.count,
-      skipped: lines.length - billable.length,
+      created: result.created,
+      corrected: result.corrected,
+      held: result.held.length,
     });
   } catch (error) {
     next(error);
@@ -2589,16 +2541,20 @@ export const setSessionChargeOverride = async (req, res, next) => {
       return res.status(404).json({ error: 'Not Found', message: 'That session does not exist.' });
     }
 
-    // Clearing: the students go back to whatever the meeting charges.
+    // Clearing: the students go back to whatever the meeting charges. Their
+    // charge is re-priced to match — an override that only moved the number on
+    // a screen would leave the old amount sitting on the family's balance.
     if (amount === null || amount === undefined || amount === '') {
       const { count } = await prisma.sessionChargeOverride.deleteMany({
         where: { sessionId, studentId: { in: studentIds } },
       });
+      const applied = await raiseSessionCharges({ sessionIds: [sessionId] });
       return res.json({
         message: count === 0
           ? 'Those students were already on the meeting’s own price.'
           : `${count} student${count === 1 ? '' : 's'} back on the meeting’s price.`,
         cleared: count,
+        corrected: applied.corrected,
       });
     }
 
@@ -2631,18 +2587,28 @@ export const setSessionChargeOverride = async (req, res, next) => {
       )
     );
 
+    // The price is the charge: raise what this override now owes, and correct
+    // what it already raised at the old number.
+    const applied = await raiseSessionCharges({ sessionIds: [sessionId] });
+
     // The log is the only trace of who priced somebody differently, and by how
     // much, until this is ever questioned.
     console.log(
       `[Billing] ${req.user.email} priced ${studentIds.length} student(s) at $${value.toFixed(2)} `
-      + `on session ${sessionId}${reason ? ` (${reason})` : ''}`
+      + `on session ${sessionId}${reason ? ` (${reason})` : ''} `
+      + `— ${applied.created} charge(s) raised, ${applied.corrected} corrected`
     );
 
     res.json({
       message: value === 0
         ? `${studentIds.length} student${studentIds.length === 1 ? '' : 's'} won’t be charged for this meeting.`
-        : `${studentIds.length} student${studentIds.length === 1 ? '' : 's'} priced at $${value.toFixed(2)} for this meeting.`,
+        : `${studentIds.length} student${studentIds.length === 1 ? '' : 's'} charged $${value.toFixed(2)} for this meeting.`,
       updated: studentIds.length,
+      created: applied.created,
+      corrected: applied.corrected,
+      // Already on an invoice, so it kept the old price. Says so rather than
+      // letting the admin believe the correction landed everywhere.
+      locked: applied.locked.length,
     });
   } catch (error) {
     next(error);
@@ -2651,9 +2617,9 @@ export const setSessionChargeOverride = async (req, res, next) => {
 
 /* ────────────────── BILLING A BLOCK OF MEETINGS UP FRONT ──────────────────
  *
- * The calendar sweep (previewSessionCharges) only surfaces meetings that
- * already carry a price, which is the right shape for "release what the term
- * has run so far". It cannot answer the other question an admin has: *these
+ * Calendar charging only ever touches meetings that already carry a price,
+ * which is the right shape for "bill what the term is running". It cannot
+ * answer the other question an admin has: *these
  * families want to pay for the next eight weeks now*. Those meetings exist on
  * the calendar but are deliberately priceless — see sessionCharges.service.js
  * on why nothing auto-prices October — so they are invisible to that screen.
