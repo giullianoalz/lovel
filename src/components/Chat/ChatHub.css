@@ -304,6 +304,18 @@
   align-items: center;
 }
 
+/* The global notif bell is fixed at top:24/right:24 over the whole app
+   (Sidebar.css .sidebar-notif-anchor) — on desktop widths, where the chat
+   window runs edge-to-edge, that lands directly on top of Resolve/kebab.
+   Reserve room for it so the header's own buttons stay clickable. */
+@media (min-width: 1101px) {
+  .chat-header-actions {
+    /* Bell width varies with the unread count's digit width (up to ~83px
+       measured with "9+"); clear it with margin to spare. */
+    margin-right: 100px;
+  }
+}
+
 .header-info {
   display: flex;
   align-items: center;
