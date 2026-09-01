@@ -905,6 +905,18 @@
   pointer-events: none;
 }
 
+/* The live "now" indicator on Day/Week's vertical time grids — a thin line
+   at the current time, only ever drawn on the actual current day. */
+.now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #14b8a6;
+  z-index: 8;
+  pointer-events: none;
+}
+
 /* Hover time label in the time axis */
 .hover-time-axis-label {
   position: absolute;
@@ -1504,9 +1516,13 @@
   border-bottom: 1px solid var(--border-light);
 }
 
+/* Fixed width, not min-width: every row's hour grid has to start at the same
+   x or the vertical hour lines (and the "now" line) stagger from row to row.
+   A long name — "Unspecified Subject" — used to widen its own row's label and
+   shove that row's grid out of step with the rest. */
 .timeline-row-label-spacer {
-  min-width: 200px;
-  flex-shrink: 0;
+  width: 200px;
+  flex: 0 0 200px;
   position: sticky;
   left: 0;
   z-index: 21;
@@ -1537,8 +1553,8 @@
 }
 
 .timeline-row-label {
-  min-width: 200px;
-  flex-shrink: 0;
+  width: 200px;
+  flex: 0 0 200px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1571,21 +1587,37 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Without this a flex child refuses to shrink below its text width, so the
+     ellipsis above would never kick in and the name would overflow instead. */
+  min-width: 0;
 }
 
+/* The half-hour rules are painted, not built. They used to be one absolutely
+   positioned <div> per tick per row (~330 nodes on an expanded day), all
+   re-created on every render; as a repeating gradient they cost no nodes and
+   no React work. --tl-tick comes from PIXELS_PER_MINUTE in JS so the spacing
+   can't drift from the event positions laid out against the same scale. */
 .timeline-h-track {
   position: relative;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.4);
+  background-color: rgba(255, 255, 255, 0.4);
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--border-light) 0 1px,
+    transparent 1px var(--tl-tick, 60px)
+  );
 }
 
-.timeline-hour-line {
+/* Timeline's hour axis is horizontal, so its "now" line runs vertically —
+   same live indicator as .now-line, rotated for this view's orientation. */
+.now-line-v {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 1px;
-  background: var(--border-light);
-  z-index: 1;
+  width: 2px;
+  background: #14b8a6;
+  z-index: 8;
+  pointer-events: none;
 }
 
 .timeline-event {
@@ -2421,7 +2453,8 @@
      the screen goes to the actual schedule. */
   .timeline-row-label-spacer,
   .timeline-row-label {
-    min-width: 108px;
+    width: 108px;
+    flex: 0 0 108px;
   }
 
   .timeline-row-label {
@@ -3541,3 +3574,61 @@ select.form-control {
   font-size: 11.5px;
 }
 
+
+/* ── Touch targets ──
+   Apple's HIG and WCAG 2.5.8 both put the minimum comfortable tap target at
+   44x44. The compact toolbar heights above (28-34px) are sized for a mouse
+   cursor and are a miss waiting to happen under a fingertip.
+
+   Keyed to `pointer: coarse` rather than a width on purpose: an iPhone held
+   sideways is 852px wide, so it takes the desktop layout while the input is
+   still a finger. A width-based rule would leave exactly that case broken. */
+@media (pointer: coarse) {
+
+  .calendar-header .nav-arrow-btn,
+  .calendar-header .nav-today-btn,
+  .add-event-btn,
+  .advanced-search-btn-new,
+  .print-btn,
+  .options-btn,
+  .view-select-btn {
+    min-height: 44px;
+  }
+
+  .calendar-header .nav-arrow-btn {
+    min-width: 44px;
+  }
+}
+
+/* ── Phone held sideways ──
+   An iPhone in landscape is only ~390px tall but wide enough to take the
+   desktop layout, so the stacked title + toolbar were eating 255px and leaving
+   about a third of the screen for the calendar itself. Reclaim the vertical
+   space that is purely chrome. Bounded by max-height so no tablet or desktop
+   window is affected. */
+@media (max-height: 480px) and (orientation: landscape) {
+
+  .calendar-container {
+    padding-top: 4px;
+  }
+
+  .calendar-header {
+    gap: 4px;
+  }
+
+  .calendar-header-top {
+    margin-bottom: 0;
+  }
+
+  .calendar-title-text {
+    font-size: 16px;
+  }
+
+  .calendar-header-bottom {
+    padding: 4px 6px;
+  }
+
+  .calendar-glass-box {
+    padding: 4px;
+  }
+}

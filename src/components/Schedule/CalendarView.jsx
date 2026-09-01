@@ -267,6 +267,18 @@ const CalendarView = () => {
   const canSetPay = hasRole('ADMIN');
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
   const [currentDate, setCurrentDate] = useState(new Date());
+  // Drives the live "now" line — ticks once a minute, which is as often as the
+  // line's position could visibly change. Only the three views that actually
+  // draw the line subscribe; on Month/List/Shifts the timer would re-render
+  // this whole component every minute to change nothing.
+  const [now, setNow] = useState(new Date());
+  const viewHasNowLine = view === 'day' || view === 'week' || view === 'timeline';
+  useEffect(() => {
+    if (!viewHasNowLine) return;
+    setNow(new Date()); // resync on arrival — the clock may have moved while away
+    const id = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(id);
+  }, [viewHasNowLine]);
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [classesList, setClassesList] = useState([]);
@@ -1135,7 +1147,14 @@ const CalendarView = () => {
     return filtered;
   };
 
-  const events = getFilteredEvents();
+  // Memoised because this re-filters the whole session list, and plain hover
+  // over the week grid re-renders this component. It only actually changes when
+  // the sessions or the search do.
+  const events = React.useMemo(
+    () => getFilteredEvents(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mappedEvents, searchForm, allStudents]
+  );
 
   // The tile only carries lightweight info — fetch the class roster and the
   // session's full notes/materials the moment it's actually opened. Split out
@@ -1816,6 +1835,14 @@ const CalendarView = () => {
   const PIXELS_PER_MINUTE = 2.0; // ~120px per hour — taller blocks for readability
   const TIMELINE_EVENT_ROW_HEIGHT = 42; // Timeline view: stacked-row height for overlapping events within one tutor's lane
 
+  // The live "now" line — only meaningful on the actual current date, and
+  // only within the grid's visible hour range (a 2 AM class the grid clips
+  // wouldn't get a line either).
+  const isRealToday = toISODate(currentDate) === toISODate(now);
+  const nowOffsetMins = (now.getHours() - START_HOUR) * 60 + now.getMinutes();
+  const showNowLine = isRealToday && nowOffsetMins >= 0 && nowOffsetMins <= (24 - START_HOUR) * 60;
+  const nowOffsetPix = nowOffsetMins * PIXELS_PER_MINUTE;
+
   const parseTimeToPix = (timeStr) => {
     if (!timeStr || typeof timeStr !== 'string') return 0;
     const startStr = timeStr.split(' - ')[0];
@@ -1893,28 +1920,40 @@ const CalendarView = () => {
     };
   };
 
-  const dayEventsList = events.filter(e => e.dateStr === toISODate(currentDate));
+  // Everything below derives the Day/Timeline row set from the fetched
+  // sessions. It's all memoised on the same handful of inputs: without that it
+  // re-ran on every hover over the week grid and on every minute tick of the
+  // "now" line, neither of which can change any of it.
+  const currentDateIso = toISODate(currentDate);
+
+  const dayEventsList = React.useMemo(
+    () => events.filter(e => e.dateStr === currentDateIso),
+    [events, currentDateIso]
+  );
+
   // Union with teachers who are on PTO today but have no session — otherwise
   // a teacher taking the whole day off (no classes to show) never gets a
   // column, and the "Out" badge below would have nowhere to render.
   // "Hide unscheduled tutors" drops the columns that only exist because of a
   // PTO badge — a tutor who's out AND has no sessions today is unscheduled.
-  const todaysPtoTeachers = searchForm.hideUnscheduled ? [] : staffEvents
-    .filter(se => se.kind === 'pto' && se.dateStr === toISODate(currentDate))
-    .map(se => se.teacherName)
-    // Own-PTO rows carry no name (the server only names people on the org-wide
-    // view), and a nameless column would render as a blank tutor lane.
-    .filter(Boolean);
-  let uniqueTeachers = [...new Set([
-    ...dayEventsList.flatMap(e => e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames : [e.teacher]), 
-    ...todaysPtoTeachers
-  ].filter(Boolean))].sort();
+  const todaysPtoTeachers = React.useMemo(
+    () => searchForm.hideUnscheduled ? [] : staffEvents
+      .filter(se => se.kind === 'pto' && se.dateStr === currentDateIso)
+      .map(se => se.teacherName)
+      // Own-PTO rows carry no name (the server only names people on the
+      // org-wide view), and a nameless column would render as a blank lane.
+      .filter(Boolean),
+    [searchForm.hideUnscheduled, staffEvents, currentDateIso]
+  );
 
-  if (searchForm.tutors.length > 0) {
-    uniqueTeachers = uniqueTeachers.filter(t =>
-      searchForm.tutors.some(st => t.toLowerCase().includes(st.toLowerCase()))
-    );
-  }
+  const uniqueTeachers = React.useMemo(() => {
+    const all = [...new Set([
+      ...dayEventsList.flatMap(e => e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames : [e.teacher]),
+      ...todaysPtoTeachers
+    ].filter(Boolean))].sort();
+    if (searchForm.tutors.length === 0) return all;
+    return all.filter(t => searchForm.tutors.some(st => t.toLowerCase().includes(st.toLowerCase())));
+  }, [dayEventsList, todaysPtoTeachers, searchForm.tutors]);
 
   // Timeline view groups tutor rows by subject — TutorBird's own Timeline
   // does the same, collapsing every subject (including the untagged bucket)
@@ -1922,7 +1961,7 @@ const CalendarView = () => {
   // needs a row to show the "Out" badge on, so PTO-only tutors land in the
   // untagged bucket too, same as an untagged session would.
   const UNSPECIFIED_SUBJECT = 'Unspecified Subject';
-  const timelineSubjectGroups = (() => {
+  const timelineSubjectGroups = React.useMemo(() => {
     const groups = new Map(); // label -> Set<teacherName>
     dayEventsList.forEach(e => {
       const primary = e.allTeacherNames && e.allTeacherNames.length > 0 ? e.allTeacherNames[0] : e.teacher;
@@ -1947,16 +1986,21 @@ const CalendarView = () => {
       })
       .filter(g => g.teacherNames.length > 0)
       .sort((a, b) => a.label.localeCompare(b.label));
-  })();
+  }, [dayEventsList, todaysPtoTeachers, searchForm.tutors]);
   const timelineWidth = (24 - START_HOUR) * 60 * PIXELS_PER_MINUTE;
   const timelineHalfHourTicks = Array.from({ length: (24 - START_HOUR) * 2 });
-  const timelineHourLines = (
-    <>
-      {timelineHalfHourTicks.map((_, i) => (
-        <div key={i} className="timeline-hour-line" style={{ left: `${i * 30 * PIXELS_PER_MINUTE}px` }} />
-      ))}
-    </>
-  );
+  // The half-hour rules used to be one <div> per tick per row — 30 nodes a row,
+  // ~330 across an expanded day, all of them re-created on every render. They're
+  // evenly spaced, so a repeating gradient paints the same thing with no nodes
+  // at all. The spacing still comes from PIXELS_PER_MINUTE (via this custom
+  // property) so JS stays the single source of truth for the scale.
+  const timelineTickPx = 30 * PIXELS_PER_MINUTE;
+  const timelineGridVars = { '--tl-tick': `${timelineTickPx}px` };
+  // Only the "now" marker is still a real element: it's one node, and its
+  // position doesn't follow the tick rhythm.
+  const timelineHourLines = showNowLine
+    ? <div className="now-line-v" style={{ left: `${nowOffsetPix}px` }} />
+    : null;
 
   // Moves currentDate by one unit of whatever's currently in view — this is
   // what the header's ◀ ▶ arrows call; each change re-fetches sessions via
@@ -2651,7 +2695,15 @@ const CalendarView = () => {
                                <div className="grid-halfhour-line" style={{ top: `${(i * 60 + 30) * PIXELS_PER_MINUTE}px` }} />
                              </React.Fragment>
                            ))}
-                           
+                           {/* Unlike Day view, `currentDate` here is just the
+                               anchor for the visible week — any of its 7
+                               columns could be the real "today", so each
+                               column checks for itself instead of reusing
+                               showNowLine. */}
+                           {isToday && nowOffsetMins >= 0 && nowOffsetMins <= (24 - START_HOUR) * 60 && (
+                             <div className="now-line" style={{ top: `${nowOffsetPix}px` }} />
+                           )}
+
                            {/* Events */}
                            {gridEvents.map(item => {
                               const isStaff = !!item.kind;
@@ -2773,7 +2825,8 @@ const CalendarView = () => {
                              <div className="grid-halfhour-line" style={{ top: `${(i * 60 + 30) * PIXELS_PER_MINUTE}px` }}></div>
                            </React.Fragment>
                          ))}
-                         
+                         {showNowLine && <div className="now-line" style={{ top: `${nowOffsetPix}px` }} />}
+
                          {/* Events */}
                          {teacherEvents.map(e => (
                            <div
@@ -2821,7 +2874,7 @@ const CalendarView = () => {
 
         {view === 'timeline' && timelineSubjectGroups.length > 0 && (
           <div className="calendar-scroll-wrapper">
-            <div className="timeline-view-grid">
+            <div className="timeline-view-grid" style={timelineGridVars}>
               <div className="timeline-hours-header">
                 <div className="timeline-row-label-spacer" />
                 <div className="timeline-hours-track" style={{ width: `${timelineWidth}px` }}>
