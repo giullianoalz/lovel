@@ -2628,7 +2628,13 @@ const CalendarView = () => {
              <div className="week-schedule-grid">
                 {/* Time Axis — shows hover time label in blue when user moves over the grid */}
                 <div className="time-axis" style={{ position: 'relative' }}>
-                  <div className="time-axis-header">GMT-5</div>
+                  {/* Deliberately empty: it aligns the hour axis with the
+                      header row above and carries no label. It used to read
+                      "GMT-5", which claimed a conversion that never happens —
+                      session times are the academy's wall clock, stored and
+                      read as-is (see lib/time.js) — and was wrong outright
+                      from March to November, when the academy is GMT-4. */}
+                  <div className="time-axis-header" />
                   {Array.from({ length: 24 - START_HOUR }).map((_, i) => {
                     const hour = START_HOUR + i;
                     const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
@@ -2787,7 +2793,13 @@ const CalendarView = () => {
              <div className="instructor-schedule-grid">
                 {/* Time Axis */}
                 <div className="time-axis">
-                  <div className="time-axis-header">GMT-5</div>
+                  {/* Deliberately empty: it aligns the hour axis with the
+                      header row above and carries no label. It used to read
+                      "GMT-5", which claimed a conversion that never happens —
+                      session times are the academy's wall clock, stored and
+                      read as-is (see lib/time.js) — and was wrong outright
+                      from March to November, when the academy is GMT-4. */}
+                  <div className="time-axis-header" />
                   {Array.from({ length: 24 - START_HOUR }).map((_, i) => {
                     const hour = START_HOUR + i;
                     const label = hour === 0 ? '12 AM' : hour > 12 ? `${hour - 12} PM` : hour === 12 ? '12 PM' : `${hour} AM`;
