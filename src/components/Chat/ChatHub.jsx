@@ -718,7 +718,12 @@ const ChatHub = () => {
                 const isLocalPreview = msg.fileUrl?.startsWith('blob:');
                 const key = dayKeyOf(msg);
                 const showDivider = i === 0 || key !== dayKeyOf(all[i - 1]);
-                const isGroup = currentChatData?.isGroup;
+                // In a real group chat "received" already means "not me", so the
+                // name distinguishes among several other people. Under admin
+                // supervision it means something different — the admin is party
+                // to neither side of a 1:1 — so every message reads "received"
+                // and needs the name just as much as a group chat does.
+                const isGroup = currentChatData?.isGroup || currentChatData?.isSupervisor;
                 return (
                 <React.Fragment key={msg.id}>
                 {showDivider && (
