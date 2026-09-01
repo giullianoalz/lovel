@@ -78,6 +78,13 @@
 .sp-checkin-btn:hover { background: rgba(255, 255, 255, 0.3); }
 .sp-checkin-btn:active { transform: translateY(1px); }
 
+/* The hero has no max-width, so this button's right edge is always the
+   viewport edge — same fixed global bell collision as ChatHub (see
+   ChatHub.css). Only relevant above 1101px, where the bell goes fixed. */
+@media (min-width: 1101px) {
+  .sp-checkin-btn { margin-right: 90px; }
+}
+
 .sp-avatar {
   width: 64px;
   height: 64px;

@@ -30,6 +30,13 @@
   flex-wrap: wrap;
 }
 
+/* Below ~1560px the 1300px max-width never kicks in, so these buttons sit
+   under the fixed global bell — same collision as ChatHub (see ChatHub.css).
+   The centered layout clears it above that width. */
+@media (min-width: 1101px) and (max-width: 1559px) {
+  .billing-header { padding-right: 100px; }
+}
+
 .btn-action {
   display: flex;
   align-items: center;

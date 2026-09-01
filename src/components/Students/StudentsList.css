@@ -23,6 +23,13 @@
   color: var(--text-main);
 }
 
+/* Below ~1460px the 1200px max-width never kicks in, so the Export/Snack
+   Cabinet buttons sit under the fixed global bell — same collision as
+   ChatHub (see ChatHub.css). The centered layout clears it above that. */
+@media (min-width: 1101px) and (max-width: 1459px) {
+  .students-header { padding-right: 100px; }
+}
+
 .loading-state, .empty-state {
   display: flex;
   flex-direction: column;

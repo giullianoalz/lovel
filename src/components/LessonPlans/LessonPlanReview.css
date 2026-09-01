@@ -19,6 +19,13 @@
   gap: 16px;
 }
 
+/* Below ~1460px the 1200px max-width never kicks in, so the pending badge
+   sits under the fixed global bell — same collision as ChatHub (see
+   ChatHub.css). The centered layout clears it above that width. */
+@media (min-width: 1101px) and (max-width: 1459px) {
+  .lpr-header { padding-right: 100px; }
+}
+
 .lpr-title {
   font-size: 26px;
   font-weight: 700;

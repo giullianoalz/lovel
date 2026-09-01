@@ -35,6 +35,12 @@
 .fds-back:hover { background: rgba(241, 245, 249, 0.95); }
 .fds-back:active { transform: translateY(1px); }
 
+/* The container has no max-width, so its right edge is always the viewport
+   edge — same fixed global bell collision as ChatHub (see ChatHub.css). */
+@media (min-width: 1101px) {
+  .fds-header { padding-right: 100px; }
+}
+
 @media (max-width: 640px) {
   .fds-container { padding: 16px; }
 }

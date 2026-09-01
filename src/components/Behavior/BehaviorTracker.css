@@ -36,6 +36,13 @@
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
 }
 
+/* Below ~1660px the 1400px max-width never kicks in, so the header runs
+   edge-to-edge and this button sits under the fixed global bell — same
+   collision as ChatHub (see ChatHub.css). Centered layout clears it above. */
+@media (min-width: 1101px) and (max-width: 1659px) {
+  .behavior-header { padding-right: 100px; }
+}
+
 .behavior-add-btn:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);

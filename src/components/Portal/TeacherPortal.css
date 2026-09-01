@@ -386,6 +386,14 @@
   text-align: left;
 }
 
+/* This is the first element on the page (see TeacherPortal.jsx) and runs
+   full-width. Below ~1540px the 1280px max-width never kicks in, so the
+   chevron on its right end sits under the fixed global bell — same
+   collision as ChatHub (see ChatHub.css). Centered layout clears it above. */
+@media (min-width: 1101px) and (max-width: 1539px) {
+  .emergency-strip-toggle { padding-right: 100px; }
+}
+
 .emergency-strip-chevron {
   color: #b91c1c;
   transition: transform 0.2s ease;
