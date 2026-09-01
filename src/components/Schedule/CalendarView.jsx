@@ -841,6 +841,10 @@ const CalendarView = () => {
           teacherId: s.class?.teacherId || classInfo.teacherId || classInfo.teacher?.id || null,
           coTeacherIds: coTeachers.map(c => c.id),
           students: roster.length || classInfo._count?.enrollments || 0,
+          // How many seats the class holds — what "full" actually means. Null
+          // when we couldn't find out, which the filter treats as "don't
+          // judge" rather than assuming a number.
+          maxStudents: s.class?.maxStudents ?? classInfo.maxStudents ?? null,
           studentList: null, // lazily loaded when the event is opened
           studentIds: [],
           // Enrolled student names (lowercased) — powers the "By Students"
@@ -1156,9 +1160,14 @@ const CalendarView = () => {
       filtered = filtered.filter(e => e.students > 0);
     }
 
+    // "Full" is the class's own capacity, the same number the server enforces
+    // when it refuses an enrolment. It used to compare against a flat 15, which
+    // was wrong in both directions: a class of 10 sitting at 10 was full and
+    // stayed on the calendar, while a class of 20 with 16 in it had room and
+    // got hidden. A class whose capacity we couldn't read is left visible —
+    // better to show something we can't judge than to hide it on a guess.
     if (searchForm.hideFullEvents) {
-      // Assuming a generic capacity limit of 15 for mock purposes
-      filtered = filtered.filter(e => e.students < 15);
+      filtered = filtered.filter(e => e.maxStudents == null || e.students < e.maxStudents);
     }
     
     return filtered;

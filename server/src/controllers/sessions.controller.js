@@ -305,6 +305,11 @@ export const listSessions = async (req, res, next) => {
           // was visible, just nothing anyone could resolve it to.
           select: {
             name: true, subject: true, type: true, meetingUrl: true, teacherId: true,
+            // Capacity, so the calendar's "hide full classes" filter can ask
+            // whether a class is actually full instead of guessing at a number.
+            // Not gated behind isStaff: how many seats a class holds is benign
+            // — it carries no pricing and names nobody.
+            maxStudents: true,
             teacher: { select: { id: true, fullName: true } },
             // The co-teachers ride along for the same reason the lead's name
             // does: the calendar names everyone standing in the room off this
