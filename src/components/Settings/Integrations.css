@@ -243,8 +243,17 @@
   color: var(--text-muted);
 }
 
-.int-disconnect {
+/* Reconnect and Disconnect share a row: both end the current authorization,
+   and putting them side by side keeps the safe one (which preserves the
+   account mapping) in front of the destructive one. */
+.int-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-top: 18px;
+}
+
+.int-disconnect {
   border-color: color-mix(in srgb, #dc2626 40%, transparent);
   color: #dc2626;
 }

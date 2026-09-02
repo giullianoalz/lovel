@@ -272,9 +272,19 @@ const Integrations = () => {
               </div>
             )}
 
-            <button className="int-btn int-btn-ghost int-disconnect" onClick={handleDisconnect}>
-              <Unlink size={15} /> Disconnect Wave
-            </button>
+            {/* Re-authorizing is not the same as starting over: the token
+                exchange updates the existing connection row, so the account
+                mapping survives. Without this button the only way to widen the
+                granted scopes was Disconnect (which drops the row, and the
+                mapping with it) and then map both accounts again by hand. */}
+            <div className="int-actions">
+              <button className="int-btn int-btn-ghost" onClick={handleConnect}>
+                <Link2 size={15} /> Reconnect to Wave
+              </button>
+              <button className="int-btn int-btn-ghost int-disconnect" onClick={handleDisconnect}>
+                <Unlink size={15} /> Disconnect Wave
+              </button>
+            </div>
           </>
         )}
       </div>
