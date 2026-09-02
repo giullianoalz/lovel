@@ -679,6 +679,57 @@
   min-height: 600px;
 }
 
+/* ── Floating Zoom Controls ── */
+.cal-zoom-controls {
+  position: sticky;
+  top: 8px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  float: right;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-light);
+  border-radius: 24px;
+  padding: 4px 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.cal-zoom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: var(--primary-light);
+  color: var(--primary);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.cal-zoom-btn:hover {
+  background: var(--primary);
+  color: white;
+  transform: scale(1.1);
+}
+
+.cal-zoom-btn:active {
+  transform: scale(0.95);
+}
+
+.cal-zoom-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
+
 .calendar-scroll-wrapper {
   width: 100%;
   max-height: calc(100vh - 240px);

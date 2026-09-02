@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX, Receipt } from 'lucide-react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX, Receipt, ZoomIn, ZoomOut } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
@@ -271,6 +271,8 @@ const CalendarView = () => {
   // is going to bounce.
   const canSetPay = hasRole('ADMIN');
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
+  const [zoomLevel, setZoomLevel] = useState(1.0); // 0.5 – 2.5, controls PIXELS_PER_MINUTE
+  const calendarBoxRef = useRef(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   // Drives the live "now" line — ticks once a minute, which is as often as the
   // line's position could visibly change. Only the three views that actually
@@ -284,6 +286,45 @@ const CalendarView = () => {
     const id = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(id);
   }, [viewHasNowLine]);
+
+  // ── Pinch-to-zoom on touch devices ──
+  // Detects two-finger pinch gestures on the calendar grid and adjusts the
+  // zoom level. The handler is attached to the glass-box wrapper so it works
+  // across all time-grid views (day, week, timeline).
+  useEffect(() => {
+    const el = calendarBoxRef.current;
+    if (!el) return;
+    let startDist = 0;
+    let startZoom = 1;
+
+    const getFingerDist = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    const onTouchStart = (e) => {
+      if (e.touches.length !== 2) return;
+      startDist = getFingerDist(e.touches);
+      startZoom = zoomLevel;
+    };
+
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault(); // prevent browser zoom
+      const curDist = getFingerDist(e.touches);
+      const scale = curDist / startDist;
+      const newZoom = Math.min(2.5, Math.max(0.5, +(startZoom * scale).toFixed(2)));
+      setZoomLevel(newZoom);
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [zoomLevel]);
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [classesList, setClassesList] = useState([]);
@@ -1909,7 +1950,8 @@ const CalendarView = () => {
 
   // Time parsing for Day View Timeline (9 AM to midnight)
   const START_HOUR = 9;
-  const PIXELS_PER_MINUTE = 2.0; // ~120px per hour — taller blocks for readability
+  const BASE_PX_PER_MIN = 2.0;
+  const PIXELS_PER_MINUTE = BASE_PX_PER_MIN * zoomLevel; // scaled by pinch / buttons
   const TIMELINE_EVENT_ROW_HEIGHT = 42; // Timeline view: stacked-row height for overlapping events within one tutor's lane
 
   // The live "now" line — only meaningful on the actual current date, and
@@ -2615,7 +2657,27 @@ const CalendarView = () => {
         </div>
       )}
 
-      <div className="calendar-glass-box">
+      <div className="calendar-glass-box" ref={calendarBoxRef}>
+        {/* ── Floating Zoom Controls (mobile-friendly) ── */}
+        {(view === 'day' || view === 'week' || view === 'timeline') && (
+          <div className="cal-zoom-controls">
+            <button
+              className="cal-zoom-btn"
+              onClick={() => setZoomLevel(z => Math.min(2.5, +(z + 0.25).toFixed(2)))}
+              title="Zoom in"
+            >
+              <ZoomIn size={18} />
+            </button>
+            <span className="cal-zoom-label">{Math.round(zoomLevel * 100)}%</span>
+            <button
+              className="cal-zoom-btn"
+              onClick={() => setZoomLevel(z => Math.max(0.5, +(z - 0.25).toFixed(2)))}
+              title="Zoom out"
+            >
+              <ZoomOut size={18} />
+            </button>
+          </div>
+        )}
         {view === 'list' && (
           <div className="calendar-scroll-wrapper">
              <div className="week-schedule-grid">
