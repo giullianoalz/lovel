@@ -213,3 +213,67 @@ test('both freezers ask the database for baseSalary', async () => {
     assert.equal(select.baseSalary, true, 'without baseSalary a salaried person is priced as hourly');
   }
 });
+
+/**
+ * A covered hour belongs to whoever covered it, at their rate.
+ *
+ * The same failure as the salaried case above, one door over: the freezer used
+ * to resolve every session from `class.teacher`, so an hour somebody else stood
+ * in for got the class teacher's number stamped on it — permanently, and for a
+ * person who was never on that contract. It is the bug `lineItem` already
+ * guards co-teachers against, arriving through the substitute picker instead.
+ */
+// Paid $70 for this kind of work by their own arrangement, so the rate alone
+// says which contract the freezer read.
+const cover = {
+  id: 'p-cover', hourlyRate: null, flatRateOnly: false, baseSalary: null,
+  payRates: [{ category: 'IN_PERSON', hourlyRate: '70' }],
+};
+
+/** The same session, taught by somebody other than the class's teacher. */
+const coveredBy = (substitute, classTeacher = hourly) => ({
+  ...sessionFor(classTeacher),
+  id: `s-covered-${substitute.id}`,
+  teacher: substitute,
+});
+
+test('a substitute freezes at their own rate, not the class teacher’s', async () => {
+  const session = coveredBy(cover);
+  stubPrisma({ sessions: [session] });
+
+  const frozen = await freezeSessionRates([session.id]);
+
+  assert.deepEqual(errors, [], 'the freeze should not have errored');
+  assert.equal(frozen, 1);
+  // $70 from the cover's own arrangement — not the $50 the class teacher's
+  // category would have produced.
+  assert.deepEqual(writes[0].data, { paidRate: 70, paidRateSource: 'teacher' });
+});
+
+test('a salaried substitute covering an hourly teacher’s class is stamped with nothing', async () => {
+  // The expensive direction. Reading the class teacher here would stamp $50/hr
+  // onto an hour already bought by the cover's salary — exactly the double
+  // payment the salaried tests above exist to prevent.
+  const session = coveredBy(salaried);
+  stubPrisma({ sessions: [session] });
+
+  const frozen = await freezeSessionRates([session.id]);
+
+  assert.deepEqual(errors, [], 'the freeze should not have errored');
+  assert.equal(frozen, 0);
+  assert.deepEqual(writes, []);
+});
+
+test('the session freezer asks the database for the substitute, salary and all', async () => {
+  // Same belt and braces as the baseSalary check above: the select is the part
+  // that has quietly regressed before, and a fixture cannot catch it.
+  let select;
+  stubPrisma({ sessions: [] });
+  prisma.session.findMany = async (args) => { select = args.select; return []; };
+
+  await freezeSessionRates(['any']);
+
+  assert.ok(select.teacher, 'without the session teacher a covered hour prices as the class teacher');
+  assert.equal(select.teacher.select.baseSalary, true);
+  assert.equal(select.teacher.select.payRates.select.hourlyRate, true);
+});

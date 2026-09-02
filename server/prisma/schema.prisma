@@ -140,6 +140,7 @@ model User {
   shiftsScheduled        WorkShift[]               @relation("ShiftScheduledBy")
   sessionPayApprovals    Session[]                 @relation("SessionPayApprovals")
   sessionAbsences        Session[]                 @relation("SessionAbsences")
+  sessionsTaught         Session[]                 @relation("SessionTeacher")
   shiftAbsences          WorkShift[]               @relation("ShiftAbsences")
   chargeOverrides        SessionChargeOverride[]   @relation("StudentChargeOverrides")
   chargeOverridesCreated SessionChargeOverride[]   @relation("ChargeOverridesCreated")
@@ -328,13 +329,27 @@ model SessionChargeOverride {
 }
 
 model ClassEnrollment {
-  id         String   @id @default(uuid()) @db.Uuid
-  classId    String   @map("class_id") @db.Uuid
-  studentId  String   @map("student_id") @db.Uuid
-  enrolledAt DateTime @default(now()) @map("enrolled_at") @db.Timestamptz(6)
-  status     String   @default("active") @db.VarChar(20)
-  class      Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
-  student    User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid()) @db.Uuid
+  classId    String    @map("class_id") @db.Uuid
+  studentId  String    @map("student_id") @db.Uuid
+  enrolledAt DateTime  @default(now()) @map("enrolled_at") @db.Timestamptz(6)
+  // The day they came off the roster. `status` says whether they are on it now;
+  // this says when they stopped being, which is the only thing that can answer
+  // "who was in the room three weeks ago".
+  //
+  // Without it a session in the past is shown with today's roster: a child
+  // enrolled yesterday appears in a class they never attended, and one who left
+  // vanishes from the register of the weeks they sat through. Set on unenrol,
+  // cleared on re-enrol.
+  //
+  // Null on every row that predates this column, which reads as "still on the
+  // roster" for the active ones and, for the inactive ones, as "left at some
+  // unknown point" — see rosterOn(), which shows those on sessions already run
+  // rather than erasing a child from meetings they were at.
+  endedAt    DateTime? @map("ended_at") @db.Timestamptz(6)
+  status     String    @default("active") @db.VarChar(20)
+  class      Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student    User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([classId, studentId])
   @@map("class_enrollments")
@@ -347,6 +362,26 @@ model Session {
   startTime       DateTime              @map("start_time") @db.Time(6)
   endTime         DateTime              @map("end_time") @db.Time(6)
   status          SessionStatus         @default(SCHEDULED)
+  // Who actually stood in the room for this hour, once that stops being a
+  // question the class can answer.
+  //
+  // Normally null, and the teacher is whoever the Class says it is — one place
+  // to look, and a timetable change carries the whole term with it. That breaks
+  // the moment a class changes hands: reading the teacher off the Class moves
+  // every hour already taught onto the new person's payslip and off the old
+  // one's, rewriting work that was done and, for the months already run, money
+  // already paid.
+  //
+  // So the outgoing teacher is stamped here on every meeting already in the
+  // past at the moment of the handover — see updateClass. It is the same
+  // reasoning as `paidRate` below: the hour happened under facts that have
+  // since changed, and the only way to keep those facts is to write them down
+  // while they are still true.
+  //
+  // Null still means "ask the Class", so nothing scheduled ahead is frozen and
+  // every session booked before this column existed keeps behaving as it did.
+  teacherId       String?               @map("teacher_id") @db.Uuid
+  teacher         User?                 @relation("SessionTeacher", fields: [teacherId], references: [id])
   // A link on THIS meeting only. Algebra 1 meets in person Mon/Wed and online
   // on Tuesday: hanging the Zoom link off the Class would advertise it on all
   // three and families would show up online on the wrong day. Set here, the
@@ -442,6 +477,7 @@ model Session {
 
   @@index([classId])
   @@index([date])
+  @@index([teacherId])
   @@map("sessions")
 }
 

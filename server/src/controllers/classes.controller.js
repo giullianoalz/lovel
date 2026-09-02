@@ -2,6 +2,7 @@ import prisma from '../config/database.js';
 import { hasRole, isOnly } from '../utils/roles.js';
 import { invalidate } from '../middleware/cache.js';
 import { resolvePaging } from '../utils/helpers.js';
+import { academyToday } from '../utils/academyTime.js';
 
 const MAX_STUDENTS_CAP = 100;
 
@@ -296,43 +297,85 @@ export const updateClass = async (req, res, next) => {
     // primary out of the list needs to know who that is — so fall back to the
     // teacher the class already has rather than to undefined, which would let
     // them be stored as their own co-teacher and paid twice.
+    // Read once and reuse: both the co-teacher normalisation below and the
+    // handover need to know who currently holds the class.
+    const existing = await prisma.class.findUnique({
+      where: { id: req.params.id },
+      select: { teacherId: true },
+    });
+    const currentTeacherId = existing?.teacherId ?? null;
+
     let effectivePrimaryId = nextTeacherId;
     if (teacherId === undefined && Array.isArray(coTeacherIds)) {
-      const existing = await prisma.class.findUnique({
-        where: { id: req.params.id },
-        select: { teacherId: true },
-      });
-      effectivePrimaryId = existing?.teacherId ?? null;
+      effectivePrimaryId = currentTeacherId;
     }
     const nextCoTeacherIds = normalizeCoTeacherIds(coTeacherIds, effectivePrimaryId);
 
-    const updatedClass = await prisma.class.update({
-      where: { id: req.params.id },
-      data: {
-        ...(name && { name }),
-        ...(subject !== undefined && { subject }),
-        ...(teacherId !== undefined && { teacherId: nextTeacherId }),
-        ...(type && { type }),
-        ...(meetingUrl !== undefined && { meetingUrl }),
-        ...(maxStudents && { maxStudents: parseInt(maxStudents) }),
-        ...(status && { status }),
-        ...(groupType && { groupType }),
-        ...(clearsPrice ? { priceOverride: null } : {}),
-        ...(setsPrice ? { priceOverride: Number(priceOverride) } : {}),
-        ...(nextCoTeacherIds
-          ? { coTeachers: { set: nextCoTeacherIds.map(id => ({ id })) } }
-          // Promoting an existing co-teacher to primary without touching the
-          // co-teacher list would leave them on both — the same double count
-          // normalizeCoTeacherIds prevents on the other path. Disconnecting is
-          // a no-op when they weren't a co-teacher to begin with.
-          : (nextTeacherId ? { coTeachers: { disconnect: { id: nextTeacherId } } } : {})),
-      },
-      include: {
-        teacher: { select: { id: true, fullName: true } },
-        coTeachers: { select: { id: true, fullName: true } },
+    // Handing a class over must not reach backwards. The teacher lives on the
+    // Class, so without this every hour already taught would follow the class
+    // to whoever takes it — off the outgoing teacher's payslip and onto the
+    // incoming one's, for months that in some cases have already been paid.
+    //
+    // So the moment the class changes hands, the outgoing teacher is written
+    // onto every meeting that has already happened. Only the ones not already
+    // stamped: a session that names its own teacher was frozen by an earlier
+    // handover, and that hour belongs to whoever taught it, not to the last
+    // person to hold the class.
+    //
+    // Only when there is somebody to stamp — a class picked up from unassigned
+    // has no past teacher to record, and leaving those null keeps them reading
+    // as "nobody was assigned", which is the truth.
+    const handsOver =
+      teacherId !== undefined && currentTeacherId && currentTeacherId !== nextTeacherId;
+
+    const updatedClass = await prisma.$transaction(async (tx) => {
+      if (handsOver) {
+        await tx.session.updateMany({
+          where: {
+            classId: req.params.id,
+            teacherId: null,
+            // Today's meetings are excluded: an hour that has not finished can
+            // still be taught by the person taking over, and this runs on a
+            // date column with no clock to consult. Erring towards the live
+            // class costs at most one day of pay attribution, which the
+            // per-session teacher can correct; erring the other way would
+            // freeze a class onto someone who never taught it.
+            date: { lt: academyToday() },
+          },
+          data: { teacherId: currentTeacherId },
+        });
       }
+
+      return tx.class.update({
+        where: { id: req.params.id },
+        data: {
+          ...(name && { name }),
+          ...(subject !== undefined && { subject }),
+          ...(teacherId !== undefined && { teacherId: nextTeacherId }),
+          ...(type && { type }),
+          ...(meetingUrl !== undefined && { meetingUrl }),
+          ...(maxStudents && { maxStudents: parseInt(maxStudents) }),
+          ...(status && { status }),
+          ...(groupType && { groupType }),
+          ...(clearsPrice ? { priceOverride: null } : {}),
+          ...(setsPrice ? { priceOverride: Number(priceOverride) } : {}),
+          ...(nextCoTeacherIds
+            ? { coTeachers: { set: nextCoTeacherIds.map(id => ({ id })) } }
+            // Promoting an existing co-teacher to primary without touching the
+            // co-teacher list would leave them on both — the same double count
+            // normalizeCoTeacherIds prevents on the other path. Disconnecting is
+            // a no-op when they weren't a co-teacher to begin with.
+            : (nextTeacherId ? { coTeachers: { disconnect: { id: nextTeacherId } } } : {})),
+        },
+        include: {
+          teacher: { select: { id: true, fullName: true } },
+          coTeachers: { select: { id: true, fullName: true } },
+        }
+      });
     });
 
+    // The handover rewrites who is paid for hours already worked, so the
+    // payroll screens have to stop serving the old attribution.
     invalidate('classes:*', 'registration:classes:*');
     res.json({ message: 'Class updated successfully.', class: updatedClass });
   } catch (error) {
@@ -404,7 +447,10 @@ export const enrollStudent = async (req, res, next) => {
       where: {
         classId_studentId: { classId: req.params.id, studentId },
       },
-      update: { status: 'active' },
+      // Clearing endedAt as well: they are back on the roster, and a leaving
+      // date left behind would hide them from every session after the day they
+      // once left — including the ones they are now enrolled for.
+      update: { status: 'active', endedAt: null },
       create: {
         classId: req.params.id,
         studentId,
@@ -445,7 +491,10 @@ export const unenrollStudent = async (req, res, next) => {
           studentId: req.params.studentId,
         },
       },
-      data: { status: 'inactive' },
+      // The day they came off, not just the fact of it. `status` alone made
+      // every past session re-read with today's roster — a child who left in
+      // October disappeared from September's register, which they sat through.
+      data: { status: 'inactive', endedAt: new Date() },
     });
 
     invalidate('classes:*', 'registration:classes:*', 'portal:student:*', 'portal:parent:*');

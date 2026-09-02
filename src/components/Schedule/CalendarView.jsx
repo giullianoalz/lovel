@@ -860,6 +860,15 @@ const CalendarView = () => {
           // back to the old guess (online if there's a link, else in person).
           payCategoryKey: s.payCategoryKey || '',
           payRateOverride: s.payRateOverride == null ? '' : String(s.payRateOverride),
+          // Somebody covered this one meeting. Empty on nearly every session:
+          // the hour is the class teacher's unless it says otherwise, and this
+          // is the only place that can say otherwise — a substitution is true
+          // of one Wednesday, not of the timetable.
+          substituteTeacherId: s.teacherId || '',
+          // Whose class it is regardless, so the picker can name the person
+          // being covered for. `teacher` above is already the effective one.
+          classTeacherId: s.class?.ownTeacher?.id || '',
+          classTeacherName: s.class?.ownTeacher?.fullName || '',
           // What this meeting charges each enrolled family. The other side of
           // payRateOverride: that is what the hour pays the teacher, this is
           // what it bills the client. Empty means it raises nothing, which is
@@ -1267,6 +1276,7 @@ const CalendarView = () => {
       applyToSeries: false,
       payCategoryKey: selectedEvent.payCategoryKey || '',
       payRateOverride: selectedEvent.payRateOverride || '',
+      substituteTeacherId: selectedEvent.substituteTeacherId || '',
       chargeAmount: selectedEvent.chargeAmount || '',
       chargeNote: selectedEvent.chargeNote || '',
       // Separate from applyToSeries on purpose: retiming one session is usually
@@ -1299,6 +1309,11 @@ const CalendarView = () => {
         ? {
             payCategoryKey: editEventForm.payCategoryKey || null,
             payRateOverride: editEventForm.payRateOverride ?? '',
+            // Who taught this one meeting. Sent as `teacherId` because that is
+            // the session's own column — not to be confused with the class
+            // teacher above, which goes to a different endpoint and moves the
+            // whole timetable.
+            teacherId: editEventForm.substituteTeacherId ?? '',
             // Typing a price charges nobody — it records what the meeting costs,
             // and an admin approves the pending ones into the ledger later.
             chargeAmount: editEventForm.chargeAmount ?? '',
@@ -1341,12 +1356,15 @@ const CalendarView = () => {
       }
 
       const newTeacher = teachers.find(t => t.id === editEventForm.teacherId);
+      // A substitute is who taught this meeting, so it is their name on it —
+      // the class teacher's is the answer for every other week.
+      const cover = teachers.find(t => t.id === editEventForm.substituteTeacherId);
       const updated = {
         ...selectedEvent,
         title: editEventForm.title,
         subject: editEventForm.subject,
-        teacher: newTeacher ? newTeacher.name : selectedEvent.teacher,
-        teacherId: editEventForm.teacherId,
+        teacher: cover ? cover.name : (newTeacher ? newTeacher.name : selectedEvent.teacher),
+        teacherId: editEventForm.substituteTeacherId || editEventForm.teacherId,
         dateStr: date,
         time: `${formatTimeStr(hhmmToMins(startTime))} - ${formatTimeStr(hhmmToMins(endTime))}`,
         studentList: editEventForm.studentList.map(s => s.name),
@@ -1354,6 +1372,7 @@ const CalendarView = () => {
         students: editEventForm.studentList.length,
         payCategoryKey: editEventForm.payCategoryKey || '',
         payRateOverride: editEventForm.payRateOverride || '',
+        substituteTeacherId: editEventForm.substituteTeacherId || '',
         chargeAmount: editEventForm.chargeAmount || '',
         chargeNote: editEventForm.chargeNote || '',
       };
@@ -3420,6 +3439,49 @@ const CalendarView = () => {
                           </div>
                         </div>
 
+                        {/* Somebody else covered this one meeting. Sits in the
+                            pay block because that is what it decides: the hour
+                            comes off the class teacher's payslip and lands on
+                            the cover's, priced from their contract. Scoped to
+                            this session alone — the teacher picker at the top
+                            of the modal is the one that moves the timetable. */}
+                        <label className="cal-series-toggle cal-sub-toggle">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(editEventForm.substituteTeacherId)}
+                            onChange={e => setEditEventForm(prev => ({
+                              ...prev,
+                              // Unticking hands the hour back to the class.
+                              substituteTeacherId: e.target.checked
+                                ? (prev.substituteTeacherId || selectedEvent.classTeacherId || '')
+                                : '',
+                            }))}
+                          />
+                          <span>
+                            Someone covered this session
+                            {selectedEvent.classTeacherName ? ` for ${selectedEvent.classTeacherName}` : ''}
+                          </span>
+                        </label>
+
+                        {Boolean(editEventForm.substituteTeacherId) && (
+                          <div className="meta-item">
+                            <User size={16} />
+                            <select
+                              className="form-control"
+                              value={editEventForm.substituteTeacherId}
+                              onChange={e => setEditEventForm(prev => ({ ...prev, substituteTeacherId: e.target.value }))}
+                              style={{ flex: 1, height: '34px', fontSize: '13px' }}
+                              title="Who actually taught this session"
+                            >
+                              {teachers.map(t => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}{t.id === selectedEvent.classTeacherId ? ' (whose class this is)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
                         <label className="cal-series-toggle">
                           <input
                             type="checkbox"
@@ -3487,6 +3549,16 @@ const CalendarView = () => {
                     <div className="meta-item">
                       <User size={16} />
                       <span>{selectedEvent.teacher}</span>
+                      {/* `teacher` above is already whoever taught it, so
+                          without this the card reads as an ordinary week and
+                          the cover is invisible — which is exactly the thing
+                          somebody opens this modal in October to check. */}
+                      {selectedEvent.substituteTeacherId
+                        && selectedEvent.substituteTeacherId !== selectedEvent.classTeacherId && (
+                        <span className="cal-sub-badge">
+                          Covered{selectedEvent.classTeacherName ? ` for ${selectedEvent.classTeacherName}` : ''}
+                        </span>
+                      )}
                     </div>
                     <div className="meta-item">
                       <Clock size={16} />

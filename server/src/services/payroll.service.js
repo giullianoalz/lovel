@@ -126,6 +126,16 @@ export const freezeSessionRates = async (sessionIds) => {
         where: { id: { in: sessionIds }, ...payableSessionWhere(), paidRate: null },
         select: {
           id: true, meetingUrl: true, payCategoryKey: true, payRateOverride: true,
+          // The substitute who covered this hour, when there was one. Their
+          // contract is the one that priced it: freezing the class teacher's
+          // number onto a session somebody else taught pins the cover at a rate
+          // that was never theirs, and stamped it outlives the correction.
+          teacher: {
+            select: {
+              id: true, hourlyRate: true, flatRateOnly: true, baseSalary: true,
+              payRates: { select: { category: true, hourlyRate: true } },
+            },
+          },
           class: {
             select: {
               type: true, meetingUrl: true,
@@ -155,7 +165,9 @@ export const freezeSessionRates = async (sessionIds) => {
     const writes = [];
 
     for (const session of sessions) {
-      const teacher = session.class?.teacher;
+      // Whoever actually taught it — the substitute if one is named, otherwise
+      // the class's teacher. Same rule the payslip reads it back by.
+      const teacher = session.teacher ?? session.class?.teacher;
       if (!teacher) continue;
       if (!contexts.has(teacher.id)) contexts.set(teacher.id, rateContextFor(teacher, categories));
       const { rate, source } = resolveRate(
@@ -537,6 +549,65 @@ export const scheduledShiftsWhere = (startDate, endDate) => ({
 });
 
 /**
+ * Whose hour a session is, now that the answer can outlive the class.
+ *
+ * `Session.teacherId` is normally null and the class names the teacher. It is
+ * filled in when a class changes hands, freezing the hours already taught onto
+ * the person who taught them (see `Session.teacherId` in the schema). So the
+ * three clauses below are one question — "was this hour theirs?" — asked of the
+ * two places the answer can live:
+ *
+ *   1. stamped to them outright, whoever holds the class today;
+ *   2. unstamped, and the class is theirs — the ordinary case, and the only one
+ *      that existed before the stamp did;
+ *   3. co-taught. Deliberately not narrowed by the stamp: it records who stood
+ *      at the front, not who was in the room, and a co-teacher's hours are
+ *      owed either way.
+ *
+ * Written for flat session queries, where each session appears once. The
+ * payroll walks below reach sessions through the class lists instead, so they
+ * take the halves separately — combining them there would pay the primary
+ * teacher and the co-teacher out of the same clause twice.
+ */
+export const taughtByWhere = (teacherId) => ({
+  OR: [
+    { teacherId },
+    { teacherId: null, class: { teacherId } },
+    { class: { coTeachers: { some: { id: teacherId } } } },
+  ],
+});
+
+/**
+ * Narrows a class's sessions to the ones its current teacher is actually owed.
+ *
+ * Applied to `taughtClasses`, whose sessions would otherwise include every hour
+ * taught by whoever held the class before them.
+ *
+ * `AND` rather than a spread because both halves carry `OR` keys and one object
+ * cannot hold two — the same reason `payableSessionWhere` is built this way.
+ */
+export const notHandedOverWhere = (base, teacherId) => ({
+  AND: [base, { OR: [{ teacherId: null }, { teacherId }] }],
+});
+
+/**
+ * The other side of a handover: hours frozen onto this teacher, on a class that
+ * is no longer theirs in any capacity.
+ *
+ * The class lists cannot reach these — the class belongs to somebody else now —
+ * so they are fetched flat and folded back in. The `NOT` keeps them from being
+ * counted twice: a stamped session on a class they still hold, or co-teach, is
+ * already coming through the ordinary walk.
+ */
+export const handedOverToWhere = (base, teacherId) => ({
+  AND: [
+    base,
+    { teacherId },
+    { NOT: { class: { OR: [{ teacherId }, { coTeachers: { some: { id: teacherId } } }] } } },
+  ],
+});
+
+/**
  * The session fields payroll prices an hour from.
  *
  * The last two are counts, not data: whether anybody actually turned up, and
@@ -546,6 +617,10 @@ export const scheduledShiftsWhere = (startDate, endDate) => ({
  */
 const PAID_SESSION_SELECT = {
   id: true, date: true, startTime: true, endTime: true, status: true,
+  // Null unless the class has changed hands since. Selected because the roster
+  // below filters on it in memory: it prices every person in one query, and a
+  // nested `where` there cannot be correlated back to the row it belongs to.
+  teacherId: true,
   meetingUrl: true, payCategoryKey: true, payRateOverride: true,
   paidRate: true, paidRateSource: true,
   attendance: { where: { status: 'PRESENT' }, select: { id: true } },
@@ -678,7 +753,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
   const [startDate, endDate] = monthRange(targetMonth, targetYear);
   const paidSessions = paidSessionsWhere(startDate, endDate);
 
-  const [categoryList, teacher, absences] = await Promise.all([
+  const [categoryList, teacher, absences, handedOver] = await Promise.all([
     loadPayCategories(),
     prisma.user.findUniqueOrThrow({
       where: { id: teacherId },
@@ -702,7 +777,9 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
             type: true,
             meetingUrl: true,
             sessions: {
-              where: paidSessions,
+              // Not every session on a class they hold today is theirs: the
+              // ones taught before they took it over name their predecessor.
+              where: notHandedOverWhere(paidSessions, teacherId),
               select: PAID_SESSION_SELECT,
               orderBy: { date: 'desc' },
             },
@@ -751,17 +828,23 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
     // because "this person's hours" spans both the classes they own and the
     // ones they cover.
     prisma.session.findMany({
-      where: {
-        ...absentSessionsWhere(startDate, endDate),
-        class: {
-          OR: [{ teacherId }, { coTeachers: { some: { id: teacherId } } }],
-        },
-      },
+      where: { AND: [absentSessionsWhere(startDate, endDate), taughtByWhere(teacherId)] },
       select: {
         id: true, date: true, startTime: true, endTime: true,
         absentAt: true, absentReason: true,
         absentBy: { select: { fullName: true } },
         class: { select: { name: true } },
+      },
+      orderBy: { date: 'desc' },
+    }),
+    // Hours frozen onto this teacher on classes somebody else now holds. The
+    // class lists above cannot see them, and without this a teacher who hands
+    // over a class loses the pay for every hour they taught it.
+    prisma.session.findMany({
+      where: handedOverToWhere(paidSessions, teacherId),
+      select: {
+        ...PAID_SESSION_SELECT,
+        class: { select: { id: true, name: true, subject: true, type: true, meetingUrl: true } },
       },
       orderBy: { date: 'desc' },
     }),
@@ -787,8 +870,21 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
   // Primary and co-taught classes are priced the same way — the rate a session
   // pays doesn't depend on which chair this teacher sat in — so both lists walk
   // through the same loop, tagged only for the summary an admin reads.
+  //
+  // The handed-over hours join them as classes of their own, rebuilt from the
+  // sessions rather than fetched: they price identically, and the summary an
+  // admin reads should still say which class the hours came from even though
+  // the class has since moved on. Tagged `primary` because that is the chair
+  // they were sitting in when they taught it.
+  const handedOverClasses = new Map();
+  for (const { class: cls, ...s } of handedOver) {
+    if (!handedOverClasses.has(cls.id)) handedOverClasses.set(cls.id, { ...cls, sessions: [] });
+    handedOverClasses.get(cls.id).sessions.push(s);
+  }
+
   const classesTaught = [
     ...teacher.taughtClasses.map((cls) => ({ cls, role: 'primary' })),
+    ...[...handedOverClasses.values()].map((cls) => ({ cls, role: 'primary' })),
     ...teacher.coTaughtClasses.map((cls) => ({ cls, role: 'co-teacher' })),
   ];
 
@@ -989,7 +1085,7 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     : (shift) => isShiftPayable(shift);
   const absentSessions = absentSessionsWhere(startDate, endDate);
 
-  const [categoryList, staff, absences] = await Promise.all([
+  const [categoryList, staff, absences, stamped] = await Promise.all([
     loadPayCategories(),
     prisma.user.findMany({
       where: {
@@ -1003,6 +1099,10 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
           // payments is worse than no total.
           { taughtClasses: { some: { sessions: { some: paidSessions } } } },
           { coTaughtClasses: { some: { sessions: { some: paidSessions } } } },
+          // Somebody whose hours this month are all on a class they have since
+          // handed over. They hold no class the two clauses above can reach,
+          // and they are still owed for every one of those hours.
+          { sessionsTaught: { some: paidSessions } },
           // Front desk staff are paid by the hour like everyone else. They were
           // missing here, and this screen is also where rates are set — so
           // somebody hired for reception and not yet scheduled could not be
@@ -1023,6 +1123,7 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
           // absence nobody can see is an absence nobody can dispute.
           { taughtClasses: { some: { sessions: { some: absentSessions } } } },
           { coTaughtClasses: { some: { sessions: { some: absentSessions } } } },
+          { sessionsTaught: { some: absentSessions } },
         ],
       },
       orderBy: { fullName: 'asc' },
@@ -1091,12 +1192,28 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     prisma.session.findMany({
       where: absentSessions,
       select: {
-        id: true, date: true, startTime: true, endTime: true,
+        id: true, date: true, startTime: true, endTime: true, teacherId: true,
         absentAt: true, absentReason: true,
         absentBy: { select: { fullName: true } },
         class: { select: { name: true, teacherId: true, coTeachers: { select: { id: true } } } },
       },
       orderBy: { date: 'desc' },
+    }),
+    // Every hour in the range that names its own teacher, because its class
+    // has changed hands. Fetched flat and handed to whoever taught it: the
+    // class lists above reach it through its *current* teacher, who is exactly
+    // the person it does not belong to.
+    prisma.session.findMany({
+      where: { AND: [paidSessions, { teacherId: { not: null } }] },
+      select: {
+        ...PAID_SESSION_SELECT,
+        class: {
+          select: {
+            id: true, name: true, type: true, meetingUrl: true,
+            teacherId: true, coTeachers: { select: { id: true } },
+          },
+        },
+      },
     }),
   ]);
 
@@ -1116,12 +1233,33 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
       markedBy: s.absentBy?.fullName || null,
       reason: s.absentReason || null,
     };
-    const owners = [s.class?.teacherId, ...(s.class?.coTeachers || []).map((t) => t.id)];
+    // A stamped session names its teacher outright; only an unstamped one falls
+    // back to whoever holds the class. Co-teachers are unaffected either way —
+    // the stamp records who was at the front, not who was in the room.
+    const owners = [
+      s.teacherId ?? s.class?.teacherId,
+      ...(s.class?.coTeachers || []).map((t) => t.id),
+    ];
     for (const id of owners) {
       if (!id) continue;
       if (!absencesByPerson.has(id)) absencesByPerson.set(id, []);
       absencesByPerson.get(id).push(entry);
     }
+  }
+
+  // The handed-over hours, keyed by the person who taught them. Only the ones
+  // their current class can no longer reach them by: a session stamped to
+  // somebody who still holds or co-teaches that class is already on their
+  // payslip through the ordinary walk, and adding it here would pay it twice.
+  const handedOverByPerson = new Map();
+  for (const { class: cls, ...s } of stamped) {
+    const stillTheirs =
+      cls?.teacherId === s.teacherId || (cls?.coTeachers || []).some((t) => t.id === s.teacherId);
+    if (stillTheirs) continue;
+    if (!handedOverByPerson.has(s.teacherId)) handedOverByPerson.set(s.teacherId, new Map());
+    const byClass = handedOverByPerson.get(s.teacherId);
+    if (!byClass.has(cls.id)) byClass.set(cls.id, { ...cls, sessions: [] });
+    byClass.get(cls.id).sessions.push(s);
   }
 
   const rows = staff.map((person) => {
@@ -1134,10 +1272,14 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
     // covering somebody else's class.
     const taught = [
       ...person.taughtClasses.map((cls) => ({ cls, role: 'primary' })),
+      ...[...(handedOverByPerson.get(person.id)?.values() || [])].map((cls) => ({ cls, role: 'primary' })),
       ...person.coTaughtClasses.map((cls) => ({ cls, role: 'co-teacher' })),
     ];
     for (const { cls, role } of taught) {
       for (const s of cls.sessions) {
+        // An hour on their class that names somebody else taught it before they
+        // took the class over. It is on that person's payslip, not this one's.
+        if (role === 'primary' && s.teacherId && s.teacherId !== person.id) continue;
         lines.push(lineItem({
           id: s.id, kind: 'session', date: s.date, startTime: s.startTime, endTime: s.endTime,
           title: cls.name, categoryKey: sessionCategory(s, cls), override: toNumber(s.payRateOverride), paidRate: toNumber(s.paidRate), paidRateSource: s.paidRateSource,
