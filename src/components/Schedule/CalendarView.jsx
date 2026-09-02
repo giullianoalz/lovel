@@ -1228,7 +1228,14 @@ const CalendarView = () => {
       ]);
       const cls = classRes.data.class;
       const sess = sessionRes.data.session;
-      const studentIds = (cls.enrollments || []).map(en => ({ id: en.student.id, name: en.student.fullName }));
+      // The roster on GET /classes is the class's roster *today* -- right for
+      // enrolling into the live class, wrong for a session that already
+      // happened. GET /sessions/:id windows its enrolments to the session's
+      // own date (see rosterOn() on the server), so that is what the panel
+      // shows; falling back to the class's list only if the session came back
+      // without one (a parent/student view, where the roster is stripped).
+      const rosterSource = sess.class?.enrollments ?? cls.enrollments;
+      const studentIds = (rosterSource || []).map(en => ({ id: en.student.id, name: en.student.fullName }));
       setSelectedEvent(prev => (prev && prev.id === event.id) ? {
         ...prev,
         studentList: studentIds.map(s => s.name),

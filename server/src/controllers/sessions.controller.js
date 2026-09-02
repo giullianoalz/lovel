@@ -575,7 +575,23 @@ export const getSession = async (req, res, next) => {
       where: { id: req.params.id, ...scope },
       include: {
         class: {
-          include: { teacher: { select: { id: true, fullName: true } } },
+          include: {
+            teacher: { select: { id: true, fullName: true } },
+            // Every enrolment, not only the live ones — narrowed to this
+            // session's date by rosterOn() below. Without this the roster
+            // panel had to fall back to GET /classes, which has no idea what
+            // date it is being asked about and hands back today's list
+            // whatever session is open: a class reassigned or re-rostered
+            // since would show the modal a roster that never sat through it.
+            ...(isStaff ? {
+              enrollments: {
+                select: {
+                  status: true, enrolledAt: true, endedAt: true,
+                  student: { select: { id: true, fullName: true, age: true, allergies: true } },
+                },
+              },
+            } : {}),
+          },
         },
         // Names whoever taught this hour, when its class has changed hands
         // since. Overlaid onto class.teacher below.
@@ -607,6 +623,10 @@ export const getSession = async (req, res, next) => {
       session.class = { ...session.class, teacherId: session.teacher.id, teacher: session.teacher };
     }
     delete session.teacher;
+
+    if (session.class?.enrollments) {
+      session.class = { ...session.class, enrollments: rosterOn(session.class.enrollments, session.date) };
+    }
 
     res.json({ session });
   } catch (error) {
