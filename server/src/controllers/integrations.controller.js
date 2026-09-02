@@ -209,8 +209,18 @@ export const waveInvoiceBackfillPreview = async (req, res, next) => {
       return res.status(400).json({ error: 'Not Ready', message: 'Connect Wave and map both accounts before syncing.' });
     }
     const items = await previewInvoiceBackfill();
-    const total = items.reduce((s, i) => s + i.total, 0);
-    res.json({ count: items.length, total: total.toFixed(2), items });
+    const blocked = items.filter((i) => i.alreadyInWave);
+    const syncable = items.filter((i) => !i.alreadyInWave);
+    res.json({
+      count: items.length,
+      total: items.reduce((s, i) => s + i.total, 0).toFixed(2),
+      // Split out because these are the two different decisions: what will be
+      // pushed, and what needs a human because Wave already has that number.
+      syncableCount: syncable.length,
+      syncableTotal: syncable.reduce((s, i) => s + i.total, 0).toFixed(2),
+      blockedCount: blocked.length,
+      items,
+    });
   } catch (error) {
     next(error);
   }

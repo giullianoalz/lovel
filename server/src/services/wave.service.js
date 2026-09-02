@@ -431,13 +431,52 @@ const recordInvoicePayments = async (row, invoiceId, waveInvoiceId) => {
 };
 
 /**
+ * Every invoice number currently in Wave, as a Map of number -> {id, status}.
+ *
+ * This exists because Wave is NOT an empty book: invoices were filed there by
+ * hand for years (the EMA Step Up workflow did exactly that, which is why our
+ * LC-#### sequence was made to continue Wave's). Pushing an invoice whose
+ * number is already there would double-bill the family in the real accounts,
+ * so both the backfill and each individual sync check against this first.
+ * Requires the invoice:read scope.
+ */
+export const listWaveInvoiceNumbers = async () => {
+  const row = await getConnectionRow();
+  if (!row?.businessId) throw new Error('No Wave business selected.');
+  const byNumber = new Map();
+  let page = 1;
+  // Paginated: this business has years of history, well past one page.
+  for (;;) {
+    const data = await waveGraphql(
+      `query($businessId: ID!, $page: Int!) {
+        business(id: $businessId) {
+          invoices(page: $page, pageSize: 200) {
+            pageInfo { totalPages }
+            edges { node { id invoiceNumber status total { value } customer { name } } }
+          }
+        }
+      }`,
+      { businessId: row.businessId, page },
+    );
+    const conn = data.business?.invoices;
+    if (!conn) break;
+    for (const e of conn.edges) {
+      if (e.node?.invoiceNumber) byNumber.set(e.node.invoiceNumber, e.node);
+    }
+    if (page >= (conn.pageInfo?.totalPages || 1)) break;
+    page += 1;
+  }
+  return byNumber;
+};
+
+/**
  * Syncs one invoice to Wave as an approved (SAVED) invoice against the mapped
  * income account. Idempotent (skips if already synced) and never throws —
  * callers fire this after their own transaction commits and do not await
  * error handling; failures are recorded on the invoice for the admin to see
  * and retry from Settings > Integrations.
  */
-export const syncInvoiceToWave = async (invoiceId) => {
+export const syncInvoiceToWave = async (invoiceId, existingWaveNumbers = null) => {
   try {
     const status = await getConnectionStatus();
     if (!status.readyToSync) return;
@@ -467,6 +506,21 @@ export const syncInvoiceToWave = async (invoiceId) => {
     const email = recipient?.user?.email;
     if (!email) {
       await prisma.invoice.update({ where: { id: invoiceId }, data: { waveSyncError: 'No invoice-recipient email on file for this family.' } });
+      return;
+    }
+
+    // Never create a second Wave invoice under a number Wave already carries —
+    // years of invoices were filed there by hand, and duplicating one bills the
+    // family twice in the real books. Recorded as an error, not silently
+    // skipped: an admin has to decide whether the two are really the same
+    // document before anything links them.
+    const knownNumbers = existingWaveNumbers || await listWaveInvoiceNumbers();
+    const clash = knownNumbers.get(invoice.invoiceNumber);
+    if (clash) {
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { waveSyncError: `Wave already has an invoice numbered ${invoice.invoiceNumber} (${clash.customer?.name || 'unknown customer'}, $${clash.total?.value ?? '?'}). Not synced — resolve by hand so the family is not billed twice.` },
+      });
       return;
     }
 
@@ -542,25 +596,41 @@ const backfillCandidates = () => prisma.invoice.findMany({
   orderBy: { date: 'asc' },
 });
 
-/** What would be pushed to Wave, without pushing anything — for admin review. */
+/**
+ * What would be pushed to Wave, without pushing anything — for admin review.
+ * Flags each invoice whose number Wave already carries: those are the ones
+ * that would double-bill a family, and the run below refuses them.
+ */
 export const previewInvoiceBackfill = async () => {
-  const invoices = await backfillCandidates();
-  return invoices.map((inv) => ({
-    invoiceNumber: inv.invoiceNumber,
-    date: inv.date.toISOString().slice(0, 10),
-    family: inv.family?.name || null,
-    total: Number(inv.totalAmount),
-    amountPaid: Number(inv.amountPaid),
-    status: inv.status,
-  }));
+  const [invoices, knownNumbers] = await Promise.all([backfillCandidates(), listWaveInvoiceNumbers()]);
+  return invoices.map((inv) => {
+    const clash = knownNumbers.get(inv.invoiceNumber);
+    return {
+      invoiceNumber: inv.invoiceNumber,
+      date: inv.date.toISOString().slice(0, 10),
+      family: inv.family?.name || null,
+      total: Number(inv.totalAmount),
+      amountPaid: Number(inv.amountPaid),
+      status: inv.status,
+      // Present only when Wave already has this number — needs a human call.
+      alreadyInWave: clash
+        ? { customer: clash.customer?.name || null, total: clash.total?.value ?? null, status: clash.status }
+        : null,
+    };
+  });
 };
 
-/** Actually pushes every not-yet-synced invoice, sequentially, sharing syncInvoiceToWave's error handling. */
+/**
+ * Pushes every not-yet-synced invoice, sequentially, sharing syncInvoiceToWave's
+ * error handling. Wave's existing invoice numbers are read once up front rather
+ * than per invoice — one round trip instead of ~70, and a consistent snapshot.
+ */
 export const runInvoiceBackfill = async () => {
   const invoices = await backfillCandidates();
+  const knownNumbers = await listWaveInvoiceNumbers();
   const results = [];
   for (const inv of invoices) {
-    await syncInvoiceToWave(inv.id);
+    await syncInvoiceToWave(inv.id, knownNumbers);
     const after = await prisma.invoice.findUnique({
       where: { id: inv.id },
       select: { waveInvoiceId: true, waveSyncError: true },
