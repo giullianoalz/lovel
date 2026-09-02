@@ -9,6 +9,8 @@ import {
   waveDisconnect,
   waveSyncPreview,
   waveSyncRun,
+  waveInvoiceBackfillPreview,
+  waveInvoiceBackfillRun,
   driveStatus,
 } from '../controllers/integrations.controller.js';
 
@@ -25,6 +27,8 @@ router.put('/wave/accounts', authenticate, requireRole('ADMIN'), waveSaveAccount
 router.post('/wave/disconnect', authenticate, requireRole('ADMIN'), waveDisconnect);
 router.post('/wave/sync/preview', authenticate, requireRole('ADMIN'), waveSyncPreview);
 router.post('/wave/sync', authenticate, requireRole('ADMIN'), waveSyncRun);
+router.get('/wave/invoices/backfill/preview', authenticate, requireRole('ADMIN'), waveInvoiceBackfillPreview);
+router.post('/wave/invoices/backfill/run', authenticate, requireRole('ADMIN'), waveInvoiceBackfillRun);
 
 // GET /api/integrations/drive — is Drive actually usable from this process?
 // Answers the question a deploy leaves open: the token, the account it belongs
