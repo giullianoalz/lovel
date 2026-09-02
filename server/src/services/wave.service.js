@@ -377,6 +377,59 @@ const getOrCreateDefaultProduct = async (row) => {
 
 const dateOnly = (d) => new Date(d).toISOString().slice(0, 10);
 
+// Our PaymentMethod enum is broader than Wave's (scholarship methods, WAVE
+// itself for card payments already processed through Stripe, etc.) — anything
+// without a direct match falls back to OTHER rather than failing the sync.
+const WAVE_PAYMENT_METHODS = new Set(['BANK_TRANSFER', 'CASH', 'CHEQUE', 'CREDIT_CARD', 'OTHER', 'PAYPAL', 'UNSPECIFIED']);
+const mapPaymentMethod = (method) => (WAVE_PAYMENT_METHODS.has(method) ? method : 'OTHER');
+
+/**
+ * Records every not-yet-synced COMPLETED payment on an invoice as a manual
+ * payment against its just-created Wave invoice, and marks each Payment
+ * synced (reusing Payment.waveTransactionId/waveSyncedAt from the payment→
+ * income sync) so that separate feature never re-posts the same money as an
+ * unlinked income transaction. One payment's failure is logged and skipped
+ * rather than aborting the rest — a partial reconciliation beats none.
+ */
+const recordInvoicePayments = async (row, invoiceId, waveInvoiceId) => {
+  const payments = await prisma.payment.findMany({
+    where: { invoiceId, status: 'COMPLETED', amount: { gt: 0 }, waveSyncedAt: null },
+    orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
+  });
+  for (const payment of payments) {
+    try {
+      const data = await waveGraphql(
+        `mutation($input: InvoicePaymentCreateManualInput!) {
+          invoicePaymentCreateManual(input: $input) {
+            didSucceed
+            inputErrors { message code path }
+            invoicePayment { id }
+          }
+        }`,
+        {
+          input: {
+            invoiceId: waveInvoiceId,
+            paymentAccountId: row.anchorAccountId,
+            amount: Number(payment.amount).toFixed(2),
+            paymentDate: dateOnly(payment.paidAt || payment.createdAt),
+            paymentMethod: mapPaymentMethod(payment.method),
+            exchangeRate: '1',
+            memo: `Synced from app payment ${payment.id.slice(0, 8)}`,
+          },
+        },
+      );
+      const result = data.invoicePaymentCreateManual;
+      if (!result?.didSucceed) throw new Error(inputErrorMessage(result, 'Failed to record Wave payment.'));
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { waveTransactionId: result.invoicePayment.id, waveSyncedAt: new Date() },
+      });
+    } catch (error) {
+      console.error(`[Wave] Failed to record payment ${payment.id} against invoice ${waveInvoiceId}:`, error);
+    }
+  }
+};
+
 /**
  * Syncs one invoice to Wave as an approved (SAVED) invoice against the mapped
  * income account. Idempotent (skips if already synced) and never throws —
@@ -457,6 +510,15 @@ export const syncInvoiceToWave = async (invoiceId) => {
       where: { id: invoiceId },
       data: { waveInvoiceId: result.invoice.id, waveSyncedAt: new Date(), waveSyncError: null },
     });
+
+    // Record any money already collected on this invoice (credit applied at
+    // creation, or a payment made before this invoice happened to sync) as a
+    // manual payment against the Wave invoice — otherwise it sits in Wave as
+    // fully unpaid AR despite really being settled. This also marks the
+    // underlying Payment rows synced so the separate payment→income sync
+    // (Settings > Integrations "Sync income to Wave") never re-posts the same
+    // money as a second, unlinked income transaction.
+    await recordInvoicePayments(row, invoiceId, result.invoice.id);
   } catch (error) {
     console.error(`[Wave] Failed to sync invoice ${invoiceId}:`, error);
     await prisma.invoice.update({
@@ -464,4 +526,50 @@ export const syncInvoiceToWave = async (invoiceId) => {
       data: { waveSyncError: String(error.message || error).slice(0, 500) },
     }).catch(() => {});
   }
+};
+
+// ── Backfill (reconciliation) ───────────────────────────────────────────────
+// One-time-ish catch-up for invoices raised before this integration existed
+// (or that failed their automatic sync) — same syncInvoiceToWave underneath,
+// just run over every not-yet-synced invoice instead of one just created.
+
+const backfillCandidates = () => prisma.invoice.findMany({
+  where: { waveInvoiceId: null, status: { not: 'CANCELLED' } },
+  select: {
+    id: true, invoiceNumber: true, date: true, totalAmount: true, amountPaid: true, status: true,
+    family: { select: { name: true } },
+  },
+  orderBy: { date: 'asc' },
+});
+
+/** What would be pushed to Wave, without pushing anything — for admin review. */
+export const previewInvoiceBackfill = async () => {
+  const invoices = await backfillCandidates();
+  return invoices.map((inv) => ({
+    invoiceNumber: inv.invoiceNumber,
+    date: inv.date.toISOString().slice(0, 10),
+    family: inv.family?.name || null,
+    total: Number(inv.totalAmount),
+    amountPaid: Number(inv.amountPaid),
+    status: inv.status,
+  }));
+};
+
+/** Actually pushes every not-yet-synced invoice, sequentially, sharing syncInvoiceToWave's error handling. */
+export const runInvoiceBackfill = async () => {
+  const invoices = await backfillCandidates();
+  const results = [];
+  for (const inv of invoices) {
+    await syncInvoiceToWave(inv.id);
+    const after = await prisma.invoice.findUnique({
+      where: { id: inv.id },
+      select: { waveInvoiceId: true, waveSyncError: true },
+    });
+    results.push({
+      invoiceNumber: inv.invoiceNumber,
+      ok: Boolean(after?.waveInvoiceId),
+      error: after?.waveSyncError || null,
+    });
+  }
+  return results;
 };

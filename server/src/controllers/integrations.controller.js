@@ -11,6 +11,8 @@ import {
   saveAccountMapping,
   disconnect,
   createIncomeTransaction,
+  previewInvoiceBackfill,
+  runInvoiceBackfill,
 } from '../services/wave.service.js';
 
 const frontendUrl = () => (process.env.FRONTEND_URL || '').replace(/\/+$/, '');
@@ -189,6 +191,41 @@ export const waveSyncRun = async (req, res, next) => {
     }
 
     res.json({ ...results, attempted: payments.length });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── Invoice backfill (reconciliation) ───────────────────────────────────────
+// Catches up invoices raised before the automatic sync existed, or that
+// failed it — same underlying syncInvoiceToWave as every new invoice, just
+// run over the whole not-yet-synced backlog instead of one at a time.
+
+// GET /api/integrations/wave/invoices/backfill/preview
+export const waveInvoiceBackfillPreview = async (req, res, next) => {
+  try {
+    const status = await getConnectionStatus();
+    if (!status.readyToSync) {
+      return res.status(400).json({ error: 'Not Ready', message: 'Connect Wave and map both accounts before syncing.' });
+    }
+    const items = await previewInvoiceBackfill();
+    const total = items.reduce((s, i) => s + i.total, 0);
+    res.json({ count: items.length, total: total.toFixed(2), items });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/integrations/wave/invoices/backfill/run
+export const waveInvoiceBackfillRun = async (req, res, next) => {
+  try {
+    const status = await getConnectionStatus();
+    if (!status.readyToSync) {
+      return res.status(400).json({ error: 'Not Ready', message: 'Connect Wave and map both accounts before syncing.' });
+    }
+    const results = await runInvoiceBackfill();
+    const ok = results.filter((r) => r.ok).length;
+    res.json({ attempted: results.length, synced: ok, failed: results.length - ok, results });
   } catch (error) {
     next(error);
   }
