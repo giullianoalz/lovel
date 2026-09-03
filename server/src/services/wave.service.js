@@ -316,7 +316,8 @@ const inputErrorMessage = (result, fallback) =>
   (result?.inputErrors || []).map((e) => e.message).join('; ') || fallback;
 
 /** Finds a Wave Customer by email, creating one if none matches. */
-const findOrCreateCustomer = async (businessId, { email, name }) => {
+/** Read-only half of findOrCreateCustomer, for callers (the backfill preview) that must never write to Wave. */
+const findCustomerByEmail = async (businessId, email) => {
   const found = await waveGraphql(
     `query($businessId: ID!, $email: String) {
       business(id: $businessId) {
@@ -327,8 +328,12 @@ const findOrCreateCustomer = async (businessId, { email, name }) => {
     }`,
     { businessId, email },
   );
-  const existing = found.business?.customers?.edges?.[0]?.node;
-  if (existing) return existing.id;
+  return found.business?.customers?.edges?.[0]?.node?.id || null;
+};
+
+const findOrCreateCustomer = async (businessId, { email, name }) => {
+  const existingId = await findCustomerByEmail(businessId, email);
+  if (existingId) return existingId;
 
   const created = await waveGraphql(
     `mutation($input: CustomerCreateInput!) {
@@ -431,13 +436,24 @@ const recordInvoicePayments = async (row, invoiceId, waveInvoiceId) => {
 };
 
 /**
- * Every invoice number currently in Wave, as a Map of number -> {id, status}.
+ * The number a Wave-side invoice gets for one of ours.
  *
- * This exists because Wave is NOT an empty book: invoices were filed there by
- * hand for years (the EMA Step Up workflow did exactly that, which is why our
- * LC-#### sequence was made to continue Wave's). Pushing an invoice whose
- * number is already there would double-bill the family in the real accounts,
- * so both the backfill and each individual sync check against this first.
+ * Wave is NOT an empty book being handed to the app: William keeps filing
+ * invoices there by hand, in the app's own LC-#### sequence — that's why the
+ * two collided the moment this integration went live (LC-4392 in the app is
+ * a $15 Alzate invoice; LC-4392 in Wave, filed independently, is a $180
+ * invoice for a different family entirely). Reusing the bare app number would
+ * keep colliding forever, so every app-originated Wave invoice gets this
+ * prefix instead — guaranteed not to already exist, since nothing filed by
+ * hand has ever used it.
+ */
+const WAVE_INVOICE_PREFIX = 'LLE-';
+const waveInvoiceNumberFor = (appInvoiceNumber) => `${WAVE_INVOICE_PREFIX}${appInvoiceNumber}`;
+
+/**
+ * Every invoice number currently in Wave, as a Map of number -> {id, status}.
+ * Belt-and-suspenders alongside the LLE- prefix above: catches the case where
+ * this ran once already (or two admins raced) rather than a numbering clash.
  * Requires the invoice:read scope.
  */
 export const listWaveInvoiceNumbers = async () => {
@@ -467,6 +483,33 @@ export const listWaveInvoiceNumbers = async () => {
     page += 1;
   }
   return byNumber;
+};
+
+/**
+ * Looks for a Wave invoice already on file for this customer, dated the same
+ * day and for the exact same amount, under ANY invoice number — the pattern
+ * that surfaced auditing the backlog: William filing a charge by hand under
+ * Wave's own numbering the same day the app raised its own invoice for it.
+ * A narrow same-day match, not a fuzzy one: this business also has genuine
+ * repeat charges (siblings, monthly tuition) that share a customer and amount
+ * on different dates, which must NOT be flagged.
+ */
+const findPossibleDuplicateInvoice = async (businessId, customerId, invoice) => {
+  const day = dateOnly(invoice.date);
+  const data = await waveGraphql(
+    `query($businessId: ID!, $customerId: ID!, $start: Date!, $end: Date!) {
+      business(id: $businessId) {
+        invoices(page: 1, pageSize: 20, customerId: $customerId, invoiceDateStart: $start, invoiceDateEnd: $end) {
+          edges { node { invoiceNumber status invoiceDate total { value } } }
+        }
+      }
+    }`,
+    { businessId, customerId, start: day, end: day },
+  );
+  const target = Number(invoice.totalAmount);
+  const edges = data.business?.invoices?.edges || [];
+  const match = edges.find((e) => Math.abs(Number(e.node?.total?.value) - target) < 0.01);
+  return match?.node || null;
 };
 
 /**
@@ -509,23 +552,41 @@ export const syncInvoiceToWave = async (invoiceId, existingWaveNumbers = null) =
       return;
     }
 
-    // Never create a second Wave invoice under a number Wave already carries —
-    // years of invoices were filed there by hand, and duplicating one bills the
-    // family twice in the real books. Recorded as an error, not silently
-    // skipped: an admin has to decide whether the two are really the same
-    // document before anything links them.
+    const row = await getConnectionRow();
+    const customerId = await findOrCreateCustomer(row.businessId, { email, name: invoice.family.name });
+
+    const waveInvoiceNumber = waveInvoiceNumberFor(invoice.invoiceNumber);
     const knownNumbers = existingWaveNumbers || await listWaveInvoiceNumbers();
-    const clash = knownNumbers.get(invoice.invoiceNumber);
-    if (clash) {
+    const numberClash = knownNumbers.get(waveInvoiceNumber);
+    if (numberClash) {
+      // Belt-and-suspenders: the LLE- prefix should make this impossible on a
+      // first run, but not on a second one (retry after a crash, two admins
+      // racing) — recorded, not silently skipped, since this shouldn't happen.
       await prisma.invoice.update({
         where: { id: invoiceId },
-        data: { waveSyncError: `Wave already has an invoice numbered ${invoice.invoiceNumber} (${clash.customer?.name || 'unknown customer'}, $${clash.total?.value ?? '?'}). Not synced — resolve by hand so the family is not billed twice.` },
+        data: { waveSyncError: `Wave already has an invoice numbered ${waveInvoiceNumber} (${numberClash.customer?.name || 'unknown customer'}, $${numberClash.total?.value ?? '?'}). Not synced.` },
       });
       return;
     }
 
-    const row = await getConnectionRow();
-    const customerId = await findOrCreateCustomer(row.businessId, { email, name: invoice.family.name });
+    // William still files invoices in Wave by hand alongside this sync — that
+    // is the point (Wave is where the two are meant to cross when money
+    // actually lands). But it means the same charge can get written twice: he
+    // bills a family for something the app already billed, or vice versa. The
+    // signal this catches is the one found auditing the backlog before this
+    // shipped — same customer, same day, same amount, filed under an
+    // unrelated number (e.g. our LC-4531 $120 Donnelly === Wave's own
+    // LC-4524 $120 Donnelly, both dated 2026-09-02). A same-day exact-amount
+    // match is treated as that invoice, not a coincidence.
+    const possibleDuplicate = await findPossibleDuplicateInvoice(row.businessId, customerId, invoice);
+    if (possibleDuplicate) {
+      await prisma.invoice.update({
+        where: { id: invoiceId },
+        data: { waveSyncError: `Wave already has a same-day, same-amount invoice for this family: ${possibleDuplicate.invoiceNumber} ($${possibleDuplicate.total?.value ?? '?'}, ${possibleDuplicate.status}, ${possibleDuplicate.invoiceDate}). Not synced — looks like the same charge filed twice; confirm by hand before linking or overriding.` },
+      });
+      return;
+    }
+
     const productId = await getOrCreateDefaultProduct(row);
 
     const items = invoice.lines.length > 0
@@ -550,7 +611,7 @@ export const syncInvoiceToWave = async (invoiceId, existingWaveNumbers = null) =
           businessId: row.businessId,
           customerId,
           status: 'SAVED',
-          invoiceNumber: invoice.invoiceNumber,
+          invoiceNumber: waveInvoiceNumber,
           invoiceDate: dateOnly(invoice.date),
           dueDate: invoice.dueDate ? dateOnly(invoice.dueDate) : undefined,
           items,
@@ -591,33 +652,58 @@ const backfillCandidates = () => prisma.invoice.findMany({
   where: { waveInvoiceId: null, status: { not: 'CANCELLED' } },
   select: {
     id: true, invoiceNumber: true, date: true, totalAmount: true, amountPaid: true, status: true,
-    family: { select: { name: true } },
+    family: {
+      select: {
+        name: true,
+        members: { select: { isInvoiceRecipient: true, user: { select: { email: true } } } },
+      },
+    },
   },
   orderBy: { date: 'asc' },
 });
 
 /**
- * What would be pushed to Wave, without pushing anything — for admin review.
- * Flags each invoice whose number Wave already carries: those are the ones
- * that would double-bill a family, and the run below refuses them.
+ * What would be pushed to Wave, without pushing or creating anything there —
+ * for admin review before runInvoiceBackfill touches the real books. Runs the
+ * exact same two checks syncInvoiceToWave does (a number clash on the LLE-
+ * prefixed number, and a same-customer/same-day/same-amount match under any
+ * number — the pattern William filing a charge by hand surfaces as), using
+ * the read-only customer lookup so nothing gets created during a preview.
  */
 export const previewInvoiceBackfill = async () => {
-  const [invoices, knownNumbers] = await Promise.all([backfillCandidates(), listWaveInvoiceNumbers()]);
-  return invoices.map((inv) => {
-    const clash = knownNumbers.get(inv.invoiceNumber);
-    return {
+  const [invoices, knownNumbers, row] = await Promise.all([
+    backfillCandidates(), listWaveInvoiceNumbers(), getConnectionRow(),
+  ]);
+  const out = [];
+  for (const inv of invoices) {
+    const item = {
       invoiceNumber: inv.invoiceNumber,
       date: inv.date.toISOString().slice(0, 10),
       family: inv.family?.name || null,
       total: Number(inv.totalAmount),
       amountPaid: Number(inv.amountPaid),
       status: inv.status,
-      // Present only when Wave already has this number — needs a human call.
-      alreadyInWave: clash
-        ? { customer: clash.customer?.name || null, total: clash.total?.value ?? null, status: clash.status }
-        : null,
+      alreadyInWave: null,
+      possibleDuplicate: null,
     };
-  });
+    const clash = knownNumbers.get(waveInvoiceNumberFor(inv.invoiceNumber));
+    if (clash) {
+      item.alreadyInWave = { customer: clash.customer?.name || null, total: clash.total?.value ?? null, status: clash.status };
+      out.push(item);
+      continue;
+    }
+    const recipient = inv.family?.members.find((m) => m.isInvoiceRecipient) || inv.family?.members[0];
+    const email = recipient?.user?.email;
+    const customerId = email ? await findCustomerByEmail(row.businessId, email) : null;
+    if (customerId) {
+      const dup = await findPossibleDuplicateInvoice(row.businessId, customerId, inv);
+      if (dup) {
+        item.possibleDuplicate = { invoiceNumber: dup.invoiceNumber, total: dup.total?.value ?? null, status: dup.status, date: dup.invoiceDate };
+      }
+    }
+    out.push(item);
+  }
+  return out;
 };
 
 /**
