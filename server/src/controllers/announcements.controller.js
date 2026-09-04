@@ -6,6 +6,7 @@ import { invalidate } from '../middleware/cache.js';
 import {
   drive, driveAuthMode, uploadFileToDrive, downloadFileWithType,
 } from '../config/drive.js';
+import { notifyAdmins, sendNotification } from '../jobs/notification.helper.js';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'announcements');
 
@@ -83,6 +84,54 @@ const storeMediaFiles = async (files, startPosition = 0) => {
 };
 
 
+/**
+ * Everything that happens the moment a post actually goes up: the live feed
+ * gets it, and everyone it was aimed at gets a push.
+ *
+ * Split out of createAnnouncement because publishing is no longer the same
+ * moment as writing. A teacher's post is written now and published when an
+ * admin says so, and the audience must hear about it then — not at the moment
+ * nobody could see it yet.
+ */
+const publishAnnouncement = (req, announcement) => {
+  const io = req.app.get('io');
+  if (io) io.emit('new_announcement', announcement);
+
+  const audience = announcement.targetAudience;
+  const roleFilter = audience === 'parent' ? 'PARENT' : audience === 'teacher' ? 'TEACHER' : null;
+  prisma.user.findMany({
+    where: {
+      status: 'ACTIVE',
+      ...(announcement.authorId ? { id: { not: announcement.authorId } } : {}),
+      // Secondary roles count too, or a teacher who is also a parent would
+      // never be pushed the announcements aimed at families.
+      ...(roleFilter
+        ? { OR: [{ role: roleFilter }, { secondaryRoles: { has: roleFilter } }] }
+        : {}),
+    },
+    select: { id: true },
+  }).then(recipients => {
+    import('../utils/pushNotifications.js').then(({ sendPushNotification }) => {
+      sendPushNotification(
+        recipients.map(r => r.id),
+        `📣 ${announcement.title}`,
+        announcement.body,
+        { type: 'ACADEMY_FEED', announcementId: announcement.id, link: '/feed' }
+      );
+    });
+  }).catch(() => {});
+};
+
+/**
+ * Who may put a post straight on the board, and who is filing a draft.
+ *
+ * An admin publishes; anyone else on staff submits. The rule is the same one
+ * that governs invitations and invoices here — nothing reaches families that an
+ * admin has not read first — so the answer is exactly "is this person an
+ * admin", not "which screen did they use".
+ */
+export const publishesDirectly = (user) => hasRole(user, 'ADMIN');
+
 export const createAnnouncement = async (req, res, next) => {
   try {
     const { title, body, targetAudience, category, expiresAt, isPinned } = req.body;
@@ -93,6 +142,7 @@ export const createAnnouncement = async (req, res, next) => {
 
     // Only admins may pin a post to the top of the feed.
     const canPin = hasRole(req.user, 'ADMIN');
+    const autoApprove = publishesDirectly(req.user);
     const files = req.files || [];
 
     const { rows: mediaRows, warning: mediaWarning } = await storeMediaFiles(files);
@@ -110,6 +160,9 @@ export const createAnnouncement = async (req, res, next) => {
         isPinned: canPin && (isPinned === 'true' || isPinned === true),
         expiresAt: expiresAt ? new Date(expiresAt) : null,
         authorId: req.user.id,
+        status: autoApprove ? 'APPROVED' : 'PENDING',
+        reviewedById: autoApprove ? req.user.id : null,
+        reviewedAt: autoApprove ? new Date() : null,
         media: mediaRows.length > 0 ? { create: mediaRows } : undefined,
       },
       include: {
@@ -120,37 +173,25 @@ export const createAnnouncement = async (req, res, next) => {
 
     invalidate('announcements:*'); // evict all users' announcement caches
 
-    const io = req.app.get('io');
-    if (io) io.emit('new_announcement', announcement);
-
-    // Push notification to everyone in the target audience, so parents/staff
-    // find out even if they don't have the app open.
-    const audience = announcement.targetAudience;
-    const roleFilter = audience === 'parent' ? 'PARENT' : audience === 'teacher' ? 'TEACHER' : null;
-    prisma.user.findMany({
-      where: {
-        status: 'ACTIVE',
-        id: { not: req.user.id },
-        // Secondary roles count too, or a teacher who is also a parent would
-        // never be pushed the announcements aimed at families.
-        ...(roleFilter
-          ? { OR: [{ role: roleFilter }, { secondaryRoles: { has: roleFilter } }] }
-          : {}),
-      },
-      select: { id: true },
-    }).then(recipients => {
-      import('../utils/pushNotifications.js').then(({ sendPushNotification }) => {
-        sendPushNotification(
-          recipients.map(r => r.id),
-          `📣 ${announcement.title}`,
-          announcement.body,
-          { type: 'ACADEMY_FEED', announcementId: announcement.id, link: '/feed' }
-        );
-      });
-    }).catch(() => {});
+    if (autoApprove) {
+      publishAnnouncement(req, announcement);
+    } else {
+      // Nobody but the author and the admins can see it yet, so the queue has
+      // to come to them rather than wait to be noticed.
+      notifyAdmins({
+        type: 'ANNOUNCEMENT_PENDING',
+        title: '📝 Announcement waiting for approval',
+        message: `${req.user.fullName} submitted "${announcement.title}".`,
+        referenceType: 'announcement',
+        referenceId: announcement.id,
+        io: req.app.get('io'),
+      }).catch(() => {});
+    }
 
     res.status(201).json({
-      message: 'Announcement created successfully',
+      message: autoApprove
+        ? 'Announcement created successfully'
+        : 'Submitted for admin approval. It goes up once an admin approves it.',
       announcement,
       ...(mediaWarning && { mediaWarning }),
     });
@@ -194,6 +235,13 @@ export const updateAnnouncement = async (req, res, next) => {
     const canPin = hasRole(req.user, 'ADMIN');
     const newFiles = req.files || [];
 
+    // An author who can't publish can't edit their way past the review either:
+    // approving a post about the open house and finding it now says something
+    // else is exactly what the approval is meant to prevent. Their edit sends
+    // the post back to PENDING — including one that was rejected, which is the
+    // normal way to answer the note and resubmit.
+    const returnsToQueue = !publishesDirectly(req.user);
+
     // Start at 1000 so additions land after whatever the post already had.
     const { rows: mediaRows, warning: mediaWarning } = await storeMediaFiles(newFiles, 1000);
 
@@ -212,6 +260,12 @@ export const updateAnnouncement = async (req, res, next) => {
         ...(targetAudience !== undefined && { targetAudience }),
         ...(isPinned    !== undefined && canPin && { isPinned: isPinned === 'true' || isPinned === true }),
         ...(mediaRows.length > 0 && { media: { create: mediaRows } }),
+        ...(returnsToQueue && {
+          status: 'PENDING',
+          reviewedById: null,
+          reviewedAt: null,
+          reviewNote: null,
+        }),
       },
       include: {
         author: { select: { fullName: true, role: true } },
@@ -220,8 +274,22 @@ export const updateAnnouncement = async (req, res, next) => {
     });
 
     invalidate('announcements:*');
+
+    if (returnsToQueue) {
+      notifyAdmins({
+        type: 'ANNOUNCEMENT_PENDING',
+        title: '📝 Announcement waiting for approval',
+        message: `${req.user.fullName} updated "${updated.title}" and resubmitted it.`,
+        referenceType: 'announcement',
+        referenceId: updated.id,
+        io: req.app.get('io'),
+      }).catch(() => {});
+    }
+
     res.json({
-      message: 'Announcement updated.',
+      message: returnsToQueue
+        ? 'Saved and sent back for admin approval.'
+        : 'Announcement updated.',
       announcement: updated,
       ...(mediaWarning && { mediaWarning }),
     });
@@ -230,17 +298,38 @@ export const updateAnnouncement = async (req, res, next) => {
   }
 };
 
+/**
+ * Which posts this account may pull out of the feed.
+ *
+ * Audience is matched against every role the account holds, so a teacher who is
+ * also a parent sees both the staff feed and the one meant for families.
+ *
+ * Admins get the board and the queue in one list — a post awaiting review sits
+ * in place with its banner, so approving it happens where they were already
+ * looking rather than on a second screen they have to remember to open.
+ *
+ * Everyone else gets what is approved and aimed at them, plus their own
+ * submissions whatever state those are in: a teacher has to be able to watch
+ * their post wait, and read the note if it comes back.
+ */
+export const feedVisibilityWhere = (user) =>
+  hasRole(user, 'ADMIN')
+    ? {}
+    : {
+        OR: [
+          {
+            status: 'APPROVED',
+            targetAudience: { in: ['all', ...allRoles(user).map(r => r.toLowerCase())] },
+          },
+          { authorId: user.id },
+        ],
+      };
+
 export const listAnnouncements = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    
-    // Matched against every role the account holds, so a teacher who is also a
-    // parent sees both the staff feed and the one meant for families.
-    const baseWhere = hasRole(req.user, 'ADMIN')
-      ? {}
-      : {
-          targetAudience: { in: ['all', ...allRoles(req.user).map(r => r.toLowerCase())] },
-        };
+
+    const baseWhere = feedVisibilityWhere(req.user);
 
     const announcements = await prisma.announcement.findMany({
       where: {
@@ -316,10 +405,16 @@ export const markAnnouncementRead = async (req, res, next) => {
  * answer as reading, so a "staff only" post can't be commented on — or read
  * back — by a parent who guessed the id.
  */
-const canSeeAnnouncement = (user, announcement) =>
+export const canSeeAnnouncement = (user, announcement) =>
   hasRole(user, 'ADMIN') ||
-  announcement.targetAudience === 'all' ||
-  allRoles(user).map(r => r.toLowerCase()).includes(announcement.targetAudience);
+  // Its author, whatever state it is in — they wrote it and may be waiting on
+  // it. For everyone else an unapproved post does not exist yet: it has not
+  // been read by an admin, so it is not on the board and cannot be replied to.
+  announcement.authorId === user.id ||
+  (announcement.status === 'APPROVED' && (
+    announcement.targetAudience === 'all' ||
+    allRoles(user).map(r => r.toLowerCase()).includes(announcement.targetAudience)
+  ));
 
 /**
  * GET /api/announcements/media/:mediaId/file
@@ -333,7 +428,7 @@ export const getAnnouncementMediaFile = async (req, res, next) => {
 
     const media = await prisma.announcementMedia.findUnique({
       where: { id: mediaId },
-      include: { announcement: { select: { targetAudience: true } } },
+      include: { announcement: { select: { targetAudience: true, status: true, authorId: true } } },
     });
     if (!media) return res.status(404).json({ error: 'Not Found' });
     // 404 rather than 403, as everywhere else here: whether a staff-only post
@@ -446,6 +541,109 @@ export const deleteAnnouncementComment = async (req, res, next) => {
     if (io) io.emit('announcement_comment_deleted', { announcementId: id, commentId });
 
     res.json({ message: 'Reply removed.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/announcements/:id/review
+ * An admin says yes or no to a submitted post. Body: { decision: 'approve' |
+ * 'reject', note? }.
+ *
+ * Approving is what publishes: only here does the audience get pushed, and
+ * `publishedAt` is reset to now so the post appears at the top of the feed at
+ * the moment it becomes true, not at the moment it was drafted.
+ *
+ * Rejecting keeps the post. The author sees the note and edits, which puts it
+ * back in the queue — a rejection is a round of feedback, not a deletion.
+ */
+export const reviewAnnouncement = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const decision = String(req.body?.decision || '').toLowerCase();
+    const note = (req.body?.note || '').trim() || null;
+
+    if (decision !== 'approve' && decision !== 'reject') {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: "decision must be 'approve' or 'reject'.",
+      });
+    }
+
+    const existing = await prisma.announcement.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ error: 'Not Found' });
+
+    // Re-approving something already on the board would push the whole academy
+    // a second time for a post they have already read.
+    if (existing.status === 'APPROVED' && decision === 'approve') {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'This post is already published.',
+      });
+    }
+
+    const approved = decision === 'approve';
+    const announcement = await prisma.announcement.update({
+      where: { id },
+      data: {
+        status: approved ? 'APPROVED' : 'REJECTED',
+        reviewedById: req.user.id,
+        reviewedAt: new Date(),
+        reviewNote: note,
+        ...(approved && { publishedAt: new Date() }),
+      },
+      include: {
+        author: { select: { id: true, fullName: true, role: true } },
+        media: { orderBy: { position: 'asc' } },
+      },
+    });
+
+    invalidate('announcements:*');
+
+    if (approved) publishAnnouncement(req, announcement);
+
+    // The author is told either way — waiting on silence is the thing that
+    // makes an approval step feel like a wall.
+    if (announcement.authorId && announcement.authorId !== req.user.id) {
+      sendNotification({
+        userId: announcement.authorId,
+        type: 'ANNOUNCEMENT_REVIEWED',
+        title: approved ? '✅ Your announcement is live' : '↩️ Your announcement needs changes',
+        message: approved
+          ? `"${announcement.title}" was approved and is on the board.`
+          : `"${announcement.title}" was sent back${note ? `: ${note}` : '.'}`,
+        referenceType: 'announcement',
+        referenceId: announcement.id,
+        link: '/feed',
+      }).catch(() => {});
+    }
+
+    res.json({
+      message: approved ? 'Announcement approved and published.' : 'Announcement sent back to its author.',
+      announcement,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/announcements/pending
+ * The admin's queue, oldest first — the one that has waited longest is the one
+ * most likely to be about something happening tomorrow.
+ */
+export const listPendingAnnouncements = async (req, res, next) => {
+  try {
+    const announcements = await prisma.announcement.findMany({
+      where: { status: 'PENDING' },
+      include: {
+        author: { select: { id: true, fullName: true, role: true } },
+        media: { orderBy: { position: 'asc' } },
+      },
+      orderBy: { publishedAt: 'asc' },
+    });
+    res.json({ announcements, count: announcements.length });
   } catch (error) {
     next(error);
   }

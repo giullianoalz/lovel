@@ -93,6 +93,7 @@ model User {
   // single source of truth for "don't post this kid," not two.
   noPhotosOverride       Boolean                   @default(false) @map("no_photos_override")
   authoredAnnouncements  Announcement[]
+  reviewedAnnouncements  Announcement[]      @relation("AnnouncementReviewer")
   attendance             Attendance[]
   doorEventsAsStudent    AttendanceEvent[]         @relation("DoorEventStudent")
   doorEventsRecorded     AttendanceEvent[]         @relation("DoorEventStaff")
@@ -1145,15 +1146,27 @@ model Announcement {
   category       String              @default("general") @map("category") @db.VarChar(30)
   imageUrl       String?             @map("image_url")
   isPinned       Boolean             @default(false) @map("is_pinned")
+  // 'PENDING' | 'APPROVED' | 'REJECTED'. A teacher's post waits for an admin;
+  // an admin's own post is approved as it is written, because the review this
+  // exists for has already happened. Rows written before the review existed
+  // are APPROVED for the same reason.
+  status         String              @default("APPROVED") @db.VarChar(10)
+  reviewedById   String?             @map("reviewed_by_id") @db.Uuid
+  reviewedAt     DateTime?           @map("reviewed_at") @db.Timestamptz(6)
+  // Why it was turned down, in the admin's words. The author sees it, so the
+  // post can be fixed rather than rewritten from memory.
+  reviewNote     String?             @map("review_note")
   publishedAt    DateTime            @default(now()) @map("published_at") @db.Timestamptz(6)
   expiresAt      DateTime?           @map("expires_at") @db.Timestamptz(6)
   author         User?               @relation(fields: [authorId], references: [id])
+  reviewedBy     User?               @relation("AnnouncementReviewer", fields: [reviewedById], references: [id])
   reads          AnnouncementRead[]
   media          AnnouncementMedia[]
   comments       AnnouncementComment[]
 
   @@index([targetAudience])
   @@index([publishedAt])
+  @@index([status])
   @@map("announcements")
 }
 
