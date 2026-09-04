@@ -28,13 +28,14 @@ const resolveParams = (descriptor, stored = {}) => {
 };
 
 // Keep only audience values that are both globally valid and allowed for this
-// event; fall back to the event's default audience if nothing valid remains.
+// event. A stored empty array is an admin who unchecked every recipient chip —
+// the settings screen says in as many words that the notification then won't be
+// sent, so it has to mean "nobody", not "back to the catalog default". Only a
+// missing or non-array value (a row that never stored an audience) falls back.
 const resolveAudience = (descriptor, stored) => {
   const allowed = descriptor.allowedAudience || AUDIENCES;
-  const filtered = Array.isArray(stored)
-    ? [...new Set(stored.filter((a) => allowed.includes(a)))]
-    : null;
-  return filtered && filtered.length ? filtered : [...descriptor.defaults.audience];
+  if (!Array.isArray(stored)) return [...descriptor.defaults.audience];
+  return [...new Set(stored.filter((a) => allowed.includes(a)))];
 };
 
 // Same shape as resolveAudience, for delivery channels. An empty/invalid stored

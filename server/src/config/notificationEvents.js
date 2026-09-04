@@ -132,6 +132,16 @@ export const NOTIFICATION_EVENTS = [
     ],
   },
   {
+    key: 'SUPPLY_REQUEST',
+    label: 'New supply request',
+    description: 'Sent when a teacher submits a lesson plan that asks for supplies to be bought.',
+    category: null,
+    defaults: { enabled: true, audience: ['ADMINS'], channels: ['IN_APP'] },
+    allowedAudience: ['ADMINS'],
+    allowedChannels: ['IN_APP', 'EMAIL', 'SMS'],
+    params: [],
+  },
+  {
     key: 'NEW_INVOICE',
     label: 'New invoice available',
     description: 'Sent to a parent when a new invoice is emailed to them.',
