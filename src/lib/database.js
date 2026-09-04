@@ -344,6 +344,36 @@ export const database = {
     return response.data;
   },
 
+  // --- Closures: the days the academy does not open ---
+  fetchClosures: async () => {
+    const response = await api.get('/closures');
+    return response.data;
+  },
+
+  /** What closing these days would cost, asked before anything is written. */
+  previewClosure: async ({ startDate, endDate }) => {
+    const params = new URLSearchParams({ startDate });
+    if (endDate) params.set('endDate', endDate);
+    const response = await api.get(`/closures/preview?${params}`);
+    return response.data;
+  },
+
+  createClosure: async (payload) => {
+    const response = await api.post('/closures', payload);
+    return response.data;
+  },
+
+  deleteClosure: async (id) => {
+    const response = await api.delete(`/closures/${id}`);
+    return response.data;
+  },
+
+  /** Closed days that still have classes sitting on the calendar. */
+  fetchClosureConflicts: async () => {
+    const response = await api.get('/closures/conflicts');
+    return response.data;
+  },
+
   // --- Work shifts: paid hours that aren't a class ---
   fetchShifts: async ({ from, to, staffId, status } = {}) => {
     const params = new URLSearchParams();

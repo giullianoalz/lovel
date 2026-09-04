@@ -16,6 +16,7 @@ import prisma from '../config/database.js';
 import { resolveMeetingUrl } from '../utils/meetingLink.js';
 import { academyNowParts } from '../utils/academyTime.js';
 import { CANCELLATION_WINDOW_HOURS } from '../constants/cancellationPolicy.js';
+import { loadClosedDates } from './closures.service.js';
 
 /**
  * The categories, if the table is empty or unreachable.
@@ -120,10 +121,11 @@ export const sessionHours = (entry) => {
 export const freezeSessionRates = async (sessionIds) => {
   if (!sessionIds?.length) return 0;
   try {
+    const closedDates = await loadClosedDates();
     const [categoryList, sessions] = await Promise.all([
       loadPayCategories(),
       prisma.session.findMany({
-        where: { id: { in: sessionIds }, ...payableSessionWhere(), paidRate: null },
+        where: { id: { in: sessionIds }, ...payableSessionWhere(new Date(), closedDates), paidRate: null },
         select: {
           id: true, meetingUrl: true, payCategoryKey: true, payRateOverride: true,
           // The substitute who covered this hour, when there was one. Their
@@ -204,10 +206,14 @@ export const freezeSessionRates = async (sessionIds) => {
 export const freezeShiftRates = async (shiftIds) => {
   if (!shiftIds?.length) return 0;
   try {
+    const closedDates = await loadClosedDates();
     const [categoryList, shifts] = await Promise.all([
       loadPayCategories(),
       prisma.workShift.findMany({
-        where: { id: { in: shiftIds }, status: { not: 'CANCELLED' }, absentAt: null, paidRate: null, ...elapsed() },
+        where: {
+          id: { in: shiftIds }, status: { not: 'CANCELLED' }, absentAt: null, paidRate: null,
+          ...elapsed(), ...andOpenDays(closedDates),
+        },
         select: {
           id: true, payCategoryKey: true, payRateOverride: true,
           staff: {
@@ -427,6 +433,52 @@ const stillWorked = {
 };
 
 /**
+ * Drops the days the academy did not open.
+ *
+ * Pay comes off the calendar, which is right for a working week and wrong for
+ * Thanksgiving: the meetings stay on the timetable, nobody comes in, and
+ * without this every one of them pays. The days come from `academy_closures`
+ * (see closures.service.js) rather than a hardcoded list, because which days a
+ * tutoring centre closes is a decision, not a fact about the calendar — plenty
+ * of them deliberately open on the public holidays when the schools shut.
+ *
+ * Returned as conditions to spread into an `AND` rather than as a `date` key,
+ * so it composes with the date ranges the callers already set instead of
+ * overwriting them. An empty list contributes nothing, which is what every
+ * database looked like before this table existed.
+ */
+const openDaysOnly = (closedDates = []) =>
+  (closedDates.length ? [{ date: { notIn: closedDates } }] : []);
+
+/**
+ * The same thing as a spreadable key, for the builders that have no AND array
+ * of their own.
+ *
+ * Contributes nothing at all when no day is closed — not an empty AND, not an
+ * empty notIn. With the table empty every filter here is byte-identical to the
+ * one that ran before this feature existed, which is the promise that shipping
+ * it moves nobody's pay by a cent.
+ */
+const andOpenDays = (closedDates = []) =>
+  (closedDates.length ? { AND: openDaysOnly(closedDates) } : {});
+
+/**
+ * The same rule as a `date` filter rather than an `AND` entry, for the places
+ * that fetch a range and split it in memory afterwards — the shift includes
+ * below. Closed days are left out of the fetch entirely, so they cannot show up
+ * as dropped hours either: a shift on a day the academy was shut is not an
+ * absence, it is a shift that never existed.
+ *
+ * `notIn` is omitted rather than passed empty, because an empty `notIn` is a
+ * degenerate filter and there is no reason to make the database evaluate one.
+ */
+const openRange = (startDate, endDate, closedDates = []) => ({
+  gte: startDate,
+  lte: endDate,
+  ...(closedDates.length ? { notIn: closedDates } : {}),
+});
+
+/**
  * Which sessions count as worked: the ones whose hour has passed.
  *
  * Pay comes off the calendar. Booking somebody for an hour is the act that
@@ -443,19 +495,24 @@ const stillWorked = {
  *   1. `elapsed` — next Tuesday's class earns nothing today;
  *   2. `stillWorked` — cancelled means unpaid, unless it was cancelled too late;
  *   3. `absentAt` — the teacher did not turn up. The one hand-operated switch
- *      left in the whole rule, set from the calendar, and it beats the rest.
+ *      left in the whole rule, set from the calendar, and it beats the rest;
+ *   4. `openDaysOnly` — the academy was shut that day, so nobody worked it.
  *
- * `AND`, because two of the three are OR-groups and one object cannot hold two
- * `OR` keys.
+ * `AND`, because two of them are OR-groups and one object cannot hold two `OR`
+ * keys.
+ *
+ * `closedDates` is passed in rather than read here: this stays a pure function
+ * so the callers fetch the list once for a whole month instead of once per
+ * session, and so the tests can state the closed days outright.
  */
-export const payableSessionWhere = (now = new Date()) => ({
+export const payableSessionWhere = (now = new Date(), closedDates = []) => ({
   absentAt: null,
-  AND: [elapsed(now), stillWorked],
+  AND: [elapsed(now), stillWorked, ...openDaysOnly(closedDates)],
 });
 
-export const paidSessionsWhere = (startDate, endDate, now = new Date()) => ({
+export const paidSessionsWhere = (startDate, endDate, now = new Date(), closedDates = []) => ({
   date: { gte: startDate, lte: endDate },
-  ...payableSessionWhere(now),
+  ...payableSessionWhere(now, closedDates),
 });
 
 /**
@@ -467,10 +524,13 @@ export const paidSessionsWhere = (startDate, endDate, now = new Date()) => ({
  * payroll screen shows every one of them, with the reason given and the name of
  * whoever marked it, next to the hours they cost.
  */
-export const absentSessionsWhere = (startDate, endDate, now = new Date()) => ({
+export const absentSessionsWhere = (startDate, endDate, now = new Date(), closedDates = []) => ({
   date: { gte: startDate, lte: endDate },
   absentAt: { not: null },
   ...elapsed(now),
+  // An absence on a day the academy was shut is not an absence, and listing it
+  // would put "did not turn up" next to somebody's name for a holiday.
+  ...andOpenDays(closedDates),
 });
 
 /**
@@ -481,11 +541,12 @@ export const absentSessionsWhere = (startDate, endDate, now = new Date()) => ({
  * Shifts have no late-cancellation bargain to honour — nobody holds a front
  * desk slot open for a student — so this is the plain version of the rule.
  */
-export const paidShiftsWhere = (startDate, endDate, now = new Date()) => ({
+export const paidShiftsWhere = (startDate, endDate, now = new Date(), closedDates = []) => ({
   date: { gte: startDate, lte: endDate },
   status: { not: 'CANCELLED' },
   absentAt: null,
   ...elapsed(now),
+  ...andOpenDays(closedDates),
 });
 
 /**
@@ -534,18 +595,24 @@ export const isShiftPayable = (shift, now = new Date()) => {
  * cancellation that is still owed — a slot nobody can refill is a slot the
  * teacher is still holding, whether it was cancelled yesterday or will be
  * cancelled next week.
+ *
+ * A day already declared closed drops out too, which is the point of declaring
+ * one ahead of time: December's forecast should not include the week nobody is
+ * coming in.
  */
-export const scheduledSessionsWhere = (startDate, endDate) => ({
+export const scheduledSessionsWhere = (startDate, endDate, closedDates = []) => ({
   date: { gte: startDate, lte: endDate },
   absentAt: null,
   ...stillWorked,
+  ...andOpenDays(closedDates),
 });
 
 /** The shift half of scheduledSessionsWhere. Same rule, no late-cancellation bargain. */
-export const scheduledShiftsWhere = (startDate, endDate) => ({
+export const scheduledShiftsWhere = (startDate, endDate, closedDates = []) => ({
   date: { gte: startDate, lte: endDate },
   status: { not: 'CANCELLED' },
   absentAt: null,
+  ...andOpenDays(closedDates),
 });
 
 /**
@@ -751,7 +818,10 @@ const summariseByCategory = (lines, categories) => {
  */
 export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) => {
   const [startDate, endDate] = monthRange(targetMonth, targetYear);
-  const paidSessions = paidSessionsWhere(startDate, endDate);
+  // Fetched once for the whole month: the closed days are the same for every
+  // query below, and asking per session would be a round trip per class.
+  const closedDates = await loadClosedDates();
+  const paidSessions = paidSessionsWhere(startDate, endDate, new Date(), closedDates);
 
   const [categoryList, teacher, absences, handedOver] = await Promise.all([
     loadPayCategories(),
@@ -806,7 +876,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
         // have to appear on the statement too, as hours that were dropped and
         // by whom. Split by isShiftPayable below.
         workShifts: {
-          where: { date: { gte: startDate, lte: endDate } },
+          where: { date: openRange(startDate, endDate, closedDates) },
           select: {
             id: true, date: true, startTime: true, endTime: true, title: true, status: true,
             payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true, notes: true,
@@ -828,7 +898,7 @@ export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) 
     // because "this person's hours" spans both the classes they own and the
     // ones they cover.
     prisma.session.findMany({
-      where: { AND: [absentSessionsWhere(startDate, endDate), taughtByWhere(teacherId)] },
+      where: { AND: [absentSessionsWhere(startDate, endDate, new Date(), closedDates), taughtByWhere(teacherId)] },
       select: {
         id: true, date: true, startTime: true, endTime: true,
         absentAt: true, absentReason: true,
@@ -1077,13 +1147,14 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
   // roster, the rate cascade, the per-category rollup — is the same work, so
   // the mode swaps the filter and nothing else.
   const scheduled = mode === 'scheduled';
+  const closedDates = await loadClosedDates();
   const paidSessions = scheduled
-    ? scheduledSessionsWhere(startDate, endDate)
-    : paidSessionsWhere(startDate, endDate);
+    ? scheduledSessionsWhere(startDate, endDate, closedDates)
+    : paidSessionsWhere(startDate, endDate, new Date(), closedDates);
   const countsAsWorked = scheduled
     ? (shift) => shift.status !== 'CANCELLED' && !shift.absentAt
     : (shift) => isShiftPayable(shift);
-  const absentSessions = absentSessionsWhere(startDate, endDate);
+  const absentSessions = absentSessionsWhere(startDate, endDate, new Date(), closedDates);
 
   const [categoryList, staff, absences, stamped] = await Promise.all([
     loadPayCategories(),
@@ -1176,7 +1247,7 @@ const computePayrollSummaryRange = async (startDate, endDate, { includeSalary = 
         // Every shift in the range, not only the payable ones: the absent ones
         // belong on the screen as dropped hours. Split by isShiftPayable below.
         workShifts: {
-          where: { date: { gte: startDate, lte: endDate } },
+          where: { date: openRange(startDate, endDate, closedDates) },
           select: {
             id: true, date: true, startTime: true, endTime: true, title: true, status: true,
             payCategoryKey: true, payRateOverride: true, paidRate: true, paidRateSource: true,

@@ -1,0 +1,325 @@
+/* Days the academy does not open. One row per closed day, with the cost of
+   closing shown while the form is still open — closing a day subtracts from
+   somebody's pay, so the number belongs before the decision, not after it. */
+
+/* `.modal-overlay` and `.modal-content` are declared by several component
+   stylesheets and by none of the global ones, so a panel that uses them only
+   renders correctly when some *other* modal's CSS happens to have been loaded
+   already. This one opens from the payroll screen, where that was not true —
+   the overlay came out `position: static` and laid itself out 1,500px down the
+   page, invisible but present in the DOM.
+
+   Declared here so the panel stands on its own. The values match the existing
+   definitions exactly, so nothing changes for any modal that was relying on
+   whichever copy loaded first. */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content.closures-panel {
+  position: relative;
+  background: var(--surface, #fff);
+  border-radius: 20px;
+  max-height: 92vh;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.closures-panel {
+  max-width: 720px;
+  width: 100%;
+  padding: 28px;
+  animation: closures-rise 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes closures-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.closures-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 20px;
+  color: var(--primary);
+}
+
+.closures-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  color: var(--text-main);
+}
+
+.closures-header p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 58ch;
+}
+
+.closures-state { padding: 40px; text-align: center; }
+
+.closures-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 64vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.closures-empty {
+  margin: 0;
+  padding: 20px 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* --- adding --------------------------------------------------------------- */
+
+.closure-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.closure-add:hover {
+  background: var(--surface-hover, rgba(99, 102, 241, 0.06));
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.closure-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--surface-raised, rgba(255, 255, 255, 0.04));
+  backdrop-filter: blur(8px);
+  animation: closure-form-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes closure-form-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.closure-form-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.closure-form-dates label,
+.closure-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.closure-form-dates span,
+.closure-form-field span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.closure-form-dates em,
+.closure-form-field em {
+  font-style: normal;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+/* --- the cost of closing -------------------------------------------------- */
+
+.closure-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-sunken, rgba(0, 0, 0, 0.12));
+  font-size: 12.5px;
+  transition: opacity 0.2s ease;
+}
+
+.closure-preview.is-loading { opacity: 0.55; }
+
+.closure-preview-head { color: var(--text-main); }
+
+.closure-preview-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.closure-preview-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Money already stamped onto those hours: closing releases it, which is the
+   part of this action nobody expects. */
+.closure-preview-money {
+  background: rgba(245, 158, 11, 0.14) !important;
+  color: #f59e0b !important;
+}
+
+.closure-preview-billing {
+  background: rgba(236, 72, 153, 0.14) !important;
+  color: #ec4899 !important;
+}
+
+.closure-preview-people,
+.closure-preview-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.closure-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* --- the list ------------------------------------------------------------- */
+
+.closures-group { display: flex; flex-direction: column; gap: 6px; }
+
+.closures-group h3 {
+  margin: 4px 0 2px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.closures-group-past { opacity: 0.62; }
+
+.closure-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 11px;
+  background: var(--surface-raised, rgba(255, 255, 255, 0.03));
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.closure-row:hover {
+  border-color: var(--primary);
+  transform: translateX(2px);
+}
+
+.closure-date {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.closure-day {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.closure-label { font-size: 12px; color: var(--primary); }
+
+.closure-notes {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Closing a day does not cancel the classes on it — families still see them on
+   the timetable. Loud enough to act on, not loud enough to look like an error. */
+.closure-clash {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.closure-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.closure-remove:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.closure-remove:disabled { opacity: 0.4; cursor: default; }
+
+@media (max-width: 620px) {
+  .closures-panel { padding: 20px; }
+  .closure-form-dates { grid-template-columns: 1fr; }
+  .closure-row { flex-wrap: wrap; }
+  .closure-clash { order: 3; width: 100%; justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .closures-panel,
+  .closure-form { animation: none; }
+  .closure-add:hover,
+  .closure-row:hover { transform: none; }
+}

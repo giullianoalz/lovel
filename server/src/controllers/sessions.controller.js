@@ -11,6 +11,7 @@ import {
 } from '../services/notificationConfig.service.js';
 import { loadPayCategories, freezeSessionRates, clearFrozenRates } from '../services/payroll.service.js';
 import { raiseSessionCharges } from '../services/sessionCharges.service.js';
+import { loadClosures } from '../services/closures.service.js';
 import { sessionStartInstant, academyToday } from '../utils/academyTime.js';
 import {
   CANCELLATION_WINDOW_HOURS,
@@ -727,13 +728,31 @@ export const bulkScheduleSessions = async (req, res, next) => {
     }
 
     const weekdaySet = new Set(weekdays.map(Number));
-    const dates = [];
+    const allDates = [];
     for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-      if (weekdaySet.has(d.getUTCDay())) dates.push(new Date(d));
+      if (weekdaySet.has(d.getUTCDay())) allDates.push(new Date(d));
     }
 
-    if (dates.length === 0) {
+    if (allDates.length === 0) {
       return res.status(400).json({ error: 'Validation Error', message: 'No dates in range match the selected weekdays.' });
+    }
+
+    // Days the academy is shut never become meetings. Generating them and
+    // relying on somebody to cancel each one is exactly the habit that had
+    // Thanksgiving paying nine teachers — see closures.service.js.
+    //
+    // Filtered here, before anything downstream, because the price rides on the
+    // *first* generated session: a term whose first Monday is a holiday would
+    // otherwise put the whole term's charge on a day nobody came in.
+    const closedDays = new Set((await loadClosures()).map((c) => c.day));
+    const dates = allDates.filter((d) => !closedDays.has(d.toISOString().slice(0, 10)));
+    const skippedForClosure = allDates.length - dates.length;
+
+    if (dates.length === 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Every matching date falls on a day the academy is closed.',
+      });
     }
 
     // Skip dates that already have a session for this class (re-running must not duplicate).
@@ -772,7 +791,12 @@ export const bulkScheduleSessions = async (req, res, next) => {
       req.user.email
     );
 
-    res.status(201).json({ message: `${createdSessions.length} sessions scheduled.`, created: createdSessions.length });
+    res.status(201).json({
+      message: `${createdSessions.length} sessions scheduled.`
+        + (skippedForClosure ? ` ${skippedForClosure} skipped — the academy is closed those days.` : ''),
+      created: createdSessions.length,
+      skippedForClosure,
+    });
   } catch (error) {
     next(error);
   }

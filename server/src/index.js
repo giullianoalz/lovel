@@ -50,6 +50,7 @@ import notificationsRoutes from './routes/notifications.routes.js';
 import integrationsRoutes from './routes/integrations.routes.js';
 import payCategoriesRoutes from './routes/payCategories.routes.js';
 import shiftsRoutes from './routes/shifts.routes.js';
+import closuresRoutes from './routes/closures.routes.js';
 import { startCronJobs } from './jobs/cron.jobs.js';
 
 const app = express();
@@ -248,6 +249,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/integrations', integrationsRoutes);
 app.use('/api/pay-categories', payCategoriesRoutes);
 app.use('/api/shifts', shiftsRoutes);
+app.use('/api/closures', closuresRoutes);
 
 // ===========================================
 // Socket.IO Connection

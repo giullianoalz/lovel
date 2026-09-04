@@ -149,6 +149,7 @@ model User {
   tempPickupAuths        TempPickupAuth[]
   pickupAuthsAsStudent   TempPickupAuth[]          @relation("PickupAuthStudent")
   assignments            Assignment[]              @relation("TeacherAssignments")
+  closuresDeclared       AcademyClosure[]          @relation("ClosuresDeclared")
   grades                 Grade[]                   @relation("StudentGrades")
   cancellationsAsStudent SessionCancellation[]     @relation("StudentCancellations")
   cancellationsReported  SessionCancellation[]     @relation("CancelledByStaff")
@@ -1951,4 +1952,38 @@ enum TimeOffStatus {
   REJECTED @map("rejected")
 
   @@map("time_off_status")
+}
+
+/// A day the academy did not open.
+///
+/// Pay accrues from the calendar: an hour whose time has passed is an hour that
+/// is owed, with no register to sign and nobody to remember. That is right for
+/// a working week and wrong for Thanksgiving, where the meetings sit on the
+/// timetable, nobody comes in, and the hours bill and pay themselves anyway.
+/// Before this table the only defence was cancelling every session by hand,
+/// one holiday at a time, and forgetting cost real money.
+///
+/// One row per closed day rather than a start/end pair. A break is entered as a
+/// range and expanded here, because every question asked of this table is about
+/// a single date — "was the academy open on the 26th?" — and answering that
+/// against ranges means overlap arithmetic in every caller. Days are cheap: a
+/// school year closes maybe thirty of them.
+model AcademyClosure {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// The closed day itself. Unique: a date is closed or it is not, and two rows
+  /// saying so would let the two disagree about why.
+  date        DateTime @unique @db.Date
+  /// What to call it on the calendar and on the payroll screen — "Thanksgiving",
+  /// "Winter break". Shown wherever an hour is left unpaid because of this row,
+  /// so that a missing hour always carries its reason.
+  label       String   @db.VarChar(120)
+  notes       String?
+  /// Who declared it. An admin closing a day removes pay from other people, so
+  /// the record names them, the same way marking somebody absent does.
+  createdById String?  @map("created_by") @db.Uuid
+  createdBy   User?    @relation("ClosuresDeclared", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([date])
+  @@map("academy_closures")
 }

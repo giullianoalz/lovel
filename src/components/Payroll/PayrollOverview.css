@@ -313,3 +313,10 @@
 .po-stacked-rate .po-sub {
   display: inline;
 }
+
+/* Two settings entries now sit beside the title. */
+.po-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

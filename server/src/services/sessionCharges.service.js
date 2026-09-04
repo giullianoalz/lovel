@@ -48,6 +48,7 @@
  */
 
 import prisma from '../config/database.js';
+import { loadClosedDates } from './closures.service.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -67,6 +68,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
  *        price has since changed.
  */
 export const buildSessionCharges = async ({ from, to, sessionIds, includeCharged = true } = {}) => {
+  const closedDates = await loadClosedDates();
   // An empty list means "these zero meetings", not "every meeting" — the
   // difference between charging nothing and charging the whole calendar.
   if (Array.isArray(sessionIds) && sessionIds.length === 0) {
@@ -90,6 +92,14 @@ export const buildSessionCharges = async ({ from, to, sessionIds, includeCharged
       status: { not: 'CANCELLED' },
       ...(Array.isArray(sessionIds) ? { id: { in: sessionIds } } : {}),
       ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+      // A day the academy did not open bills nothing, whatever the meeting is
+      // priced at. This is the billing half of the same rule payroll applies to
+      // closed days — the two have to agree, or a family is charged for an hour
+      // the teacher was correctly not paid for. See closures.service.js.
+      //
+      // An `AND` rather than a `date` key because the range above is optional
+      // and setting `date` here would silently replace it.
+      ...(closedDates.length ? { AND: [{ date: { notIn: closedDates } }] } : {}),
     },
     orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     select: {
