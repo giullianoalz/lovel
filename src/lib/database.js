@@ -344,6 +344,36 @@ export const database = {
     return response.data;
   },
 
+  // --- Closures: the days the academy does not open ---
+  fetchClosures: async () => {
+    const response = await api.get('/closures');
+    return response.data;
+  },
+
+  /** What closing these days would cost, asked before anything is written. */
+  previewClosure: async ({ startDate, endDate }) => {
+    const params = new URLSearchParams({ startDate });
+    if (endDate) params.set('endDate', endDate);
+    const response = await api.get(`/closures/preview?${params}`);
+    return response.data;
+  },
+
+  createClosure: async (payload) => {
+    const response = await api.post('/closures', payload);
+    return response.data;
+  },
+
+  deleteClosure: async (id) => {
+    const response = await api.delete(`/closures/${id}`);
+    return response.data;
+  },
+
+  /** Closed days that still have classes sitting on the calendar. */
+  fetchClosureConflicts: async () => {
+    const response = await api.get('/closures/conflicts');
+    return response.data;
+  },
+
   // --- Work shifts: paid hours that aren't a class ---
   fetchShifts: async ({ from, to, staffId, status } = {}) => {
     const params = new URLSearchParams();
@@ -556,28 +586,9 @@ export const database = {
   },
 
   // --- Charges priced on the calendar ---
-  // What the priced meetings in a range would charge each enrolled family.
-  // Read-only: this is the sheet reviewed before any money is committed.
-  fetchSessionCharges: async ({ from, to } = {}) => {
-    const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to) params.set('to', to);
-    const qs = params.toString() ? `?${params}` : '';
-    const response = await api.get(`/billing/session-charges${qs}`);
-    return response.data;
-  },
-
-  // Commits those charges to the ledger. The server recomputes the amounts —
-  // the browser never names the price — and re-running is safe, so a double
-  // click cannot bill a family twice. No mock fallback: it moves real money.
-  raiseSessionCharges: async ({ from, to, sessionIds } = {}) => {
-    const response = await api.post('/billing/session-charges', { from, to, sessionIds });
-    return response.data;
-  },
-
   // What one student pays for one meeting, when the meeting's own price doesn't
-  // apply to them. `amount: null` puts them back on the full price. Charges
-  // nobody on its own — it changes what the pending charge will be.
+  // apply to them. `amount: null` puts them back on the full price. Re-prices
+  // the charge as well as the price: on the calendar the two are the same thing.
   setStudentChargePrice: async ({ sessionId, studentIds, amount, reason }) => {
     const response = await api.put('/billing/session-charges/override', {
       sessionId, studentIds, amount, reason,

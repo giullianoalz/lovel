@@ -31,6 +31,7 @@ process.env.DATABASE_URL = 'postgresql://tests:tests@127.0.0.1:1/unused';
 const { default: prisma } = await import('../src/config/database.js');
 const { freezeSessionRates, freezeShiftRates, invalidatePayCategories } =
   await import('../src/services/payroll.service.js');
+const { invalidateClosures } = await import('../src/services/closures.service.js');
 
 /**
  * Projects a fixture through a Prisma `select`, returning only what was asked
@@ -92,7 +93,7 @@ let realConsoleError;
 before(() => {
   for (const [model, method] of [
     ['payCategory', 'findMany'], ['session', 'findMany'], ['session', 'update'],
-    ['workShift', 'findMany'], ['workShift', 'update'],
+    ['workShift', 'findMany'], ['workShift', 'update'], ['academyClosure', 'findMany'],
   ]) {
     realMethods[`${model}.${method}`] = prisma[model][method];
   }
@@ -118,12 +119,16 @@ after(async () => {
  * correctly skipped. Errors are captured and asserted on instead, so a broken
  * test fails loudly rather than passing for the wrong reason.
  */
-const stubPrisma = ({ sessions = [], shifts = [] }) => {
+const stubPrisma = ({ sessions = [], shifts = [], closures = [] }) => {
   writes = [];
   errors = [];
   console.error = (...args) => errors.push(args.join(' '));
 
   prisma.payCategory.findMany = async () => CATEGORIES;
+  // The freezer asks which days the academy was shut before it prices anything.
+  // Unstubbed this reaches for a real database, and the failure is swallowed by
+  // the freezer's own catch — so the test would pass by doing nothing at all.
+  prisma.academyClosure.findMany = async () => closures;
   prisma.session.findMany = async ({ select }) => sessions.map((s) => project(s, select));
   prisma.workShift.findMany = async ({ select }) => shifts.map((s) => project(s, select));
   prisma.session.update = async (args) => { writes.push({ model: 'session', ...args }); return args; };
@@ -132,9 +137,10 @@ const stubPrisma = ({ sessions = [], shifts = [] }) => {
 };
 
 beforeEach(() => {
-  // The category list is cached in-process with a TTL; without this the second
-  // test would read whatever the first one left behind.
+  // Both lists are cached in-process with a TTL; without this the second test
+  // would read whatever the first one left behind.
   invalidatePayCategories();
+  invalidateClosures();
 });
 
 test('a salaried teacher never gets a rate frozen onto their session', async () => {
@@ -212,4 +218,95 @@ test('both freezers ask the database for baseSalary', async () => {
   for (const select of selects) {
     assert.equal(select.baseSalary, true, 'without baseSalary a salaried person is priced as hourly');
   }
+});
+
+/**
+ * A covered hour belongs to whoever covered it, at their rate.
+ *
+ * The same failure as the salaried case above, one door over: the freezer used
+ * to resolve every session from `class.teacher`, so an hour somebody else stood
+ * in for got the class teacher's number stamped on it — permanently, and for a
+ * person who was never on that contract. It is the bug `lineItem` already
+ * guards co-teachers against, arriving through the substitute picker instead.
+ */
+// Paid $70 for this kind of work by their own arrangement, so the rate alone
+// says which contract the freezer read.
+const cover = {
+  id: 'p-cover', hourlyRate: null, flatRateOnly: false, baseSalary: null,
+  payRates: [{ category: 'IN_PERSON', hourlyRate: '70' }],
+};
+
+/** The same session, taught by somebody other than the class's teacher. */
+const coveredBy = (substitute, classTeacher = hourly) => ({
+  ...sessionFor(classTeacher),
+  id: `s-covered-${substitute.id}`,
+  teacher: substitute,
+});
+
+test('a substitute freezes at their own rate, not the class teacher’s', async () => {
+  const session = coveredBy(cover);
+  stubPrisma({ sessions: [session] });
+
+  const frozen = await freezeSessionRates([session.id]);
+
+  assert.deepEqual(errors, [], 'the freeze should not have errored');
+  assert.equal(frozen, 1);
+  // $70 from the cover's own arrangement — not the $50 the class teacher's
+  // category would have produced.
+  assert.deepEqual(writes[0].data, { paidRate: 70, paidRateSource: 'teacher' });
+});
+
+test('a salaried substitute covering an hourly teacher’s class is stamped with nothing', async () => {
+  // The expensive direction. Reading the class teacher here would stamp $50/hr
+  // onto an hour already bought by the cover's salary — exactly the double
+  // payment the salaried tests above exist to prevent.
+  const session = coveredBy(salaried);
+  stubPrisma({ sessions: [session] });
+
+  const frozen = await freezeSessionRates([session.id]);
+
+  assert.deepEqual(errors, [], 'the freeze should not have errored');
+  assert.equal(frozen, 0);
+  assert.deepEqual(writes, []);
+});
+
+test('the session freezer asks the database for the substitute, salary and all', async () => {
+  // Same belt and braces as the baseSalary check above: the select is the part
+  // that has quietly regressed before, and a fixture cannot catch it.
+  let select;
+  stubPrisma({ sessions: [] });
+  prisma.session.findMany = async (args) => { select = args.select; return []; };
+
+  await freezeSessionRates(['any']);
+
+  assert.ok(select.teacher, 'without the session teacher a covered hour prices as the class teacher');
+  assert.equal(select.teacher.select.baseSalary, true);
+  assert.equal(select.teacher.select.payRates.select.hourlyRate, true);
+});
+
+test('an hour on a day the academy was shut is never stamped', async () => {
+  // The reason closures exist at all. Freezing is what makes a price permanent,
+  // so a holiday that slipped past the filter here would not just pay once — it
+  // would pin the payment beyond the reach of the correction.
+  //
+  // The control is the test above: the same fixture, with nothing declared
+  // closed, does get stamped. Only the closure changes between them.
+  const closedDay = new Date('2026-11-26T00:00:00.000Z');
+  stubPrisma({
+    sessions: [sessionFor(hourly)],
+    closures: [{ id: 'c1', date: closedDay, label: 'Thanksgiving', notes: null, createdById: null }],
+  });
+
+  let where;
+  const passthrough = prisma.session.findMany;
+  prisma.session.findMany = async (args) => { where = args.where; return passthrough(args); };
+
+  await freezeSessionRates([sessionFor(hourly).id]);
+
+  const excluded = where.AND.flatMap((c) => c.date?.notIn ?? []);
+  assert.deepEqual(
+    excluded.map((d) => d.toISOString().slice(0, 10)),
+    ['2026-11-26'],
+    'the freezer must ask the database to skip closed days'
+  );
 });

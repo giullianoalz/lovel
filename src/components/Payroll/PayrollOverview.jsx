@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Wallet, ChevronLeft, ChevronRight, AlertTriangle, Pencil, Users, Clock, DollarSign, Tags } from 'lucide-react';
+import { Wallet, ChevronLeft, ChevronRight, AlertTriangle, Pencil, Users, Clock, DollarSign, Tags, CalendarOff } from 'lucide-react';
 import PayCategoriesPanel from './PayCategoriesPanel';
+import ClosuresPanel from './ClosuresPanel';
 import AbsencesPanel from './AbsencesPanel';
 import { database } from '../../lib/database';
 import { useAsyncData } from '../../lib/useAsyncData';
@@ -76,6 +77,7 @@ const PayrollOverview = () => {
   const [weeksAhead, setWeeksAhead] = useState(4);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [showCategories, setShowCategories] = useState(false);
+  const [showClosures, setShowClosures] = useState(false);
   const [reviewingAbsences, setReviewingAbsences] = useState(false);
 
   const isWeek = view === 'week';
@@ -144,9 +146,16 @@ const PayrollOverview = () => {
         </div>
         {/* The rates live behind this: set "front desk = $20" once, and every
             hour scheduled as front desk prices itself. */}
-        <button className="po-categories-btn" onClick={() => setShowCategories(true)}>
-          <Tags size={15} /> Pay categories
-        </button>
+        <div className="po-header-actions">
+          {/* The days nobody comes in. Pay accrues from the calendar, so
+              without these a holiday pays every teacher on it. */}
+          <button className="po-categories-btn" onClick={() => setShowClosures(true)}>
+            <CalendarOff size={15} /> Closed days
+          </button>
+          <button className="po-categories-btn" onClick={() => setShowCategories(true)}>
+            <Tags size={15} /> Pay categories
+          </button>
+        </div>
       </div>
 
       <div className="po-period-bar">
@@ -615,6 +624,15 @@ const PayrollOverview = () => {
       {showCategories && (
         <PayCategoriesPanel
           onClose={() => { setShowCategories(false); retry(); }}
+        />
+      )}
+
+      {/* Reloading on close matters here: closing a day removes hours from
+          the totals behind this modal, and leaving them showing would be a
+          stale figure an admin might act on. */}
+      {showClosures && (
+        <ClosuresPanel
+          onClose={() => { setShowClosures(false); retry(); }}
         />
       )}
 

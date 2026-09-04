@@ -10,7 +10,9 @@ import {
   getParentUserIdsForStudents,
 } from '../services/notificationConfig.service.js';
 import { loadPayCategories, freezeSessionRates, clearFrozenRates } from '../services/payroll.service.js';
-import { sessionStartInstant } from '../utils/academyTime.js';
+import { raiseSessionCharges } from '../services/sessionCharges.service.js';
+import { loadClosures } from '../services/closures.service.js';
+import { sessionStartInstant, academyToday } from '../utils/academyTime.js';
 import {
   CANCELLATION_WINDOW_HOURS,
   ADVANCE_CANCELLATION_SUGGESTED_PERCENT,
@@ -74,11 +76,58 @@ const readPayFields = async (req) => {
  * reads what it bills the client. Admin-only for the same reason and then some
  * — it is the number a family will be asked for.
  *
- * Typing it charges nobody. It records what the meeting costs; an admin reviews
- * the pending ones and approves them into the ledger (see
- * sessionCharges.service.js), so a fat-fingered price is caught on a review
- * screen rather than on somebody's invoice.
+ * Typing it CHARGES (changed 2026-09-01 — there used to be an approval screen
+ * between the two). Every enrolled family owes it the moment the session is
+ * saved; `chargeCalendarSessions` below is what commits it.
+ *
+ * Which means a fat-fingered price lands on a real balance, so correcting it
+ * has to work: re-saving with the right number re-prices the charge, clearing
+ * the price zeroes it, and cancelling the meeting zeroes it. All of that is
+ * `raiseSessionCharges` in sessionCharges.service.js. The one thing that cannot
+ * be undone from here is a charge already pulled onto an invoice.
  */
+/**
+ * The substitute who covered this one meeting, if this request may name one.
+ *
+ * Somebody stands in for the class's teacher and that hour is theirs: their
+ * name on the register, their contract pricing it, their payslip it lands on.
+ * Nothing on the Class can say so — it is true of a single Wednesday, not of
+ * the timetable — which is why this hung outside the system until now, settled
+ * by hand at the end of the month.
+ *
+ * Admin-only for the same reason pricing is: it moves an hour's pay from one
+ * person to another. Empty hands the hour back to the class's own teacher.
+ *
+ * Returns { data } to merge into the write, or { error } to reject with.
+ */
+const readSubstituteField = async (req) => {
+  const { teacherId } = req.body;
+  if (teacherId === undefined) return { data: {} };
+
+  if (!hasRole(req.user, 'ADMIN')) {
+    return { error: 'Only an admin can say who taught a session.' };
+  }
+
+  // The picker sends '' for "no substitute", which has to reach the foreign key
+  // as NULL — the column's way of saying "ask the class", not as a literal ''.
+  if (teacherId === null || teacherId === '') return { data: { teacherId: null } };
+
+  const teacher = await prisma.user.findUnique({
+    where: { id: teacherId },
+    select: { role: true, secondaryRoles: true, status: true },
+  });
+  // Any role held counts, same as assigning a class: an admin who covers an
+  // hour is someone who taught it, and is owed for it.
+  if (!teacher || !hasRole(teacher, 'TEACHER')) {
+    return { error: 'A substitute must be an existing teacher account.' };
+  }
+  if (teacher.status === 'SUSPENDED') {
+    return { error: 'This teacher is suspended and cannot be recorded as a substitute.' };
+  }
+
+  return { data: { teacherId } };
+};
+
 const readChargeFields = async (req) => {
   const { chargeAmount, chargeNote } = req.body;
   if (chargeAmount === undefined && chargeNote === undefined) return { data: {} };
@@ -110,6 +159,42 @@ const readChargeFields = async (req) => {
   }
 
   return { data };
+};
+
+/**
+ * Bill what these meetings now cost, right after they were saved.
+ *
+ * Called on every path that can change what a meeting charges — its price, its
+ * date, whether it happens at all. Cheap to call when nothing changed: a
+ * meeting with no price produces no lines, and one already charged at the same
+ * number produces no writes.
+ *
+ * Never fails the save. The session is the record of what was scheduled and it
+ * is already written; if the ledger write fails, the daily sweep in
+ * cron.jobs.js raises the same charges within the day. Refusing the edit
+ * instead would leave an admin unable to fix a calendar because billing is
+ * having a bad afternoon.
+ */
+const chargeCalendarSessions = async (sessionIds, actorEmail) => {
+  if (!sessionIds || sessionIds.length === 0) return;
+  try {
+    const result = await raiseSessionCharges({ sessionIds });
+    if (result.created || result.corrected || result.zeroed) {
+      console.log(
+        `[Billing] ${actorEmail} priced ${sessionIds.length} session(s): `
+        + `${result.created} charge(s) raised ($${result.total.toFixed(2)}), `
+        + `${result.corrected} corrected, ${result.zeroed} zeroed`
+        // Priced but deliberately not raised — almost always a student who
+        // enrolled after the meeting. Released, if ever, by POST
+        // /api/billing/session-charges with includeJoinedLate.
+        + (result.held.length > 0 ? `, ${result.held.length} held back` : '')
+        // Already invoiced, so the new price did not reach it.
+        + (result.locked.length > 0 ? `, ${result.locked.length} already invoiced and left alone` : '')
+      );
+    }
+  } catch (error) {
+    console.error('[Billing] Could not charge saved session(s); the daily sweep will retry.', error);
+  }
 };
 
 // Every cancellation reaches the admin for a decision — none is ever charged
@@ -173,12 +258,15 @@ export const sessionScope = async (user) => {
 
   if (hasRole(user, 'TEACHER')) {
     branches.push({
-      class: {
-        OR: [
-          { teacherId: user.id },
-          { coTeachers: { some: { id: user.id } } },
-        ],
-      },
+      OR: [
+        // The hours they taught on a class that has since changed hands. Their
+        // own work, and without this branch it disappears from their calendar
+        // the day somebody else takes the class over — along with the record of
+        // what it paid them.
+        { teacherId: user.id },
+        { class: { teacherId: user.id } },
+        { class: { coTeachers: { some: { id: user.id } } } },
+      ],
     });
   }
 
@@ -213,6 +301,8 @@ export const sessionScope = async (user) => {
  */
 const NOT_FOUND = { error: 'Not Found', message: 'Session not found.' };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Everyone teaching a class, lead and co-teachers together.
  *
@@ -227,6 +317,64 @@ const NOT_FOUND = { error: 'Not Found', message: 'Session not found.' };
  */
 export const teachersAssignedTo = (cls) => [
   ...new Set([cls?.teacherId, ...(cls?.coTeachers || []).map((t) => t.id)].filter(Boolean)),
+];
+
+/**
+ * Who this particular hour belongs to.
+ *
+ * The same list as `teachersAssignedTo`, except that a session which names its
+ * own teacher — because the class has changed hands since it ran — answers with
+ * that person in the lead's place. It is their hour: their pay is on it, and
+ * theirs is the name the calendar should show against it.
+ *
+ * Co-teachers come from the class either way. The stamp records who stood at
+ * the front, not everybody who was in the room.
+ */
+/**
+ * Who was on the roster on a given day.
+ *
+ * The class's enrolments are a live list, so reading it straight showed every
+ * past session with today's names: a child enrolled this morning appeared in
+ * three weeks of classes they never sat in, and one who left vanished from the
+ * ones they did. Each enrolment is really an interval — `enrolledAt` to
+ * `endedAt` — and this asks which of them covered the day in question.
+ *
+ * Both bounds are generous on purpose, because both can be missing:
+ *
+ *   - `endedAt` is null for everyone still enrolled, and also for everyone
+ *     unenrolled before the column existed. Those old rows are treated as
+ *     "left at some unknown point": shown on sessions already run, hidden from
+ *     today onwards. Hiding them everywhere would erase a child from meetings
+ *     they demonstrably attended; showing them everywhere would put a child who
+ *     left months ago back on tomorrow's register.
+ *   - `enrolledAt` is the row's creation, which for an imported roster is the
+ *     day of the import, not the day the child joined. So it only hides a
+ *     session that predates the enrolment by a clear day — a class cannot have
+ *     been attended before anyone signed up for it, but a same-day import
+ *     should not empty out that morning's register.
+ *
+ * `date` is a Postgres DATE stamped at UTC midnight; the timestamps are real
+ * instants. Comparing them directly is right to within the hours either side of
+ * midnight, which no session spans.
+ */
+export const rosterOn = (enrollments, date, now = new Date()) => {
+  const day = new Date(date).getTime();
+  const past = day < academyToday(now).getTime();
+  return (enrollments || []).filter((e) => {
+    const started = e.enrolledAt ? new Date(e.enrolledAt).getTime() : null;
+    if (started !== null && started - day >= DAY_MS) return false;
+    if (e.endedAt) return new Date(e.endedAt).getTime() >= day;
+    return e.status === 'active' || past;
+  });
+};
+
+export const teachersOnSession = (session) => [
+  ...new Set(
+    [
+      session?.teacherId ?? session?.class?.teacherId,
+      ...(session?.class?.coTeachers || []).map((t) => t.id),
+    ].filter(Boolean)
+  ),
 ];
 
 const denyForeignClass = async (user, classId) => {
@@ -272,8 +420,17 @@ export const listSessions = async (req, res, next) => {
     // co-teach as well. Matching the lead alone made a co-taught class vanish
     // from its own teacher's timetable, which reads as having been dropped from
     // the class rather than as a filter that missed it.
+    //
+    // A session that names its own teacher answers for itself: it belongs to
+    // whoever taught it, not to whoever holds the class today. Without the
+    // first two clauses, handing a class over would move its whole history onto
+    // the new teacher's calendar and strip it from the old one's.
     if (teacherId) {
-      where.class = { OR: [{ teacherId }, { coTeachers: { some: { id: teacherId } } }] };
+      where.OR = [
+        { teacherId },
+        { teacherId: null, class: { teacherId } },
+        { class: { coTeachers: { some: { id: teacherId } } } },
+      ];
     }
 
     // AND rather than merging keys: both sides can constrain `class`, and the
@@ -318,13 +475,23 @@ export const listSessions = async (req, res, next) => {
             // redaction below matches on — a co-teacher is on this class.
             coTeachers: { select: { id: true, fullName: true } },
             ...(isStaff ? {
+              // Every enrolment, not only the live ones, plus the dates that
+              // bound it: which of them counts depends on the session's date,
+              // and a nested `where` here cannot see it. Narrowed per session
+              // by `rosterOn` below.
               enrollments: {
-                where: { status: 'active' },
-                select: { student: { select: { id: true, fullName: true } } },
+                select: {
+                  status: true, enrolledAt: true, endedAt: true,
+                  student: { select: { id: true, fullName: true } },
+                },
               },
             } : {}),
           },
         },
+        // Set only on an hour taught before its class changed hands. Overlaid
+        // onto `class.teacher` below so the calendar names whoever was actually
+        // at the front, without every reader having to know the rule.
+        teacher: { select: { id: true, fullName: true } },
         notes: { orderBy: { createdAt: 'desc' } },
         materials: true,
         // Who marked the teacher absent, so the calendar can name them on the
@@ -356,11 +523,35 @@ export const listSessions = async (req, res, next) => {
     // "Their own class" means assigned to it, lead or co: payroll pays both for
     // the hour (payroll.service.js), so both have the same claim on seeing what
     // it pays and on being told the hour was struck off as an absence.
-    const teachesIt = (cls) => teachersAssignedTo(cls).includes(req.user.id);
+    const teachesIt = (s) => teachersOnSession(s).includes(req.user.id);
     res.json({
       sessions: sessions.map((s) => {
-        const visible = isAdmin ? s : { ...s, chargeAmount: null, chargeNote: null, chargeOverrides: [] };
-        return isAdmin || teachesIt(s.class)
+        // Both halves of "don't rewrite what already happened", resolved once
+        // here so every reader — calendar, payroll screens, the attendance
+        // jump — gets the same answer without repeating the rule.
+        const presented = {
+          ...s,
+          teacher: undefined,
+          class: s.class && {
+            ...s.class,
+            // The effective teacher takes the class teacher's place, so every
+            // reader that already asks the class for a name gets the right one
+            // without knowing the rule. `ownTeacher` keeps the class's own
+            // answer alongside it, for the one screen that has to show both:
+            // the substitute picker, which needs to say whose hour this
+            // normally is.
+            ...(s.teacher
+              ? { teacherId: s.teacher.id, teacher: s.teacher, ownTeacher: s.class.teacher }
+              : { ownTeacher: s.class.teacher }),
+            ...(s.class.enrollments
+              ? { enrollments: rosterOn(s.class.enrollments, s.date) }
+              : {}),
+          },
+        };
+        const visible = isAdmin
+          ? presented
+          : { ...presented, chargeAmount: null, chargeNote: null, chargeOverrides: [] };
+        return isAdmin || teachesIt(s)
           ? visible
           : { ...visible, payRateOverride: null, paidRate: null, absentAt: null, absentReason: null, absentBy: null };
       }),
@@ -385,8 +576,27 @@ export const getSession = async (req, res, next) => {
       where: { id: req.params.id, ...scope },
       include: {
         class: {
-          include: { teacher: { select: { id: true, fullName: true } } },
+          include: {
+            teacher: { select: { id: true, fullName: true } },
+            // Every enrolment, not only the live ones — narrowed to this
+            // session's date by rosterOn() below. Without this the roster
+            // panel had to fall back to GET /classes, which has no idea what
+            // date it is being asked about and hands back today's list
+            // whatever session is open: a class reassigned or re-rostered
+            // since would show the modal a roster that never sat through it.
+            ...(isStaff ? {
+              enrollments: {
+                select: {
+                  status: true, enrolledAt: true, endedAt: true,
+                  student: { select: { id: true, fullName: true, age: true, allergies: true } },
+                },
+              },
+            } : {}),
+          },
         },
+        // Names whoever taught this hour, when its class has changed hands
+        // since. Overlaid onto class.teacher below.
+        teacher: { select: { id: true, fullName: true } },
         // The roster is staff-only. A parent opening a session on the calendar
         // needs its time, notes and materials — not the name of every other
         // child in the room. (The frontend reads only notes/materials here.)
@@ -408,6 +618,15 @@ export const getSession = async (req, res, next) => {
     if (frontDesk && session.attendance) {
       const { gte, lt } = todayRange();
       if (!(session.date >= gte && session.date < lt)) delete session.attendance;
+    }
+
+    if (session.teacher) {
+      session.class = { ...session.class, teacherId: session.teacher.id, teacher: session.teacher };
+    }
+    delete session.teacher;
+
+    if (session.class?.enrollments) {
+      session.class = { ...session.class, enrollments: rosterOn(session.class.enrollments, session.date) };
     }
 
     res.json({ session });
@@ -456,6 +675,9 @@ export const createSession = async (req, res, next) => {
         ...charge.data,
       },
     });
+
+    // A price typed here is charged here.
+    await chargeCalendarSessions([session.id], req.user.email);
 
     // Attendance is recorded by the teacher when the session happens (see
     // updateAttendance) — pre-filling PRESENT here would fabricate attendance
@@ -506,13 +728,31 @@ export const bulkScheduleSessions = async (req, res, next) => {
     }
 
     const weekdaySet = new Set(weekdays.map(Number));
-    const dates = [];
+    const allDates = [];
     for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-      if (weekdaySet.has(d.getUTCDay())) dates.push(new Date(d));
+      if (weekdaySet.has(d.getUTCDay())) allDates.push(new Date(d));
     }
 
-    if (dates.length === 0) {
+    if (allDates.length === 0) {
       return res.status(400).json({ error: 'Validation Error', message: 'No dates in range match the selected weekdays.' });
+    }
+
+    // Days the academy is shut never become meetings. Generating them and
+    // relying on somebody to cancel each one is exactly the habit that had
+    // Thanksgiving paying nine teachers — see closures.service.js.
+    //
+    // Filtered here, before anything downstream, because the price rides on the
+    // *first* generated session: a term whose first Monday is a holiday would
+    // otherwise put the whole term's charge on a day nobody came in.
+    const closedDays = new Set((await loadClosures()).map((c) => c.day));
+    const dates = allDates.filter((d) => !closedDays.has(d.toISOString().slice(0, 10)));
+    const skippedForClosure = allDates.length - dates.length;
+
+    if (dates.length === 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Every matching date falls on a day the academy is closed.',
+      });
     }
 
     // Skip dates that already have a session for this class (re-running must not duplicate).
@@ -543,7 +783,20 @@ export const bulkScheduleSessions = async (req, res, next) => {
       )
     );
 
-    res.status(201).json({ message: `${createdSessions.length} sessions scheduled.`, created: createdSessions.length });
+    // Only the sessions that actually carry the price are worth looking at —
+    // with `chargeAllSessions` off that is the first one, which is the habit
+    // the whole calendar-charging model is built around.
+    await chargeCalendarSessions(
+      createdSessions.filter((s) => s.chargeAmount != null).map((s) => s.id),
+      req.user.email
+    );
+
+    res.status(201).json({
+      message: `${createdSessions.length} sessions scheduled.`
+        + (skippedForClosure ? ` ${skippedForClosure} skipped — the academy is closed those days.` : ''),
+      created: createdSessions.length,
+      skippedForClosure,
+    });
   } catch (error) {
     next(error);
   }
@@ -633,6 +886,10 @@ export const bulkUpdateSessions = async (req, res, next) => {
     }
     await freezeSessionRates(targetIds);
 
+    // Retiming a series moves the dates its charges carry, cancelling it zeroes
+    // them, and re-pricing it re-prices them — all three are the same call.
+    await chargeCalendarSessions(targetIds, req.user.email);
+
     res.json({
       message: `${targets.length} session${targets.length === 1 ? '' : 's'} updated.`,
       updated: targets.length,
@@ -659,7 +916,10 @@ export const updateSession = async (req, res, next) => {
     const charge = await readChargeFields(req);
     if (charge.error) return res.status(400).json({ error: 'Validation Error', message: charge.error });
 
-    const updateData = { ...pay.data, ...charge.data };
+    const substitute = await readSubstituteField(req);
+    if (substitute.error) return res.status(400).json({ error: 'Validation Error', message: substitute.error });
+
+    const updateData = { ...pay.data, ...charge.data, ...substitute.data };
 
     if (status) updateData.status = status.toUpperCase();
     if (date) updateData.date = new Date(date);
@@ -669,9 +929,17 @@ export const updateSession = async (req, res, next) => {
     // is in person after all", and it has to reach the column as NULL.
     if (meetingUrl !== undefined) updateData.meetingUrl = meetingUrl?.trim() || null;
 
+    // Who the hour was down to before this edit, so the reprice below can tell
+    // a real change of teacher from the picker being re-confirmed.
+    const before = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      select: { teacherId: true },
+    });
+
     const session = await prisma.session.update({
       where: { id: req.params.id },
       data: updateData,
+      include: { teacher: { select: { id: true, fullName: true } } },
     });
 
     // An hour belongs to the contract that was in force when it happened, so
@@ -683,11 +951,24 @@ export const updateSession = async (req, res, next) => {
     // Only cleared when the rate itself was touched or the hour stopped being
     // payable — clearing on every edit would mean fixing a typo in a Zoom link
     // silently repriced a class taught last March at today's rate.
+    //
+    // Naming a substitute reprices for the same reason, and it is the sharper
+    // case: the stamped number was resolved from the class teacher's contract,
+    // so leaving it would pay the cover a rate that was never theirs — the very
+    // bug lineItem() guards co-teachers against, arriving through the front
+    // door. Cleared, it re-freezes from whoever actually taught the hour.
+    // Compared rather than assumed, so re-picking the same name is not an edit.
+    const substituted =
+      substitute.data.teacherId !== undefined && substitute.data.teacherId !== before?.teacherId;
     const repriced = pay.data.payRateOverride !== undefined || pay.data.payCategoryKey !== undefined;
-    if (repriced || updateData.status === 'CANCELLED') {
+    if (repriced || substituted || updateData.status === 'CANCELLED') {
       await clearFrozenRates({ sessionIds: [req.params.id] });
     }
     await freezeSessionRates([req.params.id]);
+
+    // And the same for what the family owes: a new price is charged, a cleared
+    // one is zeroed, a cancellation takes the charge with it.
+    await chargeCalendarSessions([req.params.id], req.user.email);
 
     res.json({ message: 'Session updated.', session });
   } catch (error) {

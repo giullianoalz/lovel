@@ -151,9 +151,9 @@ const BlockBillingPanel = ({ onClose, onDone }) => {
             <h2>Bill a block to several families</h2>
             <p>
               One invoice per student for a run of classes, charged <strong>before they are
-              taught</strong>. Each class is billed against its own calendar entry, so approving
-              it later in Calendar Charges will not bill anyone twice. Invoices are created
-              as drafts and are not emailed.
+              taught</strong>. Each class is billed against its own calendar entry, so pricing
+              that entry later will not bill anyone twice. Invoices are created as drafts and
+              are not emailed.
             </p>
           </div>
         </header>

@@ -23,14 +23,32 @@
  * $32,000 nobody authorised. A $400 event with three students
  * raises three $400 charges.
  *
- * Nothing here writes. `buildSessionCharges` is the sheet an admin checks;
- * billing.controller.js is what turns approved lines into Transactions. That
- * split is deliberate and matches the quarterly run — money that goes out to
- * real families is reviewed before it is committed, never as a side effect of
- * typing in a calendar.
+ * THE PRICE IS THE CHARGE (changed 2026-09-01). There used to be a review step:
+ * priced meetings collected on a Billing → Calendar Charges sheet and an admin
+ * released them by hand. That step is gone — typing a price raises the charge.
+ * `buildSessionCharges` still computes the lines and decides which are
+ * billable; `raiseSessionCharges` is what commits them, and it runs wherever a
+ * price is written (sessions.controller.js, and the per-student override in
+ * billing.controller.js) plus a daily sweep that catches what those moments
+ * cannot see — chiefly a student enrolled into a class after its priced meeting
+ * was already saved and charged.
+ *
+ * What did NOT change is which lines are billable. A line held back for joining
+ * late, for having no family to bill, or for being priced at zero is still held
+ * back: removing the review did not remove the rules the review enforced. Held
+ * lines are reported to an admin (cron.jobs.js) rather than raised, and the one
+ * way to release a late joiner is still a deliberate, named-meeting call —
+ * POST /billing/session-charges with includeJoinedLate.
+ *
+ * Because nobody proofreads the number any more, a price that changes has to
+ * carry its charge with it: `raiseSessionCharges` corrects the amount of a
+ * charge it already raised instead of leaving a typo on the ledger. It corrects
+ * in place — never delete-and-recreate — and it will not touch a charge that
+ * has already reached an invoice, which is a credit note, not an edit.
  */
 
 import prisma from '../config/database.js';
+import { loadClosedDates } from './closures.service.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -38,15 +56,24 @@ const round2 = (n) => Math.round(n * 100) / 100;
  * What each enrolled student would be charged for the priced meetings in a
  * date range.
  *
- * @param {object}  options
- * @param {Date}    options.from  - start of the range (inclusive)
- * @param {Date}    options.to    - end of the range (inclusive)
- * @param {boolean} options.includeCharged - keep lines already raised, so the
- *        screen can show "already billed" rather than looking like it silently
- *        skipped somebody. On by default for the same reason the quarterly
- *        preview lists them.
+ * @param {object}   options
+ * @param {Date}     options.from - start of the range (inclusive)
+ * @param {Date}     options.to   - end of the range (inclusive)
+ * @param {string[]} options.sessionIds - just these meetings, whatever their
+ *        date. This is what the save path uses: pricing one class should look
+ *        at that class, not sweep the calendar.
+ * @param {boolean}  options.includeCharged - keep lines already raised, so a
+ *        caller can see "already billed" rather than a silently short list.
+ *        On by default; `raiseSessionCharges` needs them to spot a charge whose
+ *        price has since changed.
  */
-export const buildSessionCharges = async ({ from, to, includeCharged = true } = {}) => {
+export const buildSessionCharges = async ({ from, to, sessionIds, includeCharged = true } = {}) => {
+  const closedDates = await loadClosedDates();
+  // An empty list means "these zero meetings", not "every meeting" — the
+  // difference between charging nothing and charging the whole calendar.
+  if (Array.isArray(sessionIds) && sessionIds.length === 0) {
+    return { lines: [], summary: emptySummary() };
+  }
   // A cancelled meeting bills nothing: the price says what the hour costs, not
   // that it is owed regardless of whether it happened. An absent teacher is
   // deliberately NOT excluded here — that is a question about who gets paid,
@@ -63,7 +90,16 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
         { chargeOverrides: { some: { amount: { gt: 0 } } } },
       ],
       status: { not: 'CANCELLED' },
+      ...(Array.isArray(sessionIds) ? { id: { in: sessionIds } } : {}),
       ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
+      // A day the academy did not open bills nothing, whatever the meeting is
+      // priced at. This is the billing half of the same rule payroll applies to
+      // closed days — the two have to agree, or a family is charged for an hour
+      // the teacher was correctly not paid for. See closures.service.js.
+      //
+      // An `AND` rather than a `date` key because the range above is optional
+      // and setting `date` here would silently replace it.
+      ...(closedDates.length ? { AND: [{ date: { notIn: closedDates } }] } : {}),
     },
     orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     select: {
@@ -119,13 +155,17 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
   // Everything these meetings have already raised, in one query rather than one
   // per session. Keyed by session+student because that pair is exactly what the
   // unique index protects.
+  //
+  // The invoice link comes back too: a raised charge can be corrected while it
+  // is still loose on the ledger, and must not be once it is on a document a
+  // family has been sent.
   const existing = await prisma.transaction.findMany({
     where: { sessionId: { in: sessions.map((s) => s.id) } },
-    select: { sessionId: true, studentId: true, amount: true },
+    select: { id: true, sessionId: true, studentId: true, amount: true, invoiceId: true },
   });
   const chargedKey = (sessionId, studentId) => `${sessionId}:${studentId}`;
   const alreadyCharged = new Map(
-    existing.map((t) => [chargedKey(t.sessionId, t.studentId), Number(t.amount)])
+    existing.map((t) => [chargedKey(t.sessionId, t.studentId), t])
   );
 
   const lines = [];
@@ -141,7 +181,8 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
     for (const enrollment of session.class?.enrollments || []) {
       const student = enrollment.student;
       const key = chargedKey(session.id, student.id);
-      const charged = alreadyCharged.has(key);
+      const existingCharge = alreadyCharged.get(key) || null;
+      const charged = Boolean(existingCharge);
       if (charged && !includeCharged) continue;
 
       // A student's own price beats the meeting's. Carried onto the line rather
@@ -182,7 +223,11 @@ export const buildSessionCharges = async ({ from, to, includeCharged = true } = 
         // either because the meeting is free or because this student was
         // exempted. A $0 row on an invoice helps nobody either way.
         alreadyCharged: charged,
-        chargedAmount: alreadyCharged.get(key) ?? null,
+        chargedAmount: existingCharge ? round2(Number(existingCharge.amount)) : null,
+        // What the correction path needs: which row to fix, and whether it is
+        // still fixable. A charge already on an invoice is left alone.
+        chargeId: existingCharge?.id || null,
+        chargeInvoiced: Boolean(existingCharge?.invoiceId),
         missingFamily: !student.familyMembers[0]?.familyId,
         zeroAmount: amount <= 0,
         joinedLate,
@@ -209,6 +254,131 @@ const startOfUtcDay = (d) =>
 export const isBillable = (line, { allowJoinedLate = false } = {}) =>
   !line.alreadyCharged && !line.missingFamily && !line.zeroAmount
   && (allowJoinedLate || !line.joinedLate);
+
+/**
+ * Put the priced meetings on the ledger. This is the write.
+ *
+ * Called wherever a price is decided — saving a session, overriding one
+ * student's price — and once a day by the sweep in cron.jobs.js. Safe to run
+ * again as often as you like: the unique index on (studentId, sessionId) is
+ * what makes a repeat a no-op rather than a second bill.
+ *
+ * Three things happen, in this order:
+ *
+ *  1. Billable lines with no charge yet are raised.
+ *  2. Charges already raised whose price has since changed are CORRECTED in
+ *     place — the amount is updated on the row that exists. Never deleted and
+ *     re-created: an invoice line, a payment, or a receipt can be hanging off
+ *     that id. This is the safety net that replaced the review screen; without
+ *     it a mistyped price would be on a family's balance with no way back
+ *     through the calendar.
+ *  3. Charges for meetings that stopped pricing anybody — the price was
+ *     cleared, the meeting was cancelled, the student left the roster — are
+ *     corrected to zero, for the same reason and by the same rule. The row
+ *     stays so the history of the correction stays with it. Only done when the
+ *     caller names `sessionIds`: it is the save path asking "and what did this
+ *     meeting used to charge?", a question the daily sweep cannot ask about
+ *     meetings it can no longer see.
+ *
+ * A charge that has already reached an invoice is never touched by 2 or 3. That
+ * document has been sent; the fix for it is a credit note, not a quiet edit.
+ * Those are returned in `locked` so the caller can say so out loud.
+ *
+ * @returns {{created:number, corrected:number, zeroed:number, total:number,
+ *            held:object[], locked:object[]}}
+ */
+export const raiseSessionCharges = async ({
+  from, to, sessionIds, allowJoinedLate = false,
+} = {}) => {
+  const { lines } = await buildSessionCharges({ from, to, sessionIds });
+
+  const fresh = lines.filter((l) => isBillable(l, { allowJoinedLate }));
+  // Priced, unbilled, and deliberately not raised. Reported rather than
+  // charged — see the file header.
+  const held = lines.filter(
+    (l) => !l.alreadyCharged && !l.zeroAmount && !isBillable(l, { allowJoinedLate })
+  );
+
+  const changed = lines.filter(
+    (l) => l.alreadyCharged && l.chargedAmount !== l.amount
+  );
+  const corrections = changed.filter((l) => !l.chargeInvoiced);
+  const locked = changed.filter((l) => l.chargeInvoiced);
+
+  if (fresh.length > 0) {
+    await prisma.transaction.createMany({
+      data: fresh.map((l) => ({
+        studentId: l.studentId,
+        familyId: l.familyId,
+        amount: l.amount,
+        type: 'CHARGE',
+        // Carries the student's name onto the charge itself, not just the
+        // meeting's name — a sibling pair in the same class raises two
+        // otherwise-identical lines, and this is what tells them apart on the
+        // invoice a family actually reads.
+        description: `${l.description} — ${l.studentName}`,
+        date: l.date,
+        sessionId: l.sessionId,
+      })),
+      // Belt and braces alongside the unique index: a concurrent second run
+      // skips what it finds rather than failing the whole batch.
+      skipDuplicates: true,
+    });
+  }
+
+  for (const line of corrections) {
+    await prisma.transaction.update({
+      where: { id: line.chargeId },
+      data: { amount: line.amount, description: `${line.description} — ${line.studentName}` },
+    });
+  }
+
+  const zeroed = sessionIds ? await zeroOrphanedCharges(sessionIds, lines) : [];
+
+  return {
+    created: fresh.length,
+    corrected: corrections.length,
+    zeroed: zeroed.length,
+    total: round2(fresh.reduce((sum, l) => sum + l.amount, 0)),
+    held,
+    locked,
+  };
+};
+
+/**
+ * Charges left behind by a meeting that stopped charging anybody, set to zero.
+ *
+ * Two ways to get here: the meeting was cancelled, or its price was cleared.
+ * Both used to be invisible — the charge was never raised until an admin
+ * approved it, so undoing the price before approval undid the charge. Now the
+ * charge is already on a family's balance and taking the price off has to take
+ * the money off with it.
+ *
+ * Deliberately keyed on the MEETING, not on the roster. A student who drops the
+ * class still owes what was taught before they dropped, and their enrollment
+ * row disappearing must never quietly erase a charge — that call belongs to an
+ * admin, as a refund or a credit note. Re-pricing an individual is handled the
+ * ordinary way instead: their line comes back at the new amount and the
+ * correction pass updates it.
+ *
+ * Zeroed rather than deleted, and invoiced ones left alone — same rule as every
+ * other correction here.
+ */
+const zeroOrphanedCharges = async (sessionIds, lines) => {
+  const stillPricing = new Set(lines.filter((l) => l.amount > 0).map((l) => l.sessionId));
+  const dead = sessionIds.filter((id) => !stillPricing.has(id));
+  if (dead.length === 0) return [];
+
+  const orphans = await prisma.transaction.findMany({
+    where: { sessionId: { in: dead }, invoiceId: null, amount: { gt: 0 } },
+    select: { id: true },
+  });
+
+  for (const orphan of orphans) {
+    await prisma.transaction.update({ where: { id: orphan.id }, data: { amount: 0 } });
+  }
+  return orphans;
+};
 
 const emptySummary = () => ({
   sessions: 0, students: 0, billable: 0, alreadyCharged: 0, missingFamily: 0,

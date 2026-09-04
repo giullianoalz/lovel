@@ -2,6 +2,7 @@ import prisma from '../config/database.js';
 import { invalidate } from '../middleware/cache.js';
 import { isOnly } from '../utils/roles.js';
 import { sendNotification } from '../jobs/notification.helper.js';
+import { getEventConfig, getAdminUserIds } from '../services/notificationConfig.service.js';
 import { generateLessonPlanSummary, fallbackLessonPlanSummary } from '../services/ai.service.js';
 
 // The Monday (UTC calendar date) of the week `date` falls in. Sessions and
@@ -99,18 +100,22 @@ export const createLessonPlan = async (req, res, next) => {
     });
 
     // Let front-desk/admin know a purchase is needed — the supply list is
-    // useless if nobody finds out until they happen to open this screen.
-    if (lessonPlan.supplyItems.length > 0) {
-      const admins = await prisma.user.findMany({
-        where: { role: 'ADMIN', status: 'ACTIVE' },
-        select: { id: true },
-      });
+    // useless if nobody finds out until they happen to open this screen. Who
+    // (if anyone) gets pinged is the admin's call in Notification Settings:
+    // switching the event off, or clearing every recipient chip, really does
+    // stop it. The supply items themselves are stored either way — the shopping
+    // list is the queue, not the notification.
+    const supplyConfig = lessonPlan.supplyItems.length > 0
+      ? await getEventConfig('SUPPLY_REQUEST')
+      : null;
+    if (supplyConfig?.enabled && supplyConfig.audience.includes('ADMINS')) {
+      const adminIds = await getAdminUserIds();
       const itemSummary = lessonPlan.supplyItems
         .map(i => `${i.itemName} (×${i.quantity})`)
         .join(', ');
 
-      await Promise.all(admins.map(admin => sendNotification({
-        userId: admin.id,
+      await Promise.all(adminIds.map(adminId => sendNotification({
+        userId: adminId,
         type: 'SUPPLY_REQUEST',
         title: 'New supply request',
         message: `${lessonPlan.teacher.fullName} requested supplies for ${lessonPlan.class?.name || 'a lesson plan'}: ${itemSummary}.`,

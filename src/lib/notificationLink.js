@@ -15,6 +15,12 @@ export function getNotificationLink(item, role) {
       // Deep-link straight to the thread; ChatHub opens it from ?thread=.
       return item.referenceId ? `/chat?thread=${item.referenceId}` : '/chat';
 
+    // An approval waiting on an admin, or the verdict coming back to the
+    // teacher who wrote it. Both land on the feed, where the post and the
+    // Approve / Send back buttons sit on the same card.
+    case 'announcement':
+      return isStaff ? '/feed' : null;
+
     case 'behaviorLog':
       return isStaff ? '/behavior' : null;
 

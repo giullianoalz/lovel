@@ -34,6 +34,21 @@
       ],
       "port": 4000,
       "autoPort": false
+    },
+    {
+      "name": "api-readonly",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:nowatch",
+        "--prefix",
+        "server"
+      ],
+      "port": 4000,
+      "autoPort": false,
+      "env": {
+        "DISABLE_CRON": "true"
+      }
     }
   ]
 }

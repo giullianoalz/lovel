@@ -2,7 +2,7 @@ import prisma from '../config/database.js';
 import { hasRole, isOnly } from '../utils/roles.js';
 import path from 'path';
 import fs from 'fs';
-import { uploadFileToDrive, downloadFileFromDrive, drive, driveAuthMode } from '../config/drive.js';
+import { uploadFileToDrive, downloadFileFromDrive, deleteFileFromDrive, drive, driveAuthMode } from '../config/drive.js';
 
 // Ensure upload directory exists
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'marketing');
@@ -176,22 +176,38 @@ export const deleteSubmission = async (req, res, next) => {
 
     const submission = await prisma.marketingSubmission.findUnique({
       where: { id },
-      include: { _count: { select: { photos: true } } },
+      include: { photos: { select: { id: true, fileUrl: true, driveFileId: true } } },
     });
 
     if (!submission) {
       return res.status(404).json({ error: 'Not Found', message: 'Submission not found.' });
     }
 
-    if (!hasRole(req.user, 'ADMIN') && submission.teacherId !== req.user.id) {
+    const isAdmin = hasRole(req.user, 'ADMIN');
+
+    if (!isAdmin && submission.teacherId !== req.user.id) {
       return res.status(403).json({ error: 'Forbidden', message: 'You can only delete your own submissions.' });
     }
 
-    if (submission._count.photos > 0) {
+    // A teacher may still only discard a submission left empty by a failed
+    // upload. Deciding that a week's photos should disappear is the admin's
+    // call, since the gallery is the record marketing works from.
+    if (!isAdmin && submission.photos.length > 0) {
       return res.status(409).json({
         error: 'Conflict',
-        message: 'This submission already has photos and cannot be discarded.',
+        message: 'This submission already has photos. Ask an admin to remove it.',
       });
+    }
+
+    // Take the bytes with the record, or Drive keeps filling with pictures
+    // nothing points at. Best-effort: a photo whose file is already gone must
+    // not keep the row alive. The photo rows themselves go by cascade.
+    for (const photo of submission.photos) {
+      if (photo.driveFileId) {
+        await deleteFileFromDrive(photo.driveFileId);
+      }
+      const localPath = path.join(UPLOAD_DIR, path.basename(photo.fileUrl));
+      await fs.promises.unlink(localPath).catch(() => {});
     }
 
     await prisma.marketingSubmission.delete({ where: { id } });

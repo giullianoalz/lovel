@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import prisma from '../config/database.js';
 import { hasRole, isFrontDeskOnly } from '../utils/roles.js';
-import { loadPayCategories } from '../services/payroll.service.js';
+import { loadPayCategories, taughtByWhere } from '../services/payroll.service.js';
 
 export const getCalendarData = async (req, res, next) => {
   try {
@@ -33,12 +33,7 @@ export const getCalendarData = async (req, res, next) => {
     sessions = await prisma.session.findMany({
       where: {
         date: { gte: fromDate, lte: toDate },
-        class: {
-          OR: [
-            { teacherId: userId },
-            { coTeachers: { some: { id: userId } } }
-          ]
-        }
+        ...taughtByWhere(userId),
       },
       include: {
         class: { 

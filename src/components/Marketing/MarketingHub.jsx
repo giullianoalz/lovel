@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Star, Zap, Upload, X, Check, Calendar, Image, ChevronDown, Eye, Clock, User } from 'lucide-react';
+import { Camera, Star, Zap, Upload, X, Check, Calendar, Image, ChevronDown, Eye, Clock, User, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../lib/api';
 import { useToast } from '../Layout/ToastProvider';
@@ -13,6 +13,10 @@ const MarketingHub = () => {
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('submit'); // 'submit' | 'gallery'
   const [filterWeek, setFilterWeek] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
+  // { photos: [...], index } — the whole submission travels with the lightbox
+  // so a card showing only its first four thumbs can still be paged through.
+  const [lightbox, setLightbox] = useState(null);
 
   // Submit form state
   const [photoFiles, setPhotoFiles] = useState([]);
@@ -51,6 +55,25 @@ const MarketingHub = () => {
   };
 
   useEffect(() => { loadSubmissions(); }, [filterWeek]);
+
+  const stepLightbox = (delta) => {
+    setLightbox(prev => {
+      if (!prev) return prev;
+      const next = (prev.index + delta + prev.photos.length) % prev.photos.length;
+      return { ...prev, index: next };
+    });
+  };
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setLightbox(null);
+      if (e.key === 'ArrowRight') stepLightbox(1);
+      if (e.key === 'ArrowLeft') stepLightbox(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightbox]);
 
   // Matches the server's upload.array('photos', 20) — a block that goes over
   // this gets rejected as one request with no partial success, so the cap has
@@ -210,6 +233,26 @@ const MarketingHub = () => {
     } catch (error) {
       console.error('Error marking as posted:', error);
     }
+  };
+
+  const handleDelete = async (sub) => {
+    const photoCount = sub.photos?.length || 0;
+    const what = sub.title ? `"${sub.title}"` : 'this submission';
+    if (!window.confirm(
+      `Delete ${what}${photoCount > 0 ? ` and its ${photoCount} photo${photoCount === 1 ? '' : 's'}` : ''}? ` +
+      'The photos are removed from Drive too. This cannot be undone.'
+    )) return;
+
+    setDeletingId(sub.id);
+    try {
+      await api.delete(`/marketing/submissions/${sub.id}`);
+      toast.success('Submission deleted.');
+      await loadSubmissions();
+    } catch (error) {
+      console.error('Error deleting submission:', error);
+      toast.error(error.response?.data?.message || 'Could not delete this submission.');
+    }
+    setDeletingId(null);
   };
 
   const typeConfig = {
@@ -463,12 +506,18 @@ const MarketingHub = () => {
                           {sub.photos && sub.photos.length > 0 && (
                             <div className="gallery-photos">
                               {sub.photos.slice(0, 4).map((photo, i) => (
-                                <div key={photo.id} className="gallery-photo-thumb">
+                                <button
+                                  key={photo.id}
+                                  type="button"
+                                  className="gallery-photo-thumb"
+                                  title="Click to view full size"
+                                  onClick={() => setLightbox({ photos: sub.photos, index: i })}
+                                >
                                   <ProtectedImage apiPath={`/marketing/photos/${photo.id}/file`} alt={photo.fileName} />
                                   {i === 3 && sub.photos.length > 4 && (
                                     <div className="more-overlay">+{sub.photos.length - 4}</div>
                                   )}
-                                </div>
+                                </button>
                               ))}
                             </div>
                           )}
@@ -490,6 +539,14 @@ const MarketingHub = () => {
                                     Mark as Posted
                                   </button>
                                 )}
+                                <button
+                                  className="delete-btn"
+                                  title="Delete this submission and its photos"
+                                  disabled={deletingId === sub.id}
+                                  onClick={() => handleDelete(sub)}
+                                >
+                                  <Trash2 size={14} /> {deletingId === sub.id ? 'Deleting…' : 'Delete'}
+                                </button>
                               </div>
                             )}
                           </div>
@@ -500,6 +557,45 @@ const MarketingHub = () => {
                 </div>
               );
             })
+          )}
+        </div>
+      )}
+
+      {lightbox && (
+        <div className="mkt-lightbox" onClick={() => setLightbox(null)} role="dialog" aria-modal="true">
+          <button className="mkt-lightbox-close" aria-label="Close" onClick={() => setLightbox(null)}>
+            <X size={22} />
+          </button>
+
+          {lightbox.photos.length > 1 && (
+            <button
+              className="mkt-lightbox-nav prev"
+              aria-label="Previous photo"
+              onClick={(e) => { e.stopPropagation(); stepLightbox(-1); }}
+            >
+              <ChevronLeft size={26} />
+            </button>
+          )}
+
+          <ProtectedImage
+            key={lightbox.photos[lightbox.index].id}
+            apiPath={`/marketing/photos/${lightbox.photos[lightbox.index].id}/file`}
+            alt={lightbox.photos[lightbox.index].fileName}
+            className="mkt-lightbox-img"
+            onClick={(e) => e.stopPropagation()}
+          />
+
+          {lightbox.photos.length > 1 && (
+            <>
+              <button
+                className="mkt-lightbox-nav next"
+                aria-label="Next photo"
+                onClick={(e) => { e.stopPropagation(); stepLightbox(1); }}
+              >
+                <ChevronRight size={26} />
+              </button>
+              <div className="mkt-lightbox-count">{lightbox.index + 1} / {lightbox.photos.length}</div>
+            </>
           )}
         </div>
       )}

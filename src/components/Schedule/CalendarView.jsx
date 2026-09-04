@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX, Receipt } from 'lucide-react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { ChevronLeft, ChevronRight, Filter, Calendar as CalendarIcon, MapPin, Video, FileText, Star, Edit2, Save, X, Image as ImageIcon, Paperclip, User, Clock, Plus, Settings, CalendarPlus, CalendarCheck, Trash2, Link2, Pencil, UserPlus, UserMinus, CheckCircle2, ClipboardCheck, DollarSign, UserX, Receipt, ZoomIn, ZoomOut } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
@@ -271,6 +271,8 @@ const CalendarView = () => {
   // is going to bounce.
   const canSetPay = hasRole('ADMIN');
   const [view, setView] = useState('week'); // 'day', 'week', 'month'
+  const [zoomLevel, setZoomLevel] = useState(1.0); // 0.5 – 2.5, controls PIXELS_PER_MINUTE
+  const calendarBoxRef = useRef(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   // Drives the live "now" line — ticks once a minute, which is as often as the
   // line's position could visibly change. Only the three views that actually
@@ -284,6 +286,45 @@ const CalendarView = () => {
     const id = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(id);
   }, [viewHasNowLine]);
+
+  // ── Pinch-to-zoom on touch devices ──
+  // Detects two-finger pinch gestures on the calendar grid and adjusts the
+  // zoom level. The handler is attached to the glass-box wrapper so it works
+  // across all time-grid views (day, week, timeline).
+  useEffect(() => {
+    const el = calendarBoxRef.current;
+    if (!el) return;
+    let startDist = 0;
+    let startZoom = 1;
+
+    const getFingerDist = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    const onTouchStart = (e) => {
+      if (e.touches.length !== 2) return;
+      startDist = getFingerDist(e.touches);
+      startZoom = zoomLevel;
+    };
+
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault(); // prevent browser zoom
+      const curDist = getFingerDist(e.touches);
+      const scale = curDist / startDist;
+      const newZoom = Math.min(2.5, Math.max(0.5, +(startZoom * scale).toFixed(2)));
+      setZoomLevel(newZoom);
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [zoomLevel]);
   const [sessions, setSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [classesList, setClassesList] = useState([]);
@@ -860,6 +901,15 @@ const CalendarView = () => {
           // back to the old guess (online if there's a link, else in person).
           payCategoryKey: s.payCategoryKey || '',
           payRateOverride: s.payRateOverride == null ? '' : String(s.payRateOverride),
+          // Somebody covered this one meeting. Empty on nearly every session:
+          // the hour is the class teacher's unless it says otherwise, and this
+          // is the only place that can say otherwise — a substitution is true
+          // of one Wednesday, not of the timetable.
+          substituteTeacherId: s.teacherId || '',
+          // Whose class it is regardless, so the picker can name the person
+          // being covered for. `teacher` above is already the effective one.
+          classTeacherId: s.class?.ownTeacher?.id || '',
+          classTeacherName: s.class?.ownTeacher?.fullName || '',
           // What this meeting charges each enrolled family. The other side of
           // payRateOverride: that is what the hour pays the teacher, this is
           // what it bills the client. Empty means it raises nothing, which is
@@ -1219,7 +1269,14 @@ const CalendarView = () => {
       ]);
       const cls = classRes.data.class;
       const sess = sessionRes.data.session;
-      const studentIds = (cls.enrollments || []).map(en => ({ id: en.student.id, name: en.student.fullName }));
+      // The roster on GET /classes is the class's roster *today* -- right for
+      // enrolling into the live class, wrong for a session that already
+      // happened. GET /sessions/:id windows its enrolments to the session's
+      // own date (see rosterOn() on the server), so that is what the panel
+      // shows; falling back to the class's list only if the session came back
+      // without one (a parent/student view, where the roster is stripped).
+      const rosterSource = sess.class?.enrollments ?? cls.enrollments;
+      const studentIds = (rosterSource || []).map(en => ({ id: en.student.id, name: en.student.fullName }));
       setSelectedEvent(prev => (prev && prev.id === event.id) ? {
         ...prev,
         studentList: studentIds.map(s => s.name),
@@ -1267,6 +1324,7 @@ const CalendarView = () => {
       applyToSeries: false,
       payCategoryKey: selectedEvent.payCategoryKey || '',
       payRateOverride: selectedEvent.payRateOverride || '',
+      substituteTeacherId: selectedEvent.substituteTeacherId || '',
       chargeAmount: selectedEvent.chargeAmount || '',
       chargeNote: selectedEvent.chargeNote || '',
       // Separate from applyToSeries on purpose: retiming one session is usually
@@ -1299,6 +1357,11 @@ const CalendarView = () => {
         ? {
             payCategoryKey: editEventForm.payCategoryKey || null,
             payRateOverride: editEventForm.payRateOverride ?? '',
+            // Who taught this one meeting. Sent as `teacherId` because that is
+            // the session's own column — not to be confused with the class
+            // teacher above, which goes to a different endpoint and moves the
+            // whole timetable.
+            teacherId: editEventForm.substituteTeacherId ?? '',
             // Typing a price charges nobody — it records what the meeting costs,
             // and an admin approves the pending ones into the ledger later.
             chargeAmount: editEventForm.chargeAmount ?? '',
@@ -1341,12 +1404,15 @@ const CalendarView = () => {
       }
 
       const newTeacher = teachers.find(t => t.id === editEventForm.teacherId);
+      // A substitute is who taught this meeting, so it is their name on it —
+      // the class teacher's is the answer for every other week.
+      const cover = teachers.find(t => t.id === editEventForm.substituteTeacherId);
       const updated = {
         ...selectedEvent,
         title: editEventForm.title,
         subject: editEventForm.subject,
-        teacher: newTeacher ? newTeacher.name : selectedEvent.teacher,
-        teacherId: editEventForm.teacherId,
+        teacher: cover ? cover.name : (newTeacher ? newTeacher.name : selectedEvent.teacher),
+        teacherId: editEventForm.substituteTeacherId || editEventForm.teacherId,
         dateStr: date,
         time: `${formatTimeStr(hhmmToMins(startTime))} - ${formatTimeStr(hhmmToMins(endTime))}`,
         studentList: editEventForm.studentList.map(s => s.name),
@@ -1354,6 +1420,7 @@ const CalendarView = () => {
         students: editEventForm.studentList.length,
         payCategoryKey: editEventForm.payCategoryKey || '',
         payRateOverride: editEventForm.payRateOverride || '',
+        substituteTeacherId: editEventForm.substituteTeacherId || '',
         chargeAmount: editEventForm.chargeAmount || '',
         chargeNote: editEventForm.chargeNote || '',
       };
@@ -1883,7 +1950,8 @@ const CalendarView = () => {
 
   // Time parsing for Day View Timeline (9 AM to midnight)
   const START_HOUR = 9;
-  const PIXELS_PER_MINUTE = 2.0; // ~120px per hour — taller blocks for readability
+  const BASE_PX_PER_MIN = 2.0;
+  const PIXELS_PER_MINUTE = BASE_PX_PER_MIN * zoomLevel; // scaled by pinch / buttons
   const TIMELINE_EVENT_ROW_HEIGHT = 42; // Timeline view: stacked-row height for overlapping events within one tutor's lane
 
   // The live "now" line — only meaningful on the actual current date, and
@@ -2589,7 +2657,27 @@ const CalendarView = () => {
         </div>
       )}
 
-      <div className="calendar-glass-box">
+      <div className="calendar-glass-box" ref={calendarBoxRef}>
+        {/* ── Floating Zoom Controls (mobile-friendly) ── */}
+        {(view === 'day' || view === 'week' || view === 'timeline') && (
+          <div className="cal-zoom-controls">
+            <button
+              className="cal-zoom-btn"
+              onClick={() => setZoomLevel(z => Math.min(2.5, +(z + 0.25).toFixed(2)))}
+              title="Zoom in"
+            >
+              <ZoomIn size={18} />
+            </button>
+            <span className="cal-zoom-label">{Math.round(zoomLevel * 100)}%</span>
+            <button
+              className="cal-zoom-btn"
+              onClick={() => setZoomLevel(z => Math.max(0.5, +(z - 0.25).toFixed(2)))}
+              title="Zoom out"
+            >
+              <ZoomOut size={18} />
+            </button>
+          </div>
+        )}
         {view === 'list' && (
           <div className="calendar-scroll-wrapper">
              <div className="week-schedule-grid">
@@ -3420,6 +3508,49 @@ const CalendarView = () => {
                           </div>
                         </div>
 
+                        {/* Somebody else covered this one meeting. Sits in the
+                            pay block because that is what it decides: the hour
+                            comes off the class teacher's payslip and lands on
+                            the cover's, priced from their contract. Scoped to
+                            this session alone — the teacher picker at the top
+                            of the modal is the one that moves the timetable. */}
+                        <label className="cal-series-toggle cal-sub-toggle">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(editEventForm.substituteTeacherId)}
+                            onChange={e => setEditEventForm(prev => ({
+                              ...prev,
+                              // Unticking hands the hour back to the class.
+                              substituteTeacherId: e.target.checked
+                                ? (prev.substituteTeacherId || selectedEvent.classTeacherId || '')
+                                : '',
+                            }))}
+                          />
+                          <span>
+                            Someone covered this session
+                            {selectedEvent.classTeacherName ? ` for ${selectedEvent.classTeacherName}` : ''}
+                          </span>
+                        </label>
+
+                        {Boolean(editEventForm.substituteTeacherId) && (
+                          <div className="meta-item">
+                            <User size={16} />
+                            <select
+                              className="form-control"
+                              value={editEventForm.substituteTeacherId}
+                              onChange={e => setEditEventForm(prev => ({ ...prev, substituteTeacherId: e.target.value }))}
+                              style={{ flex: 1, height: '34px', fontSize: '13px' }}
+                              title="Who actually taught this session"
+                            >
+                              {teachers.map(t => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}{t.id === selectedEvent.classTeacherId ? ' (whose class this is)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
                         <label className="cal-series-toggle">
                           <input
                             type="checkbox"
@@ -3477,7 +3608,7 @@ const CalendarView = () => {
                         <p className="cal-pay-hint">
                           {editEventForm.chargeAmount === '' || editEventForm.chargeAmount == null
                             ? 'Leave this empty and the meeting charges nothing — the term’s tuition is billed separately.'
-                            : `Charges each of the ${selectedEvent.students} enrolled ${selectedEvent.students === 1 ? 'family' : 'families'} $${Number(editEventForm.chargeAmount || 0).toFixed(2)}. Nothing is billed until you approve it under Billing → Calendar Charges, which also raises the invoice.`}
+                            : `Charges each of the ${selectedEvent.students} enrolled ${selectedEvent.students === 1 ? 'family' : 'families'} $${Number(editEventForm.chargeAmount || 0).toFixed(2)} as soon as you save. To correct it, change the price here — clearing it takes the charge back off their balance, unless it has already gone onto an invoice.`}
                         </p>
                       </div>
                     )}
@@ -3487,6 +3618,16 @@ const CalendarView = () => {
                     <div className="meta-item">
                       <User size={16} />
                       <span>{selectedEvent.teacher}</span>
+                      {/* `teacher` above is already whoever taught it, so
+                          without this the card reads as an ordinary week and
+                          the cover is invisible — which is exactly the thing
+                          somebody opens this modal in October to check. */}
+                      {selectedEvent.substituteTeacherId
+                        && selectedEvent.substituteTeacherId !== selectedEvent.classTeacherId && (
+                        <span className="cal-sub-badge">
+                          Covered{selectedEvent.classTeacherName ? ` for ${selectedEvent.classTeacherName}` : ''}
+                        </span>
+                      )}
                     </div>
                     <div className="meta-item">
                       <Clock size={16} />
@@ -4147,8 +4288,9 @@ const CalendarView = () => {
                         <div className="form-group half">
                           <label>How it's billed</label>
                           <p className="cal-price-note">
-                            Once per meeting, to each enrolled family. Nothing is charged until
-                            you approve it under <strong>Billing → Calendar Charges</strong>.
+                            Once per meeting, to each enrolled family, <strong>as soon as you
+                            save</strong>. Correct it by changing the price; clearing it takes
+                            the charge back off.
                           </p>
                         </div>
                     </div>

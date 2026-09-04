@@ -14,6 +14,8 @@ import {
   addAnnouncementComment,
   getAnnouncementMediaFile,
   deleteAnnouncementComment,
+  reviewAnnouncement,
+  listPendingAnnouncements,
 } from '../controllers/announcements.controller.js';
 
 const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'announcements');
@@ -44,9 +46,15 @@ const router = Router();
 // GET /api/announcements — keyed per user (response includes per-user isRead flags)
 router.get('/', authenticate, withCache(req => `announcements:${req.user.id}`, 30), listAnnouncements);
 
-// POST /api/announcements — Academy Feed post (Admin only — teachers can view but not publish)
+// GET /api/announcements/pending — the admin's review queue. Declared before
+// the /:id routes so "pending" is never read as a post id.
+router.get('/pending', authenticate, requireRole('ADMIN'), listPendingAnnouncements);
+
+// POST /api/announcements — Academy Feed post. Staff may write; only an admin
+// publishes. A teacher's post is saved PENDING and goes up when an admin
+// approves it, which is where the controller draws the line — not here.
 // Accepts up to 10 photos/videos for a carousel-style post.
-router.post('/', authenticate, requireRole('ADMIN'), upload.array('media', 10), createAnnouncement);
+router.post('/', authenticate, requireRole('ADMIN', 'TEACHER'), upload.array('media', 10), createAnnouncement);
 
 // GET /api/announcements/media/:mediaId/file — the bytes behind one carousel
 // item. Declared before the /:id routes so "media" is never read as a post id.
@@ -57,8 +65,14 @@ router.get('/media/:mediaId/file', authenticate, getAnnouncementMediaFile);
 // POST /api/announcements/:id/read
 router.post('/:id/read', authenticate, markAnnouncementRead);
 
-// PATCH /api/announcements/:id — admin or author only (edit text + add/remove media)
-router.patch('/:id', authenticate, requireRole('ADMIN'), upload.array('media', 10), updateAnnouncement);
+// PATCH /api/announcements/:id — admin or author only (edit text + add/remove
+// media); the controller checks authorship. A teacher editing their own post
+// sends it back to the approval queue.
+router.patch('/:id', authenticate, requireRole('ADMIN', 'TEACHER'), upload.array('media', 10), updateAnnouncement);
+
+// POST /api/announcements/:id/review — approve or reject a submitted post.
+// Approving is what publishes it and pushes the audience.
+router.post('/:id/review', authenticate, requireRole('ADMIN'), reviewAnnouncement);
 
 // POST /api/announcements/:id/comments — reply to a post.
 // No requireRole: anyone who can see the post can answer it, and the

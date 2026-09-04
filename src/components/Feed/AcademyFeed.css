@@ -688,3 +688,98 @@
   color: var(--text-muted);
   cursor: not-allowed;
 }
+
+/* ── Approval review ──
+   A teacher writes; an admin decides. The banner sits above the post it is
+   about — the decision and the thing being decided in one card, rather than a
+   separate queue screen that has to be remembered. */
+.feed-card.under-review {
+  border-color: #c7d2fe;
+  background: linear-gradient(180deg, #eef2ff 0%, white 90px);
+}
+
+.feed-review-banner {
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  animation: fadeIn 0.3s ease-out;
+}
+.feed-review-banner.pending {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+}
+.feed-review-banner.rejected {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.feed-review-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+}
+.feed-review-line svg { flex-shrink: 0; }
+
+.feed-review-note {
+  margin: 8px 0 0;
+  padding-left: 21px;
+  font-style: italic;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.feed-review-actions,
+.feed-review-reject-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.feed-review-reject-row input {
+  flex: 1;
+  min-width: 180px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+}
+.feed-review-reject-row input:focus {
+  outline: none;
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.18);
+}
+
+.feed-review-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 13px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease, background 0.15s ease;
+}
+.feed-review-btn:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.06); }
+.feed-review-btn:active:not(:disabled) { transform: translateY(0); }
+.feed-review-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.feed-review-btn.approve { background: #16a34a; color: white; }
+.feed-review-btn.reject  { background: white; color: #b91c1c; border: 1px solid #fecaca; }
+.feed-review-btn.ghost   { background: transparent; color: var(--text-secondary); }
+
+@media (max-width: 560px) {
+  .feed-review-actions,
+  .feed-review-reject-row { flex-direction: column; align-items: stretch; }
+  .feed-review-btn { justify-content: center; }
+}

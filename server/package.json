@@ -18,7 +18,8 @@
     "db:backup": "node scripts/backup-db.js",
     "gmail:auth": "node scripts/gmail-auth.mjs",
     "notifications:mask-parents": "node scripts/mask-parent-names-in-notifications.js",
-    "dev:supabase": "node scripts/with-supabase.mjs node --watch src/index.js"
+    "dev:supabase": "node scripts/with-supabase.mjs node --watch src/index.js",
+    "dev:nowatch": "node src/index.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",

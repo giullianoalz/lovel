@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Megaphone, MapPin, Users, Home, Camera, ClipboardList, Pin, Trash2,
   ImagePlus, ImageOff, X, Send, Plus, Bell, ChevronLeft, ChevronRight, Film, Pencil,
+  Clock, Check, Undo2,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
@@ -226,8 +227,76 @@ const CommentThread = ({ post, currentUser, isAdmin }) => {
   );
 };
 
+/* ── Review banner ──
+   The strip that says a post is not on the board yet. It shows to the author
+   (so a submission doesn't just vanish) and to admins (who decide). Parents
+   never see one: a post they can see is by definition already approved. */
+const ReviewBanner = ({ post, isAdmin, onReview }) => {
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [note, setNote] = useState('');
+  const pending = post.status === 'PENDING';
+
+  const decide = async (decision) => {
+    setBusy(true);
+    await onReview(post, decision, note.trim());
+    setBusy(false);
+    setRejecting(false);
+    setNote('');
+  };
+
+  return (
+    <div className={`feed-review-banner ${pending ? 'pending' : 'rejected'}`}>
+      <div className="feed-review-line">
+        {pending ? <Clock size={14} /> : <Undo2 size={14} />}
+        <span>
+          {pending
+            ? (isAdmin ? `Waiting for your approval — submitted by ${post.author?.fullName || 'a teacher'}.` : 'Waiting for admin approval. Only you and the admins can see this.')
+            : 'Sent back for changes. Edit the post to submit it again.'}
+        </span>
+      </div>
+
+      {/* The admin's own words on why, kept where the author will read them. */}
+      {post.status === 'REJECTED' && post.reviewNote && (
+        <p className="feed-review-note">“{post.reviewNote}”</p>
+      )}
+
+      {isAdmin && pending && (
+        rejecting ? (
+          <div className="feed-review-reject-row">
+            <input
+              type="text"
+              placeholder="What needs to change? (optional)"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') decide('reject'); }}
+              maxLength={500}
+              autoFocus
+            />
+            <button className="feed-review-btn reject" disabled={busy} onClick={() => decide('reject')}>
+              Send back
+            </button>
+            <button className="feed-review-btn ghost" disabled={busy} onClick={() => { setRejecting(false); setNote(''); }}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="feed-review-actions">
+            <button className="feed-review-btn approve" disabled={busy} onClick={() => decide('approve')}>
+              <Check size={14} /> Approve &amp; publish
+            </button>
+            <button className="feed-review-btn reject" disabled={busy} onClick={() => setRejecting(true)}>
+              <Undo2 size={14} /> Send back
+            </button>
+          </div>
+        )
+      )}
+    </div>
+  );
+};
+
 /* ── Edit Composer (inline) ── */
-const EditComposer = ({ post, onSave, onCancel }) => {
+const EditComposer = ({ post, onSave, onCancel, isAdmin }) => {
   const toast = useToast();
   const fileInputRef = useRef(null);
   const [saving, setSaving] = useState(false);
@@ -262,7 +331,9 @@ const EditComposer = ({ post, onSave, onCancel }) => {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       if (res.data.mediaWarning) toast.error(res.data.mediaWarning);
-      else toast.success('Post updated!');
+      // The server's own wording: a teacher's edit didn't just save, it went
+      // back into the queue, and saying "Post updated!" would hide that.
+      else toast.success(res.data.message || 'Post updated!');
       onSave(res.data.announcement);
     } catch {
       toast.error('Could not update the post.');
@@ -353,14 +424,16 @@ const EditComposer = ({ post, onSave, onCancel }) => {
         >
           {AUDIENCES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
         </select>
-        <label className="composer-pin-toggle">
-          <input
-            type="checkbox"
-            checked={form.isPinned}
-            onChange={e => setForm(f => ({ ...f, isPinned: e.target.checked }))}
-          />
-          <Pin size={13} /> Pin to top
-        </label>
+        {isAdmin && (
+          <label className="composer-pin-toggle">
+            <input
+              type="checkbox"
+              checked={form.isPinned}
+              onChange={e => setForm(f => ({ ...f, isPinned: e.target.checked }))}
+            />
+            <Pin size={13} /> Pin to top
+          </label>
+        )}
       </div>
 
       <div className="composer-actions">
@@ -381,7 +454,11 @@ const EditComposer = ({ post, onSave, onCancel }) => {
 const AcademyFeed = () => {
   const { user, hasRole } = useAuth();
   const toast = useToast();
-  const canPost = hasRole('ADMIN');
+  const isAdmin = hasRole('ADMIN');
+  // Teachers write; admins publish. The composer is the same one either way —
+  // what changes is whether pressing the button puts the post on the board or
+  // in the approval queue, and the button says which.
+  const canPost = hasRole('ADMIN', 'TEACHER');
 
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -458,7 +535,7 @@ const AcademyFeed = () => {
 
       const res = await api.post('/announcements', data, { headers: { 'Content-Type': 'multipart/form-data' } });
       if (res.data.mediaWarning) toast.error(res.data.mediaWarning);
-      else toast.success('Posted to Announcements!');
+      else toast.success(isAdmin ? 'Posted to Announcements!' : 'Sent to the admins for approval.');
       clearComposer();
       setComposerOpen(false);
       await loadPosts();
@@ -484,16 +561,44 @@ const AcademyFeed = () => {
     setEditingPost(null);
   };
 
+  // Pinned posts still lead; below them, anything awaiting review comes first
+  // for an admin. Nobody else has an unapproved post in this list except their
+  // own, and seeing it at the top is the point there too.
+  const visiblePosts = [...posts].sort((a, b) => {
+    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+    const aWaiting = a.status === 'PENDING' ? 1 : 0;
+    const bWaiting = b.status === 'PENDING' ? 1 : 0;
+    if (aWaiting !== bWaiting) return bWaiting - aWaiting;
+    return new Date(b.publishedAt) - new Date(a.publishedAt);
+  });
+
+  const handleReview = async (post, decision, note) => {
+    try {
+      const res = await api.post(`/announcements/${post.id}/review`, { decision, note });
+      const updated = res.data.announcement;
+      // Merged rather than replaced: the review response doesn't carry the
+      // reply thread, and dropping it would blank the comments under a post
+      // that was just approved.
+      setPosts(prev => prev.map(p => p.id === post.id ? { ...p, ...updated } : p));
+      toast.success(decision === 'approve' ? 'Approved — it is on the board.' : 'Sent back to the author.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not save that decision.');
+    }
+  };
+
   return (
     <div className="feed-container">
       <header className="feed-header">
         <div>
           <h1><Megaphone size={24} /> Announcements</h1>
-          <p>Location changes, staff updates, open houses, and news from the whole team — in one place.</p>
+          <p>
+            Location changes, staff updates, open houses, and news from the whole team — in one place.
+            {canPost && !isAdmin && ' Your posts go up once an admin approves them.'}
+          </p>
         </div>
         {canPost && !composerOpen && !editingPost && (
           <button className="feed-new-post-btn" onClick={() => setComposerOpen(true)}>
-            <Plus size={16} /> New Post
+            <Plus size={16} /> {isAdmin ? 'New Post' : 'Write a Post'}
           </button>
         )}
       </header>
@@ -574,7 +679,9 @@ const AcademyFeed = () => {
               onClick={handleSubmit}
               disabled={submitting || !form.title.trim() || !form.body.trim()}
             >
-              <Send size={14} /> {submitting ? 'Posting...' : 'Post Announcement'}
+              <Send size={14} /> {submitting
+                ? (isAdmin ? 'Posting...' : 'Submitting...')
+                : (isAdmin ? 'Post Announcement' : 'Submit for Approval')}
             </button>
           </div>
         </div>
@@ -589,14 +696,20 @@ const AcademyFeed = () => {
             <p>No posts yet. {canPost ? 'Be the first to share an update!' : 'Check back soon for academy news.'}</p>
           </div>
         ) : (
-          posts.map(post => {
+          visiblePosts.map(post => {
             const cat = categoryMeta(post.category);
             const Icon = cat.icon;
-            const canEdit = hasRole('ADMIN') || post.authorId === user?.id;
+            const canEdit = isAdmin || post.authorId === user?.id;
             const canDelete = canEdit;
             const isEditing = editingPost?.id === post.id;
+            // Only ever true for the author or an admin — the list endpoint
+            // doesn't hand anyone else an unapproved post in the first place.
+            const underReview = post.status && post.status !== 'APPROVED';
             return (
-              <div key={post.id} className={`feed-card ${post.isPinned ? 'pinned' : ''}`}>
+              <div key={post.id} className={`feed-card ${post.isPinned ? 'pinned' : ''} ${underReview ? 'under-review' : ''}`}>
+                {underReview && (
+                  <ReviewBanner post={post} isAdmin={isAdmin} onReview={handleReview} />
+                )}
                 {post.isPinned && <div className="feed-pinned-tag"><Pin size={12} /> Pinned</div>}
                 <div className="feed-card-top">
                   <div className="feed-card-author">
@@ -632,6 +745,7 @@ const AcademyFeed = () => {
                 {isEditing ? (
                   <EditComposer
                     post={post}
+                    isAdmin={isAdmin}
                     onSave={handleEditSave}
                     onCancel={() => setEditingPost(null)}
                   />
@@ -646,12 +760,16 @@ const AcademyFeed = () => {
                       <img className="feed-card-image" src={MEDIA_BASE + post.imageUrl} alt={post.title} />
                     )}
 
-                    <CommentThread
-                      key={post.id}
-                      post={post}
-                      currentUser={user}
-                      isAdmin={hasRole('ADMIN')}
-                    />
+                    {/* No replies on a post nobody can see yet — the thread
+                        would be a conversation with an empty room. */}
+                    {!underReview && (
+                      <CommentThread
+                        key={post.id}
+                        post={post}
+                        currentUser={user}
+                        isAdmin={isAdmin}
+                      />
+                    )}
                   </>
                 )}
               </div>
