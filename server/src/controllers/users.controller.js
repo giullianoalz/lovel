@@ -2,8 +2,17 @@ import prisma from '../config/database.js';
 import { isOnly, hasRole } from '../utils/roles.js';
 import { sendAccountInvite, hasSignInAccount, isPlaceholderEmail } from '../services/invite.service.js';
 import { computeTeacherPayroll, computePayrollSummary, computeWeeklyPayrollSummary, computeProjectedPayroll, loadPayCategories } from '../services/payroll.service.js';
+import {
+  computeTeacherLedger,
+  computePayrollBalances,
+  recordTeacherPayment,
+  updateTeacherPayment,
+  deleteTeacherPayment,
+  findTeacherPayment,
+} from '../services/teacherPayments.service.js';
 import { buildParentMaskMap, masksParentIdentity } from '../utils/parentPrivacy.js';
 import { resolvePaging } from '../utils/helpers.js';
+import { invalidate } from '../middleware/cache.js';
 
 const EMPTY_MASK_MAP = new Map();
 
@@ -767,6 +776,187 @@ export const getTeacherPayroll = async (req, res, next) => {
     const targetMonth = parseInt(month) || (new Date().getMonth() + 1);
 
     res.json(await computeTeacherPayroll(req.params.id, targetMonth, targetYear));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/users/payroll/balances
+ * Who is owed what, right now (Admin only).
+ *
+ * The payday screen, as opposed to the monthly one: not "what did August cost"
+ * but "what has this person earned since we last paid her". Admin-only for the
+ * same reason as the other roster summaries — a teacher may read her own
+ * ledger, not everybody's.
+ */
+export const getPayrollBalances = async (req, res, next) => {
+  try {
+    const { asOf } = req.query;
+    if (asOf && Number.isNaN(new Date(asOf).getTime())) {
+      return res.status(400).json({ error: 'Validation Error', message: 'asOf must be a valid date.' });
+    }
+    res.json(await computePayrollBalances({ asOf: asOf ? new Date(`${asOf}T00:00:00Z`) : undefined }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/users/:id/payroll/ledger
+ * One person's statement: every hour earned, every payment made, running balance.
+ *
+ * Readable by the person it belongs to. It is their own pay, and the balance is
+ * the number they most want and previously had no way to see.
+ */
+export const getTeacherLedger = async (req, res, next) => {
+  try {
+    const { asOf } = req.query;
+    if (asOf && Number.isNaN(new Date(asOf).getTime())) {
+      return res.status(400).json({ error: 'Validation Error', message: 'asOf must be a valid date.' });
+    }
+    res.json(
+      await computeTeacherLedger(req.params.id, {
+        asOf: asOf ? new Date(`${asOf}T00:00:00Z`) : undefined,
+      })
+    );
+  } catch (error) {
+    next(error);
+  }
+};
+
+const PAYOUT_METHODS = ['CASH', 'CHECK', 'ZELLE', 'VENMO', 'PAYPAL', 'DIRECT_DEPOSIT', 'OTHER'];
+
+/**
+ * What a payment has to say before it is written down.
+ *
+ * The date is required rather than defaulted to today, because the day money
+ * moved and the day somebody got round to recording it are routinely different
+ * and only one of them is true.
+ */
+const validatePayment = (body, { partial = false } = {}) => {
+  const kind = body.kind === 'ADJUSTMENT' ? 'ADJUSTMENT' : 'PAYMENT';
+
+  if (!partial || body.amount !== undefined) {
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount)) return 'amount must be a number.';
+    if (kind === 'PAYMENT' && amount <= 0) {
+      return 'A payment has to be more than $0. To take money off a balance, record an adjustment.';
+    }
+    if (amount === 0) return 'An adjustment of $0 changes nothing.';
+    if (Math.abs(amount) > 1_000_000) return 'That amount looks like a typo.';
+  }
+
+  if (!partial || body.paidAt !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.paidAt || ''))) {
+      return 'paidAt must be a date, as YYYY-MM-DD.';
+    }
+  }
+
+  if (body.method && !PAYOUT_METHODS.includes(body.method)) {
+    return `method must be one of: ${PAYOUT_METHODS.join(', ')}.`;
+  }
+
+  if (kind === 'ADJUSTMENT' && !partial && !String(body.notes || '').trim()) {
+    return 'An adjustment needs a note saying what it is for.';
+  }
+
+  return null;
+};
+
+
+
+/**
+ * POST /api/users/:id/payroll/payments
+ * Records money paid to a member of staff (Admin only).
+ *
+ * The only write in payroll. Everything else on these screens is computed from
+ * the calendar, which is why an admin correcting an hour corrects the pay — and
+ * why this one row has to be written rather than inferred: nothing on the
+ * calendar knows a cheque was handed over.
+ */
+export const createTeacherPayment = async (req, res, next) => {
+  try {
+    const problem = validatePayment(req.body);
+    if (problem) {
+      return res.status(400).json({ error: 'Validation Error', message: problem });
+    }
+
+    const teacher = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, fullName: true },
+    });
+    if (!teacher) {
+      return res.status(404).json({ error: 'Not Found', message: 'No such person.' });
+    }
+
+    const payment = await recordTeacherPayment(
+      teacher.id,
+      { ...req.body, amount: Number(req.body.amount) },
+      req.user.id
+    );
+
+    console.log(
+      `[Payroll] ${req.user.email} recorded ${payment.kind.toLowerCase()} of $${payment.amount} to ${teacher.fullName} on ${req.body.paidAt}`
+    );
+    invalidate('payroll:balances:*');
+
+    res.status(201).json(payment);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/users/payroll/payments/:paymentId
+ * Corrects a payment that was recorded wrong (Admin only).
+ *
+ * An update, not a delete and a re-create: the row is the record that money
+ * moved, and replacing it loses who first wrote it down and when.
+ */
+export const updateTeacherPaymentEntry = async (req, res, next) => {
+  try {
+    const existing = await findTeacherPayment(req.params.paymentId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Not Found', message: 'No such payment.' });
+    }
+
+    const problem = validatePayment({ kind: existing.kind, ...req.body }, { partial: true });
+    if (problem) {
+      return res.status(400).json({ error: 'Validation Error', message: problem });
+    }
+
+    const updated = await updateTeacherPayment(existing.id, {
+      ...req.body,
+      ...(req.body.amount !== undefined && { amount: Number(req.body.amount) }),
+    });
+
+    console.log(`[Payroll] ${req.user.email} corrected payment ${existing.id} to $${updated.amount}`);
+    invalidate('payroll:balances:*');
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/users/payroll/payments/:paymentId
+ * Removes a payment that never happened (Admin only).
+ *
+ * For a row entered by mistake, not for money that went out and came back —
+ * that is an adjustment, which leaves both halves on the statement.
+ */
+export const deleteTeacherPaymentEntry = async (req, res, next) => {
+  try {
+    const existing = await findTeacherPayment(req.params.paymentId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Not Found', message: 'No such payment.' });
+    }
+
+    await deleteTeacherPayment(existing.id);
+    console.log(`[Payroll] ${req.user.email} deleted payment ${existing.id} ($${existing.amount})`);
+    invalidate('payroll:balances:*');
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

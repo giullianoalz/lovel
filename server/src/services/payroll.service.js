@@ -394,6 +394,16 @@ export const monthlySalary = (amount, period) => {
   return round2(period === 'ANNUAL' ? value / 12 : value);
 };
 
+/**
+ * How far back a ledger looks.
+ *
+ * "Everything" needs a floor, because the queries below take a range and
+ * Postgres will not take an open one. 2000 is arbitrary and safe: it is before
+ * the academy existed, so nothing is cut off, and it keeps the date columns
+ * indexable rather than making the range disappear.
+ */
+export const LEDGER_EPOCH = new Date(Date.UTC(2000, 0, 1));
+
 /** The month as a [start, end] pair of dates, inclusive. */
 const monthRange = (targetMonth, targetYear) => [
   new Date(Date.UTC(targetYear, targetMonth - 1, 1)),
@@ -816,8 +826,21 @@ const summariseByCategory = (lines, categories) => {
  * worked, what it paid and why, then the same hours rolled up per category and
  * finally one total. It is the thing an admin reads before releasing money.
  */
-export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear) => {
-  const [startDate, endDate] = monthRange(targetMonth, targetYear);
+/**
+ * One person's statement.
+ *
+ * Normally for one calendar month, which is what every screen asks for. `range`
+ * overrides that with an explicit [startDate, endDate] for the one caller that
+ * is not month-shaped: the ledger, which needs every hour this person has ever
+ * worked in a single pass. The month/year are still carried on the response so
+ * the shape does not change under the callers that do think in months — and a
+ * ranged call should read `lineItems`, not the salary, which is a month's share
+ * whatever window it was asked for.
+ */
+export const computeTeacherPayroll = async (teacherId, targetMonth, targetYear, range = null) => {
+  const [startDate, endDate] = range
+    ? [range.startDate, range.endDate]
+    : monthRange(targetMonth, targetYear);
   // Fetched once for the whole month: the closed days are the same for every
   // query below, and asking per session would be a round trip per class.
   const closedDates = await loadClosedDates();
@@ -1613,6 +1636,21 @@ export const computeProjectedPayroll = async (startDate, endDate) => {
     mode: 'scheduled',
   });
 };
+
+/**
+ * Every hour the roster has ever worked, priced.
+ *
+ * The other summaries answer "what did this month cost". This answers the
+ * question a running balance is built on — "what has the academy ever owed this
+ * person" — so it is deliberately unbounded at the front: a ledger that starts
+ * on the 1st of a month is a ledger that forgets last month's unpaid week.
+ *
+ * Hourly only. A salary is a monthly figure and this is not a month, so it is
+ * accrued month by month by the ledger instead; folding it in here would
+ * multiply it by however many months the range happened to span.
+ */
+export const computeEarnedToDate = async (asOf = new Date()) =>
+  computePayrollSummaryRange(LEDGER_EPOCH, asOf, { includeSalary: false });
 
 export const computeWeeklyPayrollSummary = async (weekStart) => {
   const startDate = mondayOf(weekStart);

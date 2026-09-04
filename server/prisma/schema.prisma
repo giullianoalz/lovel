@@ -164,6 +164,8 @@ model User {
   applicationsReviewed   EnrollmentApplication[]   @relation("ReviewedApplications")
   liabilityWaiver        LiabilityWaiver?          @relation("StudentWaiver")
   waiversSigned          LiabilityWaiver[]         @relation("SignedWaivers")
+  payments               TeacherPayment[]          @relation("StaffPayments")
+  paymentsRecorded       TeacherPayment[]          @relation("StaffPaymentsRecorded")
 
   @@map("users")
 }
@@ -536,6 +538,42 @@ model TeacherPayRate {
   @@unique([teacherId, category])
   @@index([teacherId])
   @@map("teacher_pay_rates")
+}
+
+// What has actually been handed to a member of staff.
+//
+// The rest of payroll is derived — the hours come off the calendar and price
+// themselves — so "what did she earn in August" always had an answer and "what
+// do we still owe her" never did. This is the other half of that subtraction,
+// and the only thing payroll writes down: hours stay computed, so fixing a
+// calendar entry still fixes the pay it produced.
+//
+// `kind` splits two things that look alike on a statement and are not. A
+// PAYMENT is money that left the academy. An ADJUSTMENT is a signed line an
+// admin writes to make the ledger agree with reality — an opening balance from
+// before any of this existed, a correction, a bonus — without inventing an hour
+// nobody worked.
+model TeacherPayment {
+  id           String             @id @default(uuid()) @db.Uuid
+  teacherId    String             @map("teacher_id") @db.Uuid
+  kind         TeacherPaymentKind @default(PAYMENT)
+  // Signed. A payment is positive and brings the balance down; an adjustment
+  // may go either way, so a correction can follow the mistake.
+  amount       Decimal            @db.Decimal(10, 2)
+  method       PayoutMethod?
+  // The day the money moved, not the day it was typed in: a cheque written on
+  // Friday and recorded on Monday belongs to Friday.
+  paidAt       DateTime           @map("paid_at") @db.Date
+  reference    String?            @db.VarChar(120)
+  notes        String?
+  recordedById String?            @map("recorded_by") @db.Uuid
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  teacher      User               @relation("StaffPayments", fields: [teacherId], references: [id], onDelete: Cascade)
+  recordedBy   User?              @relation("StaffPaymentsRecorded", fields: [recordedById], references: [id])
+
+  @@index([teacherId, paidAt])
+  @@map("teacher_payments")
 }
 
 // A kind of work, and what it pays by default.
@@ -1531,6 +1569,27 @@ enum InvoiceStatus {
   CANCELLED @map("cancelled")
 
   @@map("invoice_status")
+}
+
+enum TeacherPaymentKind {
+  PAYMENT    @map("payment")
+  ADJUSTMENT @map("adjustment")
+
+  @@map("teacher_payment_kind")
+}
+
+// How staff get paid, which is not how families pay us — no card processor on
+// this side, and a direct deposit that never appears on the family enum.
+enum PayoutMethod {
+  CASH           @map("cash")
+  CHECK          @map("check")
+  ZELLE          @map("zelle")
+  VENMO          @map("venmo")
+  PAYPAL         @map("paypal")
+  DIRECT_DEPOSIT @map("direct_deposit")
+  OTHER          @map("other")
+
+  @@map("payout_method")
 }
 
 enum PaymentMethod {

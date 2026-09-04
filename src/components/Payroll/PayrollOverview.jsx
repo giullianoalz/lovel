@@ -3,6 +3,8 @@ import { Wallet, ChevronLeft, ChevronRight, AlertTriangle, Pencil, Users, Clock,
 import PayCategoriesPanel from './PayCategoriesPanel';
 import ClosuresPanel from './ClosuresPanel';
 import AbsencesPanel from './AbsencesPanel';
+import PayrollBalances from './PayrollBalances';
+import TeacherLedger from './TeacherLedger';
 import { database } from '../../lib/database';
 import { useAsyncData } from '../../lib/useAsyncData';
 import ErrorBanner from '../Layout/ErrorBanner';
@@ -79,19 +81,29 @@ const PayrollOverview = () => {
   const [showCategories, setShowCategories] = useState(false);
   const [showClosures, setShowClosures] = useState(false);
   const [reviewingAbsences, setReviewingAbsences] = useState(false);
+  // Whose statement is open. Separate from `selectedTeacher`, which opens the
+  // rate editor: one is "what is this person owed", the other "what do we pay
+  // them", and answering the first by way of the second is how an admin ends up
+  // editing a rate when they meant to record a cheque.
+  const [ledgerFor, setLedgerFor] = useState(null);
 
   const isWeek = view === 'week';
+  // The account, rather than a period: everything ever earned minus everything
+  // ever paid. The only view here whose numbers can reach zero.
+  const isBalances = view === 'balances';
   // The forward-looking view: the same roster, the same rates, priced off the
   // hours that are booked but have not happened yet.
   const isUpcoming = view === 'upcoming';
   const weekStartIso = isoDate(weekStart);
 
   const { data, loading, error, retry } = useAsyncData(
-    () => (isUpcoming
-      ? database.fetchProjectedPayroll({ weeks: weeksAhead })
-      : isWeek
-        ? database.fetchWeeklyPayrollSummary(weekStartIso)
-        : database.fetchPayrollSummary(month, year)),
+    () => (isBalances
+      ? database.fetchPayrollBalances()
+      : isUpcoming
+        ? database.fetchProjectedPayroll({ weeks: weeksAhead })
+        : isWeek
+          ? database.fetchWeeklyPayrollSummary(weekStartIso)
+          : database.fetchPayrollSummary(month, year)),
     [view, weekStartIso, month, year, weeksAhead]
   );
 
@@ -110,8 +122,11 @@ const PayrollOverview = () => {
     return next;
   });
 
-  const rows = data?.rows || [];
-  const totals = data?.totals;
+  // The balances view has its own shape, so these only describe the three
+  // period views. Emptied there rather than left pointing at fields that do not
+  // exist on that payload.
+  const rows = isBalances ? [] : (data?.rows || []);
+  const totals = isBalances ? undefined : data?.totals;
 
   // Only the kinds of work that actually happened this month get a column.
   // Listing every category defined would give August a "Summer camp" column of
@@ -137,7 +152,9 @@ const PayrollOverview = () => {
         <div>
           <h1>Payroll</h1>
           <p>
-            {isUpcoming
+            {isBalances
+              ? 'What the academy still owes each person, after everything already paid.'
+              : isUpcoming
               ? 'What the calendar already commits the academy to paying, per person.'
               : isWeek
                 ? 'What everyone earned this week, and what goes out on payday.'
@@ -184,9 +201,21 @@ const PayrollOverview = () => {
           >
             Upcoming
           </button>
+          {/* Last, and deliberately apart from the three periods before it:
+              this one is not a window on the calendar, it is the account. */}
+          <button
+            role="tab"
+            aria-selected={isBalances}
+            className={isBalances ? 'is-active' : ''}
+            onClick={() => setView('balances')}
+          >
+            Balances
+          </button>
         </div>
 
-        {isUpcoming ? (
+        {isBalances ? (
+          <span className="po-range-label">Everything to date</span>
+        ) : isUpcoming ? (
           <div className="po-weeks-ahead">
             <label htmlFor="po-weeks">Looking ahead</label>
             <select
@@ -229,7 +258,15 @@ const PayrollOverview = () => {
         )}
       </div>
 
-      {loading ? (
+      {isBalances ? (
+        <PayrollBalances
+          data={data}
+          loading={loading}
+          error={error}
+          onRetry={retry}
+          onOpen={setLedgerFor}
+        />
+      ) : loading ? (
         <div className="payroll-overview-state">
           <div className="app-loader"><div className="app-spinner" /><span className="app-loader-text">{isUpcoming ? 'Pricing the calendar ahead…' : `Adding up the ${isWeek ? 'week' : 'month'}…`}</span></div>
         </div>
@@ -633,6 +670,16 @@ const PayrollOverview = () => {
       {showClosures && (
         <ClosuresPanel
           onClose={() => { setShowClosures(false); retry(); }}
+        />
+      )}
+
+      {/* Recording a payment changes the balance behind this, so closing it
+          re-reads whichever view is showing. */}
+      {ledgerFor && (
+        <TeacherLedger
+          teacher={ledgerFor}
+          onClose={() => { setLedgerFor(null); retry(); }}
+          onChanged={retry}
         />
       )}
 

@@ -313,6 +313,38 @@ export const database = {
     return response.data;
   },
 
+  // Who is owed what, right now. The other payroll calls answer "what did this
+  // period cost"; this one answers the question you have on payday, and it is
+  // the only one whose numbers can reach zero.
+  fetchPayrollBalances: async ({ asOf } = {}) => {
+    const qs = asOf ? `?asOf=${asOf}` : '';
+    const response = await api.get(`/users/payroll/balances${qs}`);
+    return response.data;
+  },
+
+  // One person's statement: every hour earned, every payment made, and the
+  // balance after each. All of time, not a month — a balance that starts on the
+  // 1st is a balance that forgets last month's unpaid week.
+  fetchTeacherLedger: async (teacherId, { asOf } = {}) => {
+    const qs = asOf ? `?asOf=${asOf}` : '';
+    const response = await api.get(`/users/${teacherId}/payroll/ledger${qs}`);
+    return response.data;
+  },
+
+  recordTeacherPayment: async (teacherId, payment) => {
+    const response = await api.post(`/users/${teacherId}/payroll/payments`, payment);
+    return response.data;
+  },
+
+  updateTeacherPayment: async (paymentId, changes) => {
+    const response = await api.put(`/users/payroll/payments/${paymentId}`, changes);
+    return response.data;
+  },
+
+  deleteTeacherPayment: async (paymentId) => {
+    await api.delete(`/users/payroll/payments/${paymentId}`);
+  },
+
   updateTeacherPayroll: async (teacherId, { baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates }) => {
     const response = await api.put(`/users/${teacherId}/payroll`, {
       baseSalary, salaryPeriod, hourlyRate, flatRateOnly, categoryRates,

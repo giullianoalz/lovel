@@ -1,0 +1,214 @@
+/* One person's payroll statement: earned, paid, and what is left after each
+   line. Read top to bottom as an account, not as a report — the balance is the
+   column your eye should land on, so it is the only one in the table with any
+   weight to it. */
+
+/* `.modal-overlay` and `.modal-content` are declared by several component
+   stylesheets and by none of the global ones, so a panel that uses them only
+   renders correctly when some other modal's CSS happens to have loaded first.
+   Declared here for the same reason ClosuresPanel declares them, with the same
+   values, so nothing changes for whichever copy wins. */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content.teacher-ledger {
+  position: relative;
+  background: var(--surface, #fff);
+  border-radius: 20px;
+  width: 100%;
+  max-width: 940px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  animation: tlRise 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tlRise {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.teacher-ledger .close-btn {
+  position: absolute; top: 16px; right: 16px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted, #64748b); padding: 4px; border-radius: 8px;
+  transition: color 0.15s ease, background 0.15s ease;
+  z-index: 2;
+}
+.teacher-ledger .close-btn:hover { color: var(--text-main, #1e293b); background: #f1f5f9; }
+
+.tl-header {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 22px 24px 16px;
+  color: var(--primary, #166534);
+  border-bottom: 1px solid #e2e8f0;
+}
+.tl-header h2 { margin: 0; font-size: 20px; color: var(--text-main, #1e293b); }
+.tl-header p { margin: 3px 0 0; font-size: 13px; color: var(--text-muted, #64748b); }
+
+.tl-body { padding: 20px 24px 24px; overflow-y: auto; }
+
+/* Summary tiles */
+.tl-stat-row {
+  display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin-bottom: 16px;
+}
+.tl-stat {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.tl-stat-primary {
+  background: linear-gradient(135deg, #166534, #15803d);
+  border-color: transparent; color: #fff;
+}
+/* Nothing outstanding is the state this screen exists to reach, so it looks
+   settled rather than merely zero. */
+.tl-stat-primary.is-settled {
+  background: linear-gradient(135deg, #334155, #475569);
+}
+.tl-stat-label {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-muted, #64748b);
+}
+.tl-stat-primary .tl-stat-label { color: rgba(255, 255, 255, 0.85); }
+.tl-stat-value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.tl-stat-sub { font-size: 11.5px; color: var(--text-muted, #94a3b8); }
+.tl-stat-primary .tl-stat-sub { color: rgba(255, 255, 255, 0.8); }
+
+.tl-warning {
+  display: flex; align-items: flex-start; gap: 10px;
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  border-radius: 12px; padding: 11px 14px; font-size: 12.5px; line-height: 1.5;
+  margin-bottom: 12px;
+}
+.tl-warning svg { flex-shrink: 0; margin-top: 1px; }
+/* A fact about how the number was built, not something to act on. */
+.tl-warning-quiet {
+  background: #f8fafc; border-color: #e2e8f0; color: var(--text-muted, #64748b);
+}
+
+.tl-actions { display: flex; gap: 8px; margin-bottom: 14px; }
+
+.tl-add-btn, .tl-adjust-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 10px; padding: 8px 14px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.tl-add-btn {
+  background: var(--primary, #166534); color: #fff; border: 1px solid transparent;
+}
+.tl-add-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(22, 101, 52, 0.25); }
+.tl-adjust-btn {
+  background: none; border: 1px solid #e2e8f0; color: var(--text-main, #1e293b);
+}
+.tl-adjust-btn:hover:not(:disabled) { border-color: var(--primary, #166534); color: var(--primary, #166534); transform: translateY(-1px); }
+.tl-add-btn:disabled, .tl-adjust-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* The form */
+.tl-form {
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid #e2e8f0; border-radius: 14px;
+  padding: 16px; margin-bottom: 16px;
+  animation: tlRise 0.25s ease-out;
+}
+.tl-form-title { font-size: 13px; font-weight: 700; color: var(--text-main, #1e293b); margin-bottom: 4px; }
+.tl-form-hint { margin: 0 0 12px; font-size: 12px; color: var(--text-muted, #64748b); line-height: 1.5; }
+.tl-form-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 10px;
+}
+.tl-form-wide { grid-column: 1 / -1; }
+.tl-form-grid label { display: flex; flex-direction: column; gap: 5px; }
+.tl-form-grid label span {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-muted, #64748b);
+}
+.tl-form-grid input, .tl-form-grid select {
+  border: 1px solid #e2e8f0; border-radius: 9px; padding: 8px 10px;
+  font-size: 13px; font-family: inherit; color: var(--text-main, #1e293b);
+  background: #fff; transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.tl-form-grid input:focus, .tl-form-grid select:focus {
+  outline: none; border-color: var(--primary, #166534);
+  box-shadow: 0 0 0 3px rgba(22, 101, 52, 0.12);
+}
+.tl-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.tl-cancel, .tl-save {
+  border-radius: 9px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.tl-cancel { background: none; border: 1px solid #e2e8f0; color: var(--text-muted, #64748b); }
+.tl-save { background: var(--primary, #166534); border: 1px solid transparent; color: #fff; }
+.tl-save:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(22, 101, 52, 0.25); }
+.tl-cancel:disabled, .tl-save:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* The statement */
+.tl-table-wrap {
+  border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 14px;
+  overflow-x: auto; background: rgba(255, 255, 255, 0.8);
+}
+.tl-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 700px; }
+.tl-table th {
+  text-align: left; padding: 11px 14px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted, #64748b);
+  border-bottom: 1px solid #e2e8f0; white-space: nowrap;
+}
+.tl-table th.num, .tl-table td.num { text-align: right; }
+.tl-table td {
+  padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
+  color: var(--text-main, #1e293b); vertical-align: top;
+}
+.tl-table tbody tr:last-child td { border-bottom: none; }
+.tl-table tbody tr { transition: background 0.15s ease; }
+.tl-table tbody tr:hover { background: rgba(22, 101, 52, 0.04); }
+
+/* The rows somebody wrote down, as opposed to the ones the calendar produced. */
+.tl-row-payment { background: rgba(22, 101, 52, 0.05); }
+.tl-row-payment:hover { background: rgba(22, 101, 52, 0.09); }
+
+.tl-time { color: var(--text-muted, #94a3b8); }
+.tl-desc { display: block; font-weight: 600; }
+.tl-detail { display: block; font-size: 11px; color: var(--text-muted, #94a3b8); margin-top: 2px; }
+.tl-paid { color: #166534; font-weight: 600; }
+.tl-balance { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.tl-row-actions { white-space: nowrap; text-align: right; }
+.tl-icon-btn {
+  background: none; border: 1px solid transparent; border-radius: 7px;
+  padding: 4px 6px; cursor: pointer; color: var(--text-muted, #94a3b8);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.tl-icon-btn:hover:not(:disabled) { color: var(--primary, #166534); border-color: #e2e8f0; background: #fff; }
+.tl-icon-danger:hover:not(:disabled) { color: #b91c1c; }
+.tl-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.tl-empty {
+  text-align: center; padding: 36px 20px; font-size: 13.5px;
+  color: var(--text-muted, #64748b);
+}
+.tl-footnote {
+  margin: 12px 0 0; font-size: 11.5px; line-height: 1.6;
+  color: var(--text-muted, #94a3b8);
+}
+
+@media (max-width: 720px) {
+  .tl-stat-row { grid-template-columns: 1fr; }
+  .tl-form-grid { grid-template-columns: 1fr; }
+  .tl-body { padding: 16px; }
+}
