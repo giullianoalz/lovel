@@ -6,14 +6,12 @@ import {
   CreditCard, Receipt, CheckCircle, AlertCircle, ExternalLink, Download,
   ChevronDown, ChevronUp, Bell, Award, GraduationCap, Smartphone, Landmark, Copy,
   ClipboardList, Lock, Star, Hourglass, FileSignature, DoorOpen, Pencil, HeartPulse,
-  Camera, Zap,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import { getSocket } from '../../lib/socket';
 import { useAuth } from '../../context/AuthContext';
 import ErrorBanner from '../Layout/ErrorBanner';
-import ProtectedImage from '../Layout/ProtectedImage';
 import StatHistoryModal from './StatHistoryModal';
 import FamilyCodeModal from './FamilyCodeModal';
 import LessonNotesModal from './LessonNotesModal';
@@ -73,22 +71,10 @@ const PAYMENT_METHODS = [
   },
 ];
 
-/* What each kind of submission looks like to a family. Same colours the
-   Marketing Hub uses in its review queue, so staff and parents recognise the
-   same card. "Weekly Photos" loses its label here — to a parent the pictures
-   are the point, and a badge reading "Weekly Photos" over a photo grid is
-   noise. */
-const HIGHLIGHT_TYPES = {
-  PHOTOS:           { label: null,                  icon: Camera, color: '#3b82f6', bg: '#dbeafe' },
-  STUDENT_OF_WEEK:  { label: 'Student of the Week', icon: Star,   color: '#f59e0b', bg: '#fef3c7' },
-  ACTIVITY_OF_WEEK: { label: 'Activity of the Week', icon: Zap,   color: '#8b5cf6', bg: '#ede9fe' },
-};
-
 const TABS = [
   { id: 'children',  label: 'My Children',      icon: <Users size={16} /> },
   { id: 'register',  label: 'Registration',    icon: <ClipboardList size={16} /> },
   { id: 'billing',   label: 'Account & Payments',  icon: <CreditCard size={16} /> },
-  { id: 'highlights', label: 'Highlights',      icon: <Camera size={16} /> },
   { id: 'announcements', label: 'Announcements',    icon: <Bell size={16} /> },
 ];
 
@@ -591,17 +577,6 @@ const ParentPortal = () => {
   const [billingLoading, setBillingLoading] = useState(false);
   const [error, setError]           = useState(null);
   const [tab, setTab]               = useState('children');
-  const [highlights, setHighlights]   = useState([]);
-  const [hlLoading, setHlLoading]     = useState(false);
-  const [hlError, setHlError]         = useState(null);
-  const [lightbox, setLightbox]       = useState(null); // { photoId, alt }
-
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (e) => { if (e.key === 'Escape') setLightbox(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightbox]);
   const [activeChild, setActiveChild] = useState(0);
   const [statModal, setStatModal] = useState(null); // 'seashells' | 'punches' | 'positive' | 'warnings'
   const [pickupAuths, setPickupAuths] = useState([]);
@@ -693,20 +668,6 @@ const ParentPortal = () => {
     window.history.replaceState({}, '', window.location.pathname);
   }, []);
 
-  // The family-facing slice of the Marketing Hub: only what an admin has
-  // already approved, never the review queue.
-  const loadHighlights = async () => {
-    setHlLoading(true); setHlError(null);
-    try {
-      const res = await api.get('/marketing/feed');
-      setHighlights(res.data.submissions);
-    } catch (err) {
-      setHlError(err.userMessage || 'Could not load highlights.');
-    } finally {
-      setHlLoading(false);
-    }
-  };
-
   const loadRegistration = async () => {
     setRegLoading(true); setRegError(null);
     try {
@@ -722,7 +683,6 @@ const ParentPortal = () => {
   useEffect(() => {
     if (tab === 'billing') loadBilling();
     if (tab === 'register') loadRegistration();
-    if (tab === 'highlights') loadHighlights();
     // Mark all announcements as read when the user opens this tab, clearing
     // the sidebar badge count.
     if (tab === 'announcements' && data?.announcements?.length) {
@@ -1496,70 +1456,6 @@ const ParentPortal = () => {
           </div>
         )}
 
-        {/* ══════════ HIGHLIGHTS TAB ══════════ */}
-        {tab === 'highlights' && (
-          <div className="pp-highlights">
-            <p className="pp-hl-intro">
-              Photos and weekly highlights your children's teachers have shared.
-            </p>
-
-            {hlError && <ErrorBanner message={hlError} onRetry={loadHighlights} />}
-
-            {hlLoading ? (
-              <div className="pp-billing-empty">
-                <span className="app-inline-loader"><span className="app-spinner-sm" />Loading highlights…</span>
-              </div>
-            ) : highlights.length === 0 ? (
-              <div className="pp-billing-empty">
-                <Camera size={32} />
-                <p>Nothing shared yet. Teachers post here every week — check back soon.</p>
-              </div>
-            ) : (
-              <div className="pp-hl-cards">
-                {highlights.map(h => {
-                  const tc = HIGHLIGHT_TYPES[h.type] || HIGHLIGHT_TYPES.PHOTOS;
-                  const Icon = tc.icon;
-                  return (
-                    <article key={h.id} className="pp-hl-card">
-                      {tc.label && (
-                        <span className="pp-hl-badge" style={{ background: tc.bg, color: tc.color }}>
-                          <Icon size={13} /> {tc.label}
-                        </span>
-                      )}
-                      {h.title && <h4 className="pp-hl-title">{h.title}</h4>}
-                      {h.description && <p className="pp-hl-desc"><Linkified text={h.description} /></p>}
-
-                      {h.photos.length > 0 && (
-                        <div className="pp-hl-photos" data-count={h.photos.length}>
-                          {h.photos.map(photo => (
-                            <button
-                              key={photo.id}
-                              type="button"
-                              className="pp-hl-photo"
-                              onClick={() => setLightbox({ photoId: photo.id, alt: h.title || photo.fileName })}
-                            >
-                              <ProtectedImage
-                                apiPath={`/marketing/photos/${photo.id}/file`}
-                                alt={photo.fileName}
-                                className="pp-hl-photo-img"
-                              />
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="pp-hl-foot">
-                        <span>{h.teacher?.fullName}</span>
-                        <span>{fmtInstant(h.createdAt)}</span>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* ══════════ ANNOUNCEMENTS TAB ══════════ */}
         {tab === 'announcements' && (
           <div className="pp-announcements">
@@ -1595,17 +1491,6 @@ const ParentPortal = () => {
           onCreated={(auth) => { handlePickupCreated(); setViewAuth(auth); }}
           initialAuth={viewAuth}
         />
-      )}
-
-      {lightbox && (
-        <div className="pp-hl-lightbox" onClick={() => setLightbox(null)} role="dialog" aria-modal="true">
-          <button className="pp-hl-lightbox-close" aria-label="Close"><X size={22} /></button>
-          <ProtectedImage
-            apiPath={`/marketing/photos/${lightbox.photoId}/file`}
-            alt={lightbox.alt}
-            className="pp-hl-lightbox-img"
-          />
-        </div>
       )}
 
       {showFamilyCode && (
