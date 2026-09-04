@@ -205,3 +205,21 @@ export const uploadBufferToDrive = async (buffer, name, mimeType, folderId) => {
     throw error;
   }
 };
+
+// Removing a submission has to take its bytes with it, or Drive keeps filling
+// up with pictures nobody can reach any more. Best-effort by design: a file
+// that is already gone (or that this account can't touch) must not block the
+// database row from being deleted, so this reports instead of throwing.
+export const deleteFileFromDrive = async (fileId) => {
+  if (!drive || !fileId) return false;
+
+  try {
+    await drive.files.delete({ fileId, supportsAllDrives: true });
+    return true;
+  } catch (error) {
+    // 404 means someone already deleted it — the desired end state either way.
+    if (error?.code === 404 || error?.response?.status === 404) return true;
+    console.error(`[Drive Config] Error deleting file ${fileId} from Drive:`, error.message);
+    return false;
+  }
+};
