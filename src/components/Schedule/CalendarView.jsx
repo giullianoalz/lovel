@@ -1889,9 +1889,12 @@ const CalendarView = () => {
     setRescheduling(false);
   };
 
-  // Dropping onto a different teacher's column reassigns the whole class to
-  // that teacher (there's no per-session substitute field) — a real, if
-  // broader, effect worth knowing about before dragging one across columns.
+  // Dropping onto a different teacher's column names them the substitute for
+  // THIS session alone — the session's own teacherId, same field and same
+  // rule as the picker in the edit modal ("Someone covered this session").
+  // Reassigning the whole class/timetable is a separate, heavier action and
+  // stays where it already lives: the main teacher picker at the top of the
+  // edit modal, which goes to PUT /classes.
   const handleDropOnTeacher = async (e, newTeacherLabel) => {
     e.preventDefault();
     const eventId = e.dataTransfer.getData('eventId');
@@ -1902,7 +1905,7 @@ const CalendarView = () => {
     const newTeacher = teachers.find(t => t.name === newTeacherLabel);
     if (!eventItem || !newTeacher) return;
 
-    const sessionPayload = {};
+    const sessionPayload = { teacherId: newTeacher.id };
     const container = e.currentTarget.querySelector('.timeline-container') || e.currentTarget;
     if (container && container.classList.contains('timeline-container')) {
       const containerRect = container.getBoundingClientRect();
@@ -1912,14 +1915,11 @@ const CalendarView = () => {
     }
 
     try {
-      await api.put(`/classes/${eventItem.classId}`, { teacherId: newTeacher.id });
-      if (Object.keys(sessionPayload).length > 0) {
-        await api.put(`/sessions/${eventItem.id}`, sessionPayload);
-      }
+      await api.put(`/sessions/${eventItem.id}`, sessionPayload);
       reloadClasses();
       loadSessions(view, currentDate);
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Could not reassign this session.');
+      toast.error(error.response?.data?.message || 'Could not cover this session.');
     }
   };
 
