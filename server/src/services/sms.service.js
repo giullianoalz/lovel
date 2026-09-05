@@ -1,21 +1,38 @@
+import twilio from 'twilio';
+
 /**
  * SMS delivery.
  *
- * The provider is not chosen yet, so this module is deliberately a thin,
- * provider-agnostic seam: everything upstream (the notification dispatcher)
- * only ever calls `sendSms` and reads `{ ok, error }`. Swapping in Twilio,
- * AWS SNS, or anything else means implementing `deliver` below and adding the
- * credentials — no caller changes.
+ * This module is a thin, provider-agnostic seam: everything upstream (the
+ * notification dispatcher) only ever calls `sendSms` and reads
+ * `{ ok, error }`. Twilio is wired up below; swapping in AWS SNS or anything
+ * else means implementing another branch in `deliver` — no caller changes.
  *
- * Until then `isSmsConfigured()` is false and every send is a logged no-op, so
- * turning the SMS channel on in the admin UI is safe: it simply won't deliver
- * and the in-app notification still lands.
+ * With SMS_PROVIDER unset, `isSmsConfigured()` is false and every send is a
+ * logged no-op, so turning the SMS channel on in the admin UI is safe before
+ * a provider is configured: it simply won't deliver and the in-app
+ * notification still lands.
  */
 
-// Set SMS_PROVIDER (e.g. 'twilio') once a provider is wired up in `deliver`.
+// Set SMS_PROVIDER=twilio (plus the TWILIO_* env vars below) to enable delivery.
 const PROVIDER = process.env.SMS_PROVIDER || null;
 
-export const isSmsConfigured = () => PROVIDER !== null;
+export const isSmsConfigured = () => {
+  if (PROVIDER === 'twilio') {
+    return Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM_NUMBER);
+  }
+  return false;
+};
+
+// Created once and reused — Twilio's client opens its own connection pool,
+// so a fresh one per send would leak sockets under load.
+let twilioClient = null;
+const getTwilioClient = () => {
+  if (!twilioClient) {
+    twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  }
+  return twilioClient;
+};
 
 /**
  * Normalizes a stored phone number to E.164, which every provider expects.
@@ -32,8 +49,16 @@ export const toE164 = (raw) => {
   return null;
 };
 
-// Provider-specific transport. Add the real implementation here.
-const deliver = async (/* { to, body } */) => {
+// Provider-specific transport.
+const deliver = async ({ to, body }) => {
+  if (PROVIDER === 'twilio') {
+    await getTwilioClient().messages.create({
+      to,
+      from: process.env.TWILIO_FROM_NUMBER,
+      body,
+    });
+    return;
+  }
   throw new Error(`SMS_PROVIDER "${PROVIDER}" has no transport implemented yet`);
 };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse, Pencil, Plus, Minus } from 'lucide-react';
+import { X, Cookie, AlertCircle, ShoppingBag, History, FileText, Download, Eye, Search, Shell, Gift, Check, TrendingDown, CreditCard, AlertTriangle, HeartPulse, Pencil, Plus, Minus, MessageSquare } from 'lucide-react';
 import { database } from '../../lib/database';
 import api from '../../lib/api';
 import SnackCabinetModal from './SnackCabinetModal';
@@ -42,6 +42,27 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
   const canAdjustPunches = hasRole('ADMIN', 'TEACHER');
   const [adjustAmount, setAdjustAmount] = useState('1');
   const [adjusting, setAdjusting] = useState(false);
+
+  /* ── Text the parent (admin/front desk) ── */
+  const canTextParent = hasRole('ADMIN', 'RECEPTIONIST');
+  const [showTextParent, setShowTextParent] = useState(false);
+  const [textParentBody, setTextParentBody] = useState('');
+  const [sendingTextParent, setSendingTextParent] = useState(false);
+
+  const handleSendTextParent = async () => {
+    if (!textParentBody.trim()) return;
+    setSendingTextParent(true);
+    try {
+      await api.post('/sms/send-to-parent', { studentId: student.id, message: textParentBody.trim() });
+      toast.success(`Text sent to ${student.parentPhone}.`);
+      setShowTextParent(false);
+      setTextParentBody('');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not send the text.');
+    } finally {
+      setSendingTextParent(false);
+    }
+  };
 
   /* ── Staff notes (admin only) ── */
   const [editingStaffNotes, setEditingStaffNotes] = useState(false);
@@ -373,7 +394,18 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
                     )}
                   </div>
                   <p style={{ marginBottom: '4px' }}><strong>Name:</strong> {student.parentName || 'No Parent Assigned'}</p>
-                  <p style={{ marginBottom: '4px' }}><strong>Phone:</strong> {student.parentPhone || 'N/A'}</p>
+                  <p style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span><strong>Phone:</strong> {student.parentPhone || 'N/A'}</span>
+                    {canTextParent && student.parentPhone && (
+                      <button
+                        className="staff-note-edit"
+                        onClick={() => setShowTextParent(true)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <MessageSquare size={12} /> Text
+                      </button>
+                    )}
+                  </p>
                   <p style={{ marginBottom: !isTeacher ? '4px' : '0' }}><strong>Email:</strong> {student.parentEmail || 'N/A'}</p>
                   {!isTeacher && (
                     <p style={{ marginBottom: '0' }}><strong>Address:</strong> {student.familyAddress || 'Not on file'}</p>
@@ -810,6 +842,38 @@ const StudentProfileModal = ({ student: initialStudent, onClose, onUpdate }) => 
               }
             }}
           />
+        )}
+
+        {showTextParent && (
+          <div className="modal-overlay" onClick={() => !sendingTextParent && setShowTextParent(false)}>
+            <div className="modal-content" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3><MessageSquare size={18} style={{ marginRight: '6px', verticalAlign: 'text-bottom' }} />Text {student.parentName || 'Parent'}</h3>
+                <button className="close-btn" onClick={() => setShowTextParent(false)}><X size={20} /></button>
+              </div>
+              <div className="modal-body">
+                <p className="text-muted" style={{ fontSize: '13px', marginTop: 0 }}>
+                  Sends an SMS to {student.parentPhone}. Keep it short — long texts split into multiple messages.
+                </p>
+                <textarea
+                  rows={4}
+                  autoFocus
+                  value={textParentBody}
+                  onChange={(e) => setTextParentBody(e.target.value)}
+                  placeholder="Type your message…"
+                  style={{ width: '100%', resize: 'vertical' }}
+                  maxLength={480}
+                />
+                <div className="text-muted" style={{ fontSize: '11px', textAlign: 'right' }}>{textParentBody.length}/480</div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn-secondary" onClick={() => setShowTextParent(false)} disabled={sendingTextParent}>Cancel</button>
+                <button className="btn-primary" onClick={handleSendTextParent} disabled={sendingTextParent || !textParentBody.trim()}>
+                  {sendingTextParent ? 'Sending…' : 'Send text'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Snack Cabinet Pop-up Overlay */}
