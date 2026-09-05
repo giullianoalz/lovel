@@ -494,7 +494,11 @@ export const unenrollStudent = async (req, res, next) => {
       // The day they came off, not just the fact of it. `status` alone made
       // every past session re-read with today's roster — a child who left in
       // October disappeared from September's register, which they sat through.
-      data: { status: 'inactive', endedAt: new Date() },
+      // Stamped as the academy's calendar day (not a raw instant): rosterOn()
+      // compares this against Session.date, a UTC-midnight day stamp. A raw
+      // `new Date()` taken after 8 PM local is already "tomorrow" in UTC, so a
+      // student unenrolled that evening kept showing up on tomorrow's sessions.
+      data: { status: 'inactive', endedAt: academyToday() },
     });
 
     invalidate('classes:*', 'registration:classes:*', 'portal:student:*', 'portal:parent:*');
